@@ -20,9 +20,16 @@
 - Real runtime required: no (verification uses synthetic data)
 - Human/UAT required: yes (user runs playbook commands against real DB data at their own pace post-milestone; this is not gated)
 
+## Observability / Diagnostics
+
+- **Verification script output**: `scripts/verify_m003_milestone.sh` prints structured check results (8 groups: file structure, imports, registry, fee dynamics, slippage, backtest execution, optimizer discovery, core immutability); each check reports PASS/FAIL with command/output on failure
+- **Playbook completeness**: `grep` commands validate presence of required sections and strategy coverage; missing sections surface as grep exit 1
+- **Failure visibility**: Verification script exits 1 on first failure with diagnostic message showing which check failed and why; playbook grep failures show which required content is missing
+- **Inspection surface**: Playbook itself is human-readable markdown with table of contents, examples, and troubleshooting; verification script is bash with clear check labels
+
 ## Verification
 
-- `bash scripts/verify_m003_milestone.sh` (exits 0 = all M003 deliverables verified)
+- `bash scripts/verify_m003_milestone.sh` (exits 0 = all M003 deliverables verified; exits 1 with failure diagnostics on any check failure)
 - `test -f src/docs/STRATEGY_PLAYBOOK.md` (playbook file exists)
 - `grep -q "## Quick Start" src/docs/STRATEGY_PLAYBOOK.md` (playbook has required sections)
 - `grep -q "Sharpe Ratio" src/docs/STRATEGY_PLAYBOOK.md` (playbook documents metrics)
@@ -42,7 +49,7 @@
 
 ## Tasks
 
-- [ ] **T01: Write operator playbook documenting all strategies, CLI usage, and metric interpretation** `est:45m`
+- [x] **T01: Write operator playbook documenting all strategies, CLI usage, and metric interpretation** `est:45m`
   - Why: Delivers R019 (operator guidance for deployment decisions); without this, user has strategies but no knowledge of what "good" looks like or how to use the tools
   - Files: `src/docs/STRATEGY_PLAYBOOK.md` (new file, ~400-500 lines)
   - Do: Create comprehensive reference doc with 7 sections: (1) Quick Start with one-liner commands for single strategy and all strategies, (2) Strategy Reference Table covering S1-S7 with entry conditions and parameter ranges, (3) CLI Reference documenting all `backtest_strategies.py` and `optimize.py` flags with examples, (4) Metric Interpretation Guide explaining Sharpe/Sortino/profit factor/win rate/drawdown/consistency with formulas and thresholds for 5-minute markets, (5) Go/No-Go Decision Framework defining profitability thresholds (total_pnl > 0, Sharpe > 1.0, profit factor > 1.2, win rate > 52%, max drawdown < 50% of total PnL, consistency > 60), (6) Parameter Optimization Guide showing how to use optimizer to explore param grids, (7) Troubleshooting covering zero-trade strategies (S6 legitimately produces zero if no streaks), sparse data causing _get_price() to return None, DB dependency (worktree may be empty), optimizer runtime. Read strategy docstrings and config files to extract entry conditions and parameter semantics. Read engine.py compute_metrics() for metric formulas. Follow S03 forward intelligence notes on S6 cross-market limitation and S7 inline duplication. Add prerequisite note: real backtests require TimescaleDB data; if DB empty, strategies are correct but no data to backtest against.

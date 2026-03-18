@@ -70,3 +70,10 @@ This task delivers R019 (operability: backtest output includes clear profitabili
 ## Expected Output
 
 - `src/docs/STRATEGY_PLAYBOOK.md` — comprehensive operator reference doc (~400-500 lines) with 7 main sections, copy-pasteable commands, metric definitions with formulas, profitability thresholds with rationale, per-strategy characteristics table, troubleshooting guide, and prerequisites note about DB dependency
+
+## Observability Impact
+
+- **New inspection surface**: Playbook markdown file becomes primary human-readable reference for strategy characteristics, metric interpretation, and troubleshooting; operators use this to diagnose why backtests fail or produce unexpected results
+- **Failure visibility**: Playbook Troubleshooting section documents known failure modes (zero trades, sparse data, empty DB) with symptoms and resolutions; operators can grep for error patterns they're seeing
+- **Completeness checks**: Verification commands (`grep` for sections, strategy counts) confirm playbook covers all 7 strategies and required documentation; missing content surfaces as verification failures
+- **No runtime signals**: This task produces static documentation only; no new logging, metrics, or runtime diagnostics
