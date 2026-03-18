@@ -16,6 +16,8 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M002 complete.** Unified strategy reports — both analysis backtest and live trading produce per-strategy reports in identical JSON + Markdown format via `StrategyReport`.
 
+**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 5-7 real strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling.
+
 ### What M001 Delivered
 
 - **Shared strategy package** (`shared/strategies/`): base types (StrategyConfig, MarketSnapshot, Signal, BaseStrategy), folder-based auto-discovery registry, S1 (spike reversion), S2 (volatility), and TEMPLATE skeleton.
@@ -38,12 +40,16 @@ Create from TEMPLATE → implement evaluate() → add get_param_grid() → backt
 ## Architecture / Key Patterns
 
 - `src/shared/` — config, asyncpg pool, models, API, WebSocket, HTTP helpers
-- `src/shared/strategies/` — base classes, registry, report model, S1, S2, TEMPLATE (folder-per-strategy auto-discovery)
+- `src/shared/strategies/` — base classes, registry, report model, S1–S7 strategies, TEMPLATE (folder-per-strategy auto-discovery)
 - `src/core/` — market discovery, WS listener, tick recording, resolution polling (never touch)
-- `src/analysis/` — backtest engine, data loader, strategy backtests, optimizer (psycopg2/pandas)
+- `src/analysis/` — backtest engine (with dynamic fees + slippage), data loader, strategy backtests, optimizer (psycopg2/pandas)
 - `src/trading/` — bot main loop, strategy evaluation via shared adapter, order execution, redemption, report generation (async)
 - Docker Compose with 4 services: timescaledb, core, analysis, trading
 - Core is isolated — never restarted on updates to analysis/trading
+
+## Capability Contract
+
+See `.gsd/REQUIREMENTS.md` for the explicit capability contract, requirement status, and coverage mapping.
 
 ## Authoritative Diagnostics
 
@@ -59,3 +65,4 @@ cd src && PYTHONPATH=. python3 scripts/verify_reports.py # 47 checks — unified
 
 - [x] M001: Unified Strategy Framework — shared strategy definitions consumed identically by analysis (backtest) and trading (live)
 - [x] M002: Unified Strategy Reports — both backtest and live trading produce per-strategy reports in identical JSON + Markdown format
+- [ ] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 5-7 real prediction market strategies, upgrade engine with dynamic fees + slippage
