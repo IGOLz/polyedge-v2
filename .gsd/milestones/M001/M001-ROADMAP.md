@@ -47,19 +47,19 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Shared strategy framework + data model** `risk:high` `depends:[]`
+- [x] **S01: Shared strategy framework + data model** `risk:high` `depends:[]`
   > After this: `shared/strategies/` exists with base classes (StrategyConfig, MarketSnapshot, Signal), a registry that discovers strategies by folder, and S1 (spike reversion) ported with config. Importable and unit-testable but not yet wired to analysis or trading.
 
-- [ ] **S02: Analysis adapter — backtest through shared strategies** `risk:medium` `depends:[S01]`
+- [x] **S02: Analysis adapter — backtest through shared strategies** `risk:medium` `depends:[S01]`
   > After this: `python -m analysis.backtest_strategies` loads strategies from the shared registry, runs them against historical data via MarketSnapshot, and produces backtest metrics using the existing engine.
 
-- [ ] **S03: Trading adapter — live signals through shared strategies** `risk:medium` `depends:[S01]`
+- [x] **S03: Trading adapter — live signals through shared strategies** `risk:medium` `depends:[S01]`
   > After this: trading bot's main loop evaluates strategies from the shared registry, converting live ticks to MarketSnapshot, producing Signal objects the executor accepts. Bot runs without regressions.
 
-- [ ] **S04: Port S2 + parity verification** `risk:low` `depends:[S02,S03]`
+- [x] **S04: Port S2 + parity verification** `risk:low` `depends:[S02,S03]`
   > After this: S2 (volatility) is ported. A parity test script feeds identical price data through both adapters and asserts identical signals. The seconds-vs-ticks bug is provably eliminated.
 
-- [ ] **S05: Strategy template + parameter optimization** `risk:low` `depends:[S04]`
+- [x] **S05: Strategy template + parameter optimization** `risk:low` `depends:[S04]`
   > After this: `shared/strategies/TEMPLATE/` contains a documented skeleton. `python -m analysis.optimize --strategy S1` grid-searches the config space and ranks parameter combinations.
 
 ## Boundary Map

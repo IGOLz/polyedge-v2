@@ -1,0 +1,121 @@
+# PolyEdge — Unified Docker Compose
+#
+# Architecture:
+#   - timescaledb: Shared database (persistent volume, never restarted by updates)
+#   - core:        Data collector — runs 24/7, NEVER restarted on code updates
+#   - analysis:    Strategy research — run on-demand, restarts are safe
+#   - trading:     Live trading bot — can be restarted independently
+#
+# Update workflow (on LXC):
+#   1. git pull
+#   2. docker compose build analysis trading   # ONLY rebuild analysis + trading
+#   3. docker compose up -d analysis trading   # ONLY restart analysis + trading
+#   # Core keeps running untouched!
+#
+# To update core (rare, planned downtime):
+#   docker compose build core && docker compose up -d core
+
+services:
+  # ── Database (shared, persistent) ─────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    platform: linux/arm64
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - polyedge
+
+  # ── Core: Data collector (24/7, never restart on updates) ─────────────
+  core:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.core
+    container_name: polyedge-core
+    platform: linux/arm64
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./logs/core:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    # Labels to identify this as a "do not touch" service
+    labels:
+      polyedge.role: "core"
+      polyedge.update: "never"
+
+  # ── Analysis: Strategy research (run on-demand) ───────────────────────
+  analysis:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.analysis
+    container_name: polyedge-analysis
+    platform: linux/arm64
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./logs/analysis:/app/logs
+    restart: "no"
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "analysis"
+      polyedge.update: "safe"
+
+  # ── Trading: Live trading bot (can restart independently) ─────────────
+  trading:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.trading
+    container_name: polyedge-trading
+    platform: linux/arm64
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./logs/trading:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "trading"
+      polyedge.update: "safe"
+
+volumes:
+  timescaledb_data:
+
+networks:
+  polyedge:
+    driver: bridge
