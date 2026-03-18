@@ -64,14 +64,24 @@ assert fee_over_one >= 0.0 and fee_over_one <= 0.05, f"Price > 1.0 should clamp 
 
 print("✓ Invalid input handling verified (price clamping works)")
 EOF
+
+# 5. Verify failure path inspection for missing strategy (diagnostic check)
+# This verifies that error output is structured and inspectable
+PYTHONPATH=. python3 -m analysis.backtest_strategies --strategy NONEXISTENT 2>&1 | tee /tmp/missing_strategy.txt
+if grep -qE "(KeyError|not found|does not exist)" /tmp/missing_strategy.txt; then
+  echo "✓ Missing strategy error is structured and inspectable"
+else
+  echo "✗ Missing strategy error is not clearly reported"
+fi
 ```
 
 **Acceptance criteria:**
-- All four verification commands pass
+- All five verification commands pass
 - Fee formula produces correct values at 0.50, 0.10, 0.90
 - Invalid price inputs are clamped and produce valid fees
 - Running with different slippage values produces different PnL
 - CLI accepts both new flags without error
+- Missing strategy error is structured and inspectable
 
 ## Observability / Diagnostics
 
@@ -119,7 +129,7 @@ EOF
   - Verify: Run the REPL test commands above; all three outputs must match expected values within 0.0001
   - Done when: `polymarket_dynamic_fee()` exists, PnL functions call it, and REPL test shows correct fee values
 
-- [ ] **T02: Add slippage modeling and wire CLI parameters** `est:45m`
+- [x] **T02: Add slippage modeling and wire CLI parameters** `est:45m`
   - Why: R017 requires slippage; this completes the engine upgrade and exposes control to users
   - Files: `src/analysis/backtest/engine.py`, `src/analysis/backtest_strategies.py`
   - Do:

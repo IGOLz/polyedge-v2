@@ -65,15 +65,34 @@ def calculate_pnl_exit(entry_price, exit_price, base_rate=0.063):
 
 
 def make_trade(market, second_entered, entry_price, direction,
-               second_exited=-1, exit_price=None, base_rate=0.063):
-    """Create a Trade object with PnL calculated."""
+               second_exited=-1, exit_price=None, 
+               slippage=0.0, base_rate=0.063):
+    """Create a Trade object with PnL calculated.
+    
+    Args:
+        slippage: Entry price penalty (default 0.0). Added to Up bets, subtracted from Down.
+        base_rate: Polymarket dynamic fee base rate (default 0.063).
+    
+    Note: Removed fee_rate parameter. Old code using fee_rate should pass base_rate instead.
+          To approximate flat 2% fee, use base_rate ≈ 0.0317 (produces ~2% at extreme prices).
+    """
     actual = market['final_outcome']
+    
+    # Apply slippage penalty (unfavorable direction)
+    adjusted_entry = entry_price
+    if slippage != 0.0:
+        if direction == "Up":
+            adjusted_entry = entry_price + slippage
+        else:  # Down
+            adjusted_entry = entry_price - slippage
+        # Clamp to valid token price range
+        adjusted_entry = max(0.01, min(0.99, adjusted_entry))
 
     if exit_price is not None and second_exited >= 0:
-        pnl = calculate_pnl_exit(entry_price, exit_price, base_rate)
+        pnl = calculate_pnl_exit(adjusted_entry, exit_price, base_rate)
         outcome = 'win' if pnl > 0 else 'loss'
     else:
-        pnl = calculate_pnl_hold(entry_price, direction, actual, base_rate)
+        pnl = calculate_pnl_hold(adjusted_entry, direction, actual, base_rate)
         outcome = 'win' if direction == actual else 'loss'
         second_exited = market['total_seconds']
         exit_price = 1.0 if outcome == 'win' else 0.0

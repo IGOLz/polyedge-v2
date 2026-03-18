@@ -70,6 +70,8 @@ def run_strategy(
     strategy_id: str,
     strategy,
     markets: list[dict],
+    slippage: float = 0.0,
+    base_rate: float = 0.063,
 ) -> tuple[list[Trade], dict]:
     """Run a single strategy against all *markets*.
 
@@ -92,6 +94,8 @@ def run_strategy(
                 second_entered,
                 signal.entry_price,
                 signal.direction,
+                slippage=slippage,
+                base_rate=base_rate,
             )
             trades.append(trade)
 
@@ -202,6 +206,20 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         help="Comma-separated duration filter in minutes (e.g. 5,15).",
     )
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=0.0,
+        help="Slippage penalty in price units (default: 0.0). "
+             "Models execution lag — Up bets pay more, Down bets worse fill.",
+    )
+    parser.add_argument(
+        "--fee-base-rate",
+        type=float,
+        default=0.063,
+        help="Polymarket dynamic fee base rate (default: 0.063). "
+             "Produces ~3.15%% peak fee at 50/50 prices.",
+    )
     args = parser.parse_args(argv)
 
     # ── Load market data ────────────────────────────────────────────
@@ -241,7 +259,11 @@ def main(argv: list[str] | None = None) -> None:
     trades_by_config: dict[str, list[Trade]] = {}
 
     for sid, strat in sorted(strategies.items()):
-        trades, metrics = run_strategy(sid, strat, markets)
+        trades, metrics = run_strategy(
+            sid, strat, markets, 
+            slippage=args.slippage, 
+            base_rate=args.fee_base_rate
+        )
         all_metrics.append(metrics)
         trades_by_config[sid] = trades
 
