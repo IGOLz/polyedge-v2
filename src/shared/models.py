@@ -16,7 +16,11 @@ class MarketState:
     market_type: Optional[str] = None
     latest_up_price: Optional[float] = None
     latest_volume: Optional[float] = None
+    latest_up_price_at: Optional[datetime] = None
     last_recorded_at: Optional[datetime] = None
+    last_recorded_second: int = -1
+    last_emitted_up_price: Optional[float] = None
+    observed_prices_by_second: dict[int, float] = field(default_factory=dict)
     is_open: bool = True
     awaiting_resolution: bool = False
     tick_count: int = 0

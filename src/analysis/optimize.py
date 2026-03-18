@@ -22,6 +22,7 @@ import argparse
 import dataclasses
 import importlib
 import itertools
+import math
 import sys
 
 import pandas as pd
@@ -88,8 +89,7 @@ def optimize_strategy(
 
     param_names = list(grid.keys())
     param_values = list(grid.values())
-    combinations = list(itertools.product(*param_values))
-    total_combos = len(combinations)
+    total_combos = math.prod(len(values) for values in param_values)
 
     # ── Print grid summary ──────────────────────────────────────────
     print(f"\n{'='*60}")
@@ -129,7 +129,7 @@ def optimize_strategy(
 
     print(f"\nRunning {total_combos} backtests...\n")
 
-    for i, combo in enumerate(combinations, 1):
+    for i, combo in enumerate(itertools.product(*param_values), 1):
         param_dict = dict(zip(param_names, combo))
 
         # Split param_dict into strategy params and exit params

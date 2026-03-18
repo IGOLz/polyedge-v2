@@ -41,6 +41,11 @@ class TradeRecord:
     second_entered: int = 0
     asset: str = ""
     duration_minutes: int = 0
+    exit_reason: str = "resolution"
+    gross_pnl: float = 0.0
+    entry_fee_usdc: float = 0.0
+    exit_fee_usdc: float = 0.0
+    net_shares: float = 1.0
 
 
 @dataclass
@@ -68,6 +73,7 @@ class StrategyReport:
     date_range_start: str = ""  # ISO-8601 or empty
     date_range_end: str = ""
     total_markets_evaluated: int = 0
+    skipped_markets_missing_features: int = 0
 
     # ── Core metrics (match engine.compute_metrics output) ──────────
     total_bets: int = 0
@@ -78,6 +84,9 @@ class StrategyReport:
     avg_bet_pnl: float = 0.0
     profit_factor: float = 0.0
     expected_value: float = 0.0
+    total_entry_fees: float = 0.0
+    total_exit_fees: float = 0.0
+    total_fees: float = 0.0
 
     # ── Risk metrics ────────────────────────────────────────────────
     sharpe_ratio: float = 0.0
@@ -136,6 +145,10 @@ class StrategyReport:
             )
         if self.total_markets_evaluated:
             lines.append(f"**Markets evaluated:** {self.total_markets_evaluated}  ")
+        if self.skipped_markets_missing_features:
+            lines.append(
+                f"**Markets skipped (missing features):** {self.skipped_markets_missing_features}  "
+            )
         lines.append("")
 
         # Performance summary table
@@ -150,6 +163,9 @@ class StrategyReport:
         lines.append(f"| Avg bet PnL | ${self.avg_bet_pnl:.6f} |")
         lines.append(f"| Profit factor | {self.profit_factor:.4f} |")
         lines.append(f"| Expected value | ${self.expected_value:.6f} |")
+        lines.append(f"| Entry fees | ${self.total_entry_fees:.6f} |")
+        lines.append(f"| Exit fees | ${self.total_exit_fees:.6f} |")
+        lines.append(f"| Total fees | ${self.total_fees:.6f} |")
         lines.append("")
 
         # Risk metrics
@@ -271,6 +287,11 @@ class StrategyReport:
                             "second_entered": t.second_entered,
                             "asset": t.asset,
                             "duration_minutes": t.duration_minutes,
+                            "exit_reason": t.exit_reason,
+                            "gross_pnl": t.gross_pnl,
+                            "entry_fee_usdc": t.entry_fee_usdc,
+                            "exit_fee_usdc": t.exit_fee_usdc,
+                            "net_shares": t.net_shares,
                         }
                     )
                 elif isinstance(t, dict):
@@ -281,6 +302,9 @@ class StrategyReport:
             strategy_name=strategy_name,
             context=context,
             total_markets_evaluated=total_markets,
+            skipped_markets_missing_features=metrics.get(
+                "skipped_markets_missing_features", 0
+            ),
             date_range_start=date_range_start,
             date_range_end=date_range_end,
             total_bets=metrics.get("total_bets", 0),
@@ -291,6 +315,9 @@ class StrategyReport:
             avg_bet_pnl=metrics.get("avg_bet_pnl", 0.0),
             profit_factor=metrics.get("profit_factor", 0.0),
             expected_value=metrics.get("expected_value", 0.0),
+            total_entry_fees=metrics.get("total_entry_fees", 0.0),
+            total_exit_fees=metrics.get("total_exit_fees", 0.0),
+            total_fees=metrics.get("total_fees", 0.0),
             sharpe_ratio=metrics.get("sharpe_ratio", 0.0),
             sortino_ratio=metrics.get("sortino_ratio", 0.0),
             max_drawdown=metrics.get("max_drawdown", 0.0),

@@ -1,21 +1,10 @@
 """Backtest shared strategies through the analysis engine.
 
 Bridges the shared strategy framework (``shared.strategies``) into the
-existing analysis backtest infrastructure (``analysis.backtest``).  Converts
-``data_loader`` market dicts into :class:`MarketSnapshot` objects, evaluates
-strategies via the shared registry, converts returned :class:`Signal` objects
-into :class:`Trade` objects using the existing engine, and computes/saves
-performance metrics.
-
-Produces per-strategy reports in both JSON and Markdown via
-:class:`StrategyReport` — the same format used by the trading bot — so
-agents can compare backtest vs live side-by-side.
-
-Usage::
-
-    cd src && PYTHONPATH=. python3 -m analysis.backtest_strategies --strategy S1
-    cd src && PYTHONPATH=. python3 -m analysis.backtest_strategies --assets BTC,ETH --durations 5
-
+existing analysis backtest infrastructure (``analysis.backtest``). Converts
+``data_loader`` market dicts into causal ``MarketSnapshot`` objects, evaluates
+strategies second by second, converts returned ``Signal`` objects into
+``Trade`` objects using the existing engine, and computes performance metrics.
 """
 
 from __future__ import annotations
@@ -35,35 +24,42 @@ from analysis.backtest.engine import (
     make_trade,
     save_module_results,
 )
-from shared.strategies import MarketSnapshot, StrategyReport, discover_strategies, get_strategy
+from shared.strategies import (
+    MarketSnapshot,
+    StrategyReport,
+    discover_strategies,
+    get_strategy,
+)
 
 
-# ── Conversion ──────────────────────────────────────────────────────
+def market_to_snapshot(market: dict, current_second: int) -> MarketSnapshot:
+    """Convert a market dict to a causal ``MarketSnapshot``."""
+    history_end = current_second + 1
+    feature_series = {
+        name: values[:history_end].copy()
+        for name, values in market.get("feature_series", {}).items()
+    }
 
-
-def market_to_snapshot(market: dict) -> MarketSnapshot:
-    """Convert a data_loader market dict to a :class:`MarketSnapshot`.
-
-    In backtest mode ``elapsed_seconds`` equals ``total_seconds`` because the
-    full price series is available for evaluation.
-    """
     return MarketSnapshot(
         market_id=market["market_id"],
         market_type=market["market_type"],
-        prices=market["prices"],  # numpy ndarray, seconds-indexed, NaN for missing
+        prices=market["prices"][:history_end].copy(),
         total_seconds=market["total_seconds"],
-        elapsed_seconds=market["total_seconds"],  # backtest: full market data
+        elapsed_seconds=current_second,
+        feature_series=feature_series,
         metadata={
             "asset": market["asset"],
             "hour": market["hour"],
             "started_at": market["started_at"],
-            "final_outcome": market["final_outcome"],
             "duration_minutes": market["duration_minutes"],
+            "prior_market_type_streak_direction": market.get(
+                "prior_market_type_streak_direction"
+            ),
+            "prior_market_type_streak_length": market.get(
+                "prior_market_type_streak_length", 0
+            ),
         },
     )
-
-
-# ── Strategy runner ─────────────────────────────────────────────────
 
 
 def run_strategy(
@@ -71,27 +67,36 @@ def run_strategy(
     strategy,
     markets: list[dict],
     slippage: float = 0.0,
-    base_rate: float = 0.063,
+    base_rate: float | None = None,
     *,
     stop_loss: float | None = None,
     take_profit: float | None = None,
 ) -> tuple[list[Trade], dict]:
-    """Run a single strategy against all *markets*.
-
-    Returns ``(trades, metrics)`` where *trades* is a list of
-    :class:`Trade` objects and *metrics* is a dict produced by
-    :func:`engine.compute_metrics`.
-    """
+    """Run a single strategy against all eligible markets."""
     trades: list[Trade] = []
+    eligible_markets = [
+        market for market in markets if strategy.market_is_eligible(market)
+    ]
+    skipped_markets = len(markets) - len(eligible_markets)
 
-    for market in markets:
-        snapshot = market_to_snapshot(market)
-        signal = strategy.evaluate(snapshot)
+    for market in eligible_markets:
+        total_seconds = market["total_seconds"]
 
-        if signal is not None:
-            second_entered = signal.signal_data.get(
-                "entry_second", signal.signal_data.get("reversion_second", 0)
+        for current_second in range(total_seconds):
+            snapshot = market_to_snapshot(market, current_second)
+            signal = strategy.evaluate(snapshot)
+            if signal is None:
+                continue
+
+            second_entered = int(
+                signal.signal_data.get(
+                    "entry_second",
+                    signal.signal_data.get("reversion_second", current_second),
+                )
             )
+            if second_entered != current_second:
+                continue
+
             trade = make_trade(
                 market,
                 second_entered,
@@ -103,24 +108,24 @@ def run_strategy(
                 take_profit=take_profit,
             )
             trades.append(trade)
+            break
 
     metrics = compute_metrics(trades, config_id=strategy_id)
-    
-    # Augment metrics with SL/TP parameters if provided
+    metrics["eligible_markets"] = len(eligible_markets)
+    metrics["skipped_markets_missing_features"] = skipped_markets
+
     if stop_loss is not None:
-        metrics['stop_loss'] = stop_loss
+        metrics["stop_loss"] = stop_loss
     if take_profit is not None:
-        metrics['take_profit'] = take_profit
+        metrics["take_profit"] = take_profit
 
     print(
-        f"[{strategy_id}] Evaluating {len(markets)} markets "
-        f"→ {len(trades)} trades"
+        f"[{strategy_id}] Evaluating {len(eligible_markets)} markets "
+        f"(skipped {skipped_markets} without required feature data) "
+        f"-> {len(trades)} trades"
     )
 
     return trades, metrics
-
-
-# ── Report generation ───────────────────────────────────────────────
 
 
 def _generate_reports(
@@ -131,10 +136,9 @@ def _generate_reports(
     df: pd.DataFrame,
     output_dir: str,
 ) -> None:
-    """Generate per-strategy JSON + Markdown reports in the shared format."""
+    """Generate per-strategy JSON and Markdown reports."""
     report_dir = os.path.join(output_dir, "reports", "backtest")
 
-    # Compute date range from market data
     date_range_start = ""
     date_range_end = ""
     if markets:
@@ -153,13 +157,11 @@ def _generate_reports(
         strategy = strategies[sid]
         trades = trades_by_config.get(sid, [])
 
-        # Get ranking score from the DataFrame
         ranking_score = 0.0
         row = df[df["config_id"] == sid]
         if not row.empty and "ranking_score" in row.columns:
             ranking_score = float(row.iloc[0]["ranking_score"])
 
-        # Get strategy config as dict
         config_dict = {}
         if hasattr(strategy, "config"):
             try:
@@ -173,7 +175,7 @@ def _generate_reports(
             strategy_id=sid,
             strategy_name=strategy.config.strategy_name if hasattr(strategy, "config") else sid,
             context="backtest",
-            total_markets=len(markets),
+            total_markets=int(metrics.get("eligible_markets", len(markets))),
             date_range_start=date_range_start,
             date_range_end=date_range_end,
             config=config_dict,
@@ -186,11 +188,8 @@ def _generate_reports(
     print(f"  Reports saved to {report_dir}/")
 
 
-# ── CLI ─────────────────────────────────────────────────────────────
-
-
 def main(argv: list[str] | None = None) -> None:
-    """Entry point for ``python3 -m analysis.backtest_strategies``."""
+    """Entry point for ``python -m analysis.backtest_strategies``."""
     parser = argparse.ArgumentParser(
         prog="analysis.backtest_strategies",
         description="Backtest shared strategies through the analysis engine.",
@@ -199,7 +198,7 @@ def main(argv: list[str] | None = None) -> None:
         "-s",
         "--strategy",
         default=None,
-        help="Run only this strategy ID (e.g. S1). Omit to run all discovered strategies.",
+        help="Run only this strategy ID (for example S1).",
     )
     parser.add_argument(
         "-o",
@@ -210,86 +209,82 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--assets",
         default=None,
-        help="Comma-separated asset filter (e.g. BTC,ETH).",
+        help="Comma-separated asset filter (for example BTC,ETH).",
     )
     parser.add_argument(
         "--durations",
         default=None,
-        help="Comma-separated duration filter in minutes (e.g. 5,15).",
+        help="Comma-separated duration filter in minutes (for example 5,15).",
     )
     parser.add_argument(
         "--slippage",
         type=float,
         default=0.0,
-        help="Slippage penalty in price units (default: 0.0). "
-             "Models execution lag — Up bets pay more, Down bets worse fill.",
+        help=(
+            "Slippage penalty in price units (default: 0.0). "
+            "Models execution lag."
+        ),
     )
     parser.add_argument(
         "--fee-base-rate",
         type=float,
-        default=0.063,
-        help="Polymarket dynamic fee base rate (default: 0.063). "
-             "Produces ~3.15%% peak fee at 50/50 prices.",
+        default=None,
+        help=(
+            "Optional fee-rate override. By default the engine uses the "
+            "official market-aware Polymarket crypto fee schedule automatically."
+        ),
     )
     args = parser.parse_args(argv)
 
-    # ── Load market data ────────────────────────────────────────────
     print("Loading market data...")
     markets = data_loader.load_all_data()
     if not markets:
         print("No markets loaded. Exiting.")
         sys.exit(1)
 
-    # Apply filters
     asset_list = args.assets.split(",") if args.assets else None
-    duration_list = (
-        [int(d) for d in args.durations.split(",")]
-        if args.durations
-        else None
-    )
+    duration_list = [int(d) for d in args.durations.split(",")] if args.durations else None
     if asset_list or duration_list:
         markets = data_loader.filter_markets(
             markets, assets=asset_list, durations=duration_list
         )
         print(f"After filtering: {len(markets)} markets")
 
-    # ── Discover / select strategies ────────────────────────────────
     if args.strategy:
-        strategy = get_strategy(args.strategy)
-        strategies = {args.strategy: strategy}
+        strategies = {args.strategy: get_strategy(args.strategy)}
     else:
-        strategy_classes = discover_strategies()
-        strategies = {}
-        for sid in strategy_classes:
-            strategies[sid] = get_strategy(sid)
+        strategies = {sid: get_strategy(sid) for sid in discover_strategies()}
 
     print(f"Running {len(strategies)} strategy(ies): {sorted(strategies.keys())}\n")
 
-    # ── Run strategies ──────────────────────────────────────────────
     all_metrics: list[dict] = []
     trades_by_config: dict[str, list[Trade]] = {}
 
     for sid, strat in sorted(strategies.items()):
         trades, metrics = run_strategy(
-            sid, strat, markets, 
-            slippage=args.slippage, 
-            base_rate=args.fee_base_rate
+            sid,
+            strat,
+            markets,
+            slippage=args.slippage,
+            base_rate=args.fee_base_rate,
         )
         all_metrics.append(metrics)
         trades_by_config[sid] = trades
 
-    # ── Build results DataFrame ─────────────────────────────────────
     df = pd.DataFrame(all_metrics)
     df = add_ranking_score(df)
 
-    # ── Save existing results (CSV, best configs, markdown) ─────────
     module_name = "shared_strategies"
     save_module_results(df, trades_by_config, module_name, args.output_dir)
+    _generate_reports(
+        strategies,
+        all_metrics,
+        trades_by_config,
+        markets,
+        df,
+        args.output_dir,
+    )
 
-    # ── Save shared-format reports (JSON + Markdown per strategy) ───
-    _generate_reports(strategies, all_metrics, trades_by_config, markets, df, args.output_dir)
-
-    # ── Summary ─────────────────────────────────────────────────────
     print("\n=== Summary ===")
     for _, row in df.iterrows():
         print(

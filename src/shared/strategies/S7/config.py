@@ -1,9 +1,3 @@
-"""S7 strategy configuration — composite ensemble with inline pattern detection.
-
-S7 runs multiple detection patterns inline (calibration, momentum, volatility)
-and returns a signal only when ≥ min_agreement patterns agree on direction.
-"""
-
 from dataclasses import dataclass
 
 from shared.strategies.base import StrategyConfig
@@ -11,64 +5,57 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S7Config(StrategyConfig):
-    """Configuration for S7 composite ensemble strategy.
+    """Configuration for S7 ensemble confirmation."""
 
-    This strategy duplicates detection logic from S1 (calibration), S2 (momentum),
-    and S4 (volatility) inline rather than calling those strategies. The pure
-    function contract prevents accessing the registry or calling other strategies.
-    """
-
-    # Ensemble parameters
-    min_agreement: int = 2  # minimum strategies that must agree on direction
+    min_agreement: int = 2
     calibration_enabled: bool = True
     momentum_enabled: bool = True
     volatility_enabled: bool = True
-    
-    # Calibration pattern parameters (from S1)
-    calibration_deviation: float = 0.08  # min deviation from 0.50 to trigger
-    calibration_eval_window: int = 60    # seconds to scan for calibration signal
-    
-    # Momentum pattern parameters (from S2)
-    momentum_threshold: float = 0.03     # min velocity to trigger
-    momentum_eval_start: int = 30        # start of velocity measurement window
-    momentum_eval_end: int = 60          # end of velocity measurement window
-    
-    # Volatility pattern parameters (from S4)
-    volatility_threshold: float = 0.08   # min std dev to consider high vol
-    volatility_lookback: int = 60        # lookback window for vol calculation
-    volatility_eval_sec: int = 120       # when to evaluate vol + price
-    extreme_price_low: float = 0.30      # low extreme threshold
-    extreme_price_high: float = 0.70     # high extreme threshold
+
+    calibration_entry_window_start: int = 30
+    calibration_entry_window_end: int = 120
+    calibration_price_low_threshold: float = 0.42
+    calibration_price_high_threshold: float = 0.58
+    calibration_min_deviation: float = 0.06
+    calibration_rebound_lookback: int = 8
+    calibration_rebound_min_move: float = 0.015
+
+    momentum_eval_window_start: int = 30
+    momentum_eval_window_end: int = 60
+    momentum_threshold: float = 0.05
+    momentum_tolerance: int = 3
+    momentum_max_entry_second: int = 150
+    momentum_efficiency_min: float = 0.65
+    momentum_min_distance_from_mid: float = 0.04
+
+    volatility_lookback_window: int = 60
+    volatility_threshold: float = 0.025
+    volatility_eval_second: int = 45
+    volatility_extreme_price_low: float = 0.30
+    volatility_extreme_price_high: float = 0.70
+    volatility_reversal_lookback: int = 6
+    volatility_reversal_min_move: float = 0.015
 
 
 def get_default_config() -> S7Config:
-    """Return the production-default S7 configuration."""
     return S7Config(
         strategy_id="S7",
-        strategy_name="S7_composite",
+        strategy_name="S7_ensemble_confirmation",
     )
 
 
 def get_param_grid() -> dict[str, list]:
-    """Return grid-search parameter space for S7 composite ensemble.
-
-    Explores ensemble configurations: which patterns to enable, agreement
-    thresholds, and key thresholds for each detection pattern.
-
-    Returns:
-        Parameter grid with ~864 combinations.
-    """
     return {
         "min_agreement": [2, 3],
         "calibration_enabled": [True, False],
         "momentum_enabled": [True, False],
         "volatility_enabled": [True, False],
-        "calibration_deviation": [0.05, 0.08, 0.10],
-        "momentum_threshold": [0.03, 0.05],
-        "volatility_threshold": [0.08, 0.10],
-        # Stop loss and take profit are absolute price thresholds (not relative offsets).
-        # Entry prices 0.45-0.60 for composite ensemble signals.
-        # Engine handles direction logic (swap SL/TP for Down bets).
-        "stop_loss": [0.35, 0.40, 0.45],
-        "take_profit": [0.65, 0.70, 0.75],
+        "calibration_min_deviation": [0.04, 0.06, 0.08],
+        "calibration_rebound_min_move": [0.008, 0.012, 0.016],
+        "momentum_threshold": [0.03, 0.05, 0.07],
+        "momentum_efficiency_min": [0.55, 0.65, 0.75],
+        "volatility_threshold": [0.018, 0.024, 0.03],
+        "volatility_reversal_min_move": [0.008, 0.012, 0.016],
+        "stop_loss": [0.20, 0.25, 0.30, 0.35],
+        "take_profit": [0.65, 0.70, 0.75, 0.80],
     }

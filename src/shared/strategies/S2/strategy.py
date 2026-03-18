@@ -1,126 +1,55 @@
-"""S2 Strategy: Early Momentum — detect directional velocity in first 30-60 seconds.
-
-Entry logic: Calculate velocity between two time points (30s and 60s).
-If velocity >= threshold, enter Down (contrarian to upward momentum).
-If velocity <= -threshold, enter Up (contrarian to downward momentum).
-"""
+"""S2 Strategy: early momentum continuation."""
 
 from __future__ import annotations
 
 import numpy as np
 
-from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
 from shared.strategies.S2.config import S2Config
-
-
-def _get_price(prices: np.ndarray, target_sec: int, tolerance: int = 5) -> float | None:
-    """Get price at target second with NaN tolerance.
-    
-    Args:
-        prices: numpy array of prices indexed by elapsed second
-        target_sec: target second to retrieve price
-        tolerance: seconds to scan ±target_sec if target is NaN
-        
-    Returns:
-        price at target_sec, or nearest valid price within tolerance, or None
-    """
-    if target_sec < 0 or target_sec >= len(prices):
-        return None
-    
-    # Check target first
-    price = prices[target_sec]
-    if not np.isnan(price):
-        return float(price)
-    
-    # Scan ±tolerance for nearest valid price
-    for offset in range(1, tolerance + 1):
-        # Check target_sec + offset
-        idx_plus = target_sec + offset
-        if idx_plus < len(prices):
-            price = prices[idx_plus]
-            if not np.isnan(price):
-                return float(price)
-        
-        # Check target_sec - offset
-        idx_minus = target_sec - offset
-        if idx_minus >= 0:
-            price = prices[idx_minus]
-            if not np.isnan(price):
-                return float(price)
-    
-    return None
+from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
+from shared.strategies.helpers import current_second, get_price, path_efficiency, trailing_points
 
 
 class S2Strategy(BaseStrategy):
-    """S2 Strategy: Early Momentum — detect directional velocity in first 30-60 seconds
-
-    Entry logic: Calculate velocity = (price_60s - price_30s) / time_delta.
-    If velocity >= threshold, enter Down (contrarian to rising price).
-    If velocity <= -threshold, enter Up (contrarian to falling price).
-    """
+    """Follow efficient directional moves instead of fading them blindly."""
 
     config: S2Config
 
-    # ── public contract ─────────────────────────────────────────────
-
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
-        """Detect momentum signal from market snapshot.
-
-        Contract:
-        - Pure function: no side effects, no async, no database access.
-        - Return a ``Signal`` when entry conditions are met, ``None`` otherwise.
-        - Never raise on NaN-heavy, flat, or insufficient data — just return None.
-        """
         prices = snapshot.prices
         cfg = self.config
-
-        # Guard: need enough data to reach eval_window_end
-        if len(prices) < cfg.eval_window_end:
+        sec = current_second(snapshot)
+        if sec < cfg.eval_window_end or sec > cfg.max_entry_second:
             return None
 
-        # Get price at eval_window_start (e.g., 30s)
-        price_30s = _get_price(prices, cfg.eval_window_start, cfg.tolerance)
-        if price_30s is None:
+        lookback = max(1, cfg.eval_window_end - cfg.eval_window_start)
+        points = trailing_points(prices, sec, lookback + 1)
+        if len(points) < 4:
             return None
 
-        # Get price at eval_window_end (e.g., 60s)
-        price_60s = _get_price(prices, cfg.eval_window_end, cfg.tolerance)
-        if price_60s is None:
+        values = np.array([price for _, price in points], dtype=float)
+        net_move = float(values[-1] - values[0])
+        if abs(net_move) < cfg.momentum_threshold:
             return None
 
-        # Calculate velocity (price change per second)
-        time_delta = cfg.eval_window_end - cfg.eval_window_start
-        velocity = (price_60s - price_30s) / time_delta
+        efficiency = path_efficiency(values)
+        if efficiency < cfg.efficiency_min:
+            return None
 
-        # Check for strong upward momentum → enter Down (contrarian)
-        if velocity >= cfg.momentum_threshold:
-            entry_price = max(0.01, min(0.99, 1.0 - price_60s))  # clamp
-            return Signal(
-                direction="Down",
-                strategy_name=cfg.strategy_name,
-                entry_price=entry_price,
-                signal_data={
-                    "entry_second": cfg.eval_window_end,
-                    "velocity": velocity,
-                    "price_30s": price_30s,
-                    "price_60s": price_60s,
-                },
-            )
+        price = get_price(prices, sec, tolerance=cfg.tolerance)
+        if price is None or abs(price - 0.50) < cfg.min_distance_from_mid:
+            return None
 
-        # Check for strong downward momentum → enter Up (contrarian)
-        if velocity <= -cfg.momentum_threshold:
-            entry_price = max(0.01, min(0.99, price_60s))  # clamp
-            return Signal(
-                direction="Up",
-                strategy_name=cfg.strategy_name,
-                entry_price=entry_price,
-                signal_data={
-                    "entry_second": cfg.eval_window_end,
-                    "velocity": velocity,
-                    "price_30s": price_30s,
-                    "price_60s": price_60s,
-                },
-            )
+        direction = "Up" if net_move > 0 else "Down"
+        entry_price = price if direction == "Up" else 1.0 - price
 
-        # No momentum signal detected
-        return None
+        return Signal(
+            direction=direction,
+            strategy_name=cfg.strategy_name,
+            entry_price=max(0.01, min(0.99, entry_price)),
+            signal_data={
+                "entry_second": sec,
+                "observed_up_price": price,
+                "net_move": net_move,
+                "efficiency": efficiency,
+            },
+        )

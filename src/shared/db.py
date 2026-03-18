@@ -85,6 +85,10 @@ async def create_core_tables() -> None:
         await conn.execute("""
             SELECT create_hypertable('market_ticks', 'time', if_not_exists => TRUE);
         """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_market_ticks_market_time
+            ON market_ticks (market_id, time DESC);
+        """)
         try:
             await conn.execute("""
                 ALTER TABLE market_ticks SET (
@@ -130,7 +134,9 @@ async def insert_tick(
                 """
                 INSERT INTO market_ticks (time, market_id, up_price, volume)
                 VALUES ($1, $2, $3, $4)
-                ON CONFLICT (time, market_id) DO NOTHING;
+                ON CONFLICT (time, market_id) DO UPDATE SET
+                    up_price = EXCLUDED.up_price,
+                    volume = COALESCE(EXCLUDED.volume, market_ticks.volume);
                 """,
                 time, market_id, up_price, volume,
             )
@@ -179,7 +185,11 @@ async def fetch_unresolved_markets() -> list[dict]:
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT market_id, started_at, ended_at FROM market_outcomes WHERE resolved = FALSE;"
+                """
+                SELECT market_id, market_type, started_at, ended_at
+                FROM market_outcomes
+                WHERE resolved = FALSE;
+                """
             )
             return [dict(r) for r in rows]
     except Exception as exc:

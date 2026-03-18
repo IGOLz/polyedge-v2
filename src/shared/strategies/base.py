@@ -22,8 +22,11 @@ class MarketSnapshot:
     """Point-in-time view of a market for strategy evaluation.
 
     ``prices`` is a numpy ndarray indexed by elapsed second, with NaN for
-    missing ticks.  ``elapsed_seconds`` gives the current position in the
-    market so strategies can determine how much data is available.
+    missing ticks. It contains only the history available at evaluation time.
+    ``elapsed_seconds`` gives the current position in the market so strategies
+    can determine how much data is available. ``feature_series`` optionally
+    carries aligned per-second arrays such as underlying crypto returns or
+    volatility measures.
     """
 
     market_id: str
@@ -31,6 +34,7 @@ class MarketSnapshot:
     prices: np.ndarray  # up_price indexed by elapsed second, NaN for missing
     total_seconds: int  # total market duration in seconds
     elapsed_seconds: float  # current position in market (for live: time since start)
+    feature_series: dict[str, np.ndarray] = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)  # asset, hour, started_at, etc.
 
 
@@ -69,6 +73,23 @@ class BaseStrategy(ABC):
 
     def __init__(self, config: StrategyConfig):
         self.config = config
+
+    def required_feature_columns(self) -> tuple[str, ...]:
+        """Return aligned feature columns required by this strategy."""
+        return ()
+
+    def market_is_eligible(self, market: dict) -> bool:
+        """Return whether *market* has the required aligned feature data."""
+        required = self.required_feature_columns()
+        if not required:
+            return True
+
+        feature_series = market.get("feature_series", {})
+        for column in required:
+            series = feature_series.get(column)
+            if series is None or not np.any(np.isfinite(series)):
+                return False
+        return True
 
     @abstractmethod
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:

@@ -1,26 +1,17 @@
-"""
-Entry point for the Polymarket BTC 5-minute market tracker (core service).
+"""Entry point for the Polymarket short-duration crypto market tracker."""
 
-Three concurrent async tasks:
-  1. market_discovery_loop  — polls REST API every 30s, registers new markets
-  2. websocket_listener     — maintains WS connection, routes price updates
-  3. price_recorder_loop    — every 1s, flushes latest prices to DB
-
-Plus a resolution_loop that watches expired markets until they resolve.
-"""
+from __future__ import annotations
 
 import asyncio
-import logging
 import signal
-import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 
 from shared import db
-from shared.api import fetch_open_btc_5min_markets, fetch_market_resolution
+from shared.api import fetch_market_resolution, fetch_open_crypto_markets
 from shared.config import TIMING
 from shared.logging import setup_logger
 from shared.models import MarketState
@@ -39,12 +30,13 @@ def _short(mid: str) -> str:
 
 
 def _win(start: datetime, end: datetime) -> str:
-    return f"{start.strftime('%H:%M')}→{end.strftime('%H:%M')}"
+    return f"{start.strftime('%H:%M')}->{end.strftime('%H:%M')}"
 
 
-# ---------------------------------------------------------------------------
-# Shared application state
-# ---------------------------------------------------------------------------
+def _market_total_seconds(state: MarketState) -> int:
+    return max(0, int((state.ended_at - state.started_at).total_seconds()))
+
+
 @dataclass
 class AppState:
     markets: dict[str, MarketState] = field(default_factory=dict)
@@ -53,31 +45,57 @@ class AppState:
     ws_reconnect_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
-# ---------------------------------------------------------------------------
-# Task 1: Market discovery
-# ---------------------------------------------------------------------------
-async def market_discovery_loop(app_state: AppState, http_client: httpx.AsyncClient) -> None:
+async def market_discovery_loop(
+    app_state: AppState, http_client: httpx.AsyncClient
+) -> None:
     while not app_state.shutdown_event.is_set():
         try:
-            open_markets = await fetch_open_btc_5min_markets(http_client)
+            discovered_markets = await fetch_open_crypto_markets(http_client)
         except Exception as exc:
             logger.error("Market discovery error: %s", exc)
-            open_markets = []
+            discovered_markets = []
 
-        async with app_state.markets_lock:
-            known_ids = set(app_state.markets.keys())
+        needs_reconnect = False
+        for discovered in discovered_markets:
+            is_new = False
+            async with app_state.markets_lock:
+                existing = app_state.markets.get(discovered.market_id)
+                if existing is None:
+                    app_state.markets[discovered.market_id] = discovered
+                    is_new = True
+                    needs_reconnect = True
+                else:
+                    if (
+                        existing.up_token_id != discovered.up_token_id
+                        or existing.down_token_id != discovered.down_token_id
+                    ):
+                        needs_reconnect = True
+                    existing.up_token_id = discovered.up_token_id
+                    existing.down_token_id = discovered.down_token_id
+                    existing.market_type = discovered.market_type
+                    existing.started_at = discovered.started_at
+                    existing.ended_at = discovered.ended_at
+                    if existing.latest_up_price is None and discovered.latest_up_price is not None:
+                        existing.latest_up_price = discovered.latest_up_price
+                    if existing.last_emitted_up_price is None and discovered.latest_up_price is not None:
+                        existing.last_emitted_up_price = discovered.latest_up_price
 
-        for state in open_markets:
-            if state.market_id not in known_ids:
-                async with app_state.markets_lock:
-                    app_state.markets[state.market_id] = state
-
-                await db.upsert_market_outcome(
-                    market_id=state.market_id,
-                    started_at=state.started_at,
-                    ended_at=state.ended_at,
+            await db.upsert_market_outcome(
+                market_id=discovered.market_id,
+                market_type=discovered.market_type,
+                started_at=discovered.started_at,
+                ended_at=discovered.ended_at,
+            )
+            if is_new:
+                logger.info(
+                    "Tracking %s %s %s",
+                    discovered.market_type or "market",
+                    _short(discovered.market_id),
+                    _win(discovered.started_at, discovered.ended_at),
                 )
-                app_state.ws_reconnect_event.set()
+
+        if needs_reconnect:
+            app_state.ws_reconnect_event.set()
 
         try:
             await asyncio.wait_for(
@@ -87,34 +105,41 @@ async def market_discovery_loop(app_state: AppState, http_client: httpx.AsyncCli
             pass
 
 
-# ---------------------------------------------------------------------------
-# Task 2: WebSocket listener (uses shared WS module)
-# ---------------------------------------------------------------------------
 async def websocket_listener(app_state: AppState) -> None:
-    async def get_active_market():
+    async def get_tracked_markets():
         async with app_state.markets_lock:
-            for mid, state in app_state.markets.items():
-                if state.is_open:
-                    return (mid, state.up_token_id, state.down_token_id)
-        return None
+            return [
+                (market_id, state.up_token_id, state.down_token_id)
+                for market_id, state in app_state.markets.items()
+                if state.is_open
+            ]
 
-    async def on_price_update(market_id, price):
+    async def on_price_update(market_id: str, price: float):
+        observed_at = datetime.now(timezone.utc)
         async with app_state.markets_lock:
             state = app_state.markets.get(market_id)
-            if state is not None and state.is_open:
-                state.latest_up_price = price
+            if state is None or not state.is_open:
+                return
+
+            state.latest_up_price = price
+            state.latest_up_price_at = observed_at
+
+            if observed_at < state.started_at:
+                return
+
+            elapsed_second = int((observed_at - state.started_at).total_seconds())
+            total_seconds = _market_total_seconds(state)
+            if 0 <= elapsed_second < total_seconds:
+                state.observed_prices_by_second[elapsed_second] = price
 
     await run_websocket_listener(
-        get_active_market=get_active_market,
+        get_tracked_markets=get_tracked_markets,
         on_price_update=on_price_update,
         shutdown_event=app_state.shutdown_event,
         reconnect_event=app_state.ws_reconnect_event,
     )
 
 
-# ---------------------------------------------------------------------------
-# Task 3: Price recorder
-# ---------------------------------------------------------------------------
 async def price_recorder_loop(app_state: AppState) -> None:
     heartbeat_counter = 0
 
@@ -129,35 +154,79 @@ async def price_recorder_loop(app_state: AppState) -> None:
             if not state.is_open:
                 continue
 
+            total_seconds = _market_total_seconds(state)
+            if total_seconds <= 0:
+                continue
+            if now < state.started_at:
+                continue
+
+            current_second = min(
+                total_seconds - 1,
+                int((min(now, state.ended_at) - state.started_at).total_seconds()),
+            )
+
+            if (
+                state.last_emitted_up_price is None
+                and state.latest_up_price is not None
+                and (state.latest_up_price_at is None or state.latest_up_price_at <= state.started_at)
+            ):
+                state.last_emitted_up_price = state.latest_up_price
+
+            second = state.last_recorded_second + 1
+            while second <= current_second:
+                observed_price = state.observed_prices_by_second.pop(second, None)
+                if observed_price is not None:
+                    state.last_emitted_up_price = observed_price
+
+                if state.last_emitted_up_price is None:
+                    future_known_seconds = [
+                        known_second
+                        for known_second in state.observed_prices_by_second.keys()
+                        if second < known_second <= current_second
+                    ]
+                    if not future_known_seconds:
+                        break
+                    state.last_recorded_second = min(future_known_seconds) - 1
+                    second = state.last_recorded_second + 1
+                    continue
+
+                tick_time = state.started_at + timedelta(seconds=second)
+                await db.insert_tick(
+                    time=tick_time,
+                    market_id=market_id,
+                    up_price=state.last_emitted_up_price,
+                    volume=state.latest_volume,
+                )
+                state.tick_count += 1
+                state.last_recorded_second = second
+                state.last_recorded_at = tick_time
+                second += 1
+
             if now >= state.ended_at:
                 async with app_state.markets_lock:
-                    if market_id in app_state.markets:
-                        app_state.markets[market_id].is_open = False
-                        app_state.markets[market_id].awaiting_resolution = True
+                    tracked = app_state.markets.get(market_id)
+                    if tracked is not None:
+                        tracked.is_open = False
+                        tracked.awaiting_resolution = True
                 logger.info(
-                    "⏹️  %s  %s  ended — %d ticks collected",
-                    _short(market_id), _win(state.started_at, state.ended_at), state.tick_count,
+                    "%s %s ended - %d ticks collected",
+                    _short(market_id),
+                    _win(state.started_at, state.ended_at),
+                    state.tick_count,
                 )
-                continue
-
-            if state.latest_up_price is None:
-                continue
-
-            await db.insert_tick(
-                time=now,
-                market_id=market_id,
-                up_price=state.latest_up_price,
-                volume=state.latest_volume,
-            )
-            state.tick_count += 1
 
         if heartbeat_counter >= HEARTBEAT_INTERVAL:
-            active = [(mid, st) for mid, st in snapshot if st.is_open and st.latest_up_price is not None]
-            if active:
-                mid, st = active[0]
-                logger.info("💓 Heartbeat — tracking: %s  %s", _short(mid), _win(st.started_at, st.ended_at))
-            else:
-                logger.info("💓 Heartbeat — no active market")
+            tracked_count = sum(1 for _, state in snapshot if state.is_open)
+            live_count = sum(
+                1
+                for _, state in snapshot
+                if state.is_open and state.started_at <= now < state.ended_at
+            )
+            logger.info(
+                "Heartbeat - tracking %d market(s), live %d",
+                tracked_count,
+                live_count,
+            )
             heartbeat_counter = 0
 
         try:
@@ -168,13 +237,11 @@ async def price_recorder_loop(app_state: AppState) -> None:
             pass
 
 
-# ---------------------------------------------------------------------------
-# Resolution poller
-# ---------------------------------------------------------------------------
 async def _poll_resolution(
     app_state: AppState,
     http_client: httpx.AsyncClient,
     market_id: str,
+    market_type: Optional[str],
     started_at: datetime,
     ended_at: Optional[datetime],
 ) -> None:
@@ -182,9 +249,10 @@ async def _poll_resolution(
         result = await fetch_market_resolution(http_client, market_id)
         if result and result.get("resolved"):
             win_str = _win(started_at, ended_at) if ended_at else started_at.strftime("%H:%M")
-            logger.info("✅ %s  %s  resolved: %s", _short(market_id), win_str, result["winner"])
+            logger.info("%s %s resolved: %s", _short(market_id), win_str, result["winner"])
             await db.upsert_market_outcome(
                 market_id=market_id,
+                market_type=market_type,
                 started_at=started_at,
                 ended_at=ended_at,
                 final_outcome=result["winner"],
@@ -216,13 +284,18 @@ async def resolution_watcher_loop(
         for market_id, state in snapshot:
             if state.awaiting_resolution and market_id not in pending_resolution:
                 pending_resolution.add(market_id)
-                asyncio.create_task(
+                task = asyncio.create_task(
                     _poll_resolution(
-                        app_state, http_client, market_id,
-                        state.started_at, state.ended_at,
+                        app_state,
+                        http_client,
+                        market_id,
+                        state.market_type,
+                        state.started_at,
+                        state.ended_at,
                     ),
                     name=f"resolve-{market_id}",
                 )
+                task.add_done_callback(lambda _task, mid=market_id: pending_resolution.discard(mid))
 
         try:
             await asyncio.wait_for(
@@ -232,9 +305,6 @@ async def resolution_watcher_loop(
             pass
 
 
-# ---------------------------------------------------------------------------
-# Startup: recover unresolved markets from previous runs
-# ---------------------------------------------------------------------------
 async def recover_unresolved_markets(
     app_state: AppState, http_client: httpx.AsyncClient
 ) -> None:
@@ -245,36 +315,53 @@ async def recover_unresolved_markets(
     for row in unresolved:
         asyncio.create_task(
             _poll_resolution(
-                app_state, http_client,
-                row["market_id"], row["started_at"], row.get("ended_at"),
+                app_state,
+                http_client,
+                row["market_id"],
+                row.get("market_type"),
+                row["started_at"],
+                row.get("ended_at"),
             ),
             name=f"recover-{row['market_id']}",
         )
 
 
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
+def _install_signal_handlers(loop: asyncio.AbstractEventLoop, app_state: AppState) -> None:
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, app_state.shutdown_event.set)
+        except NotImplementedError:
+            signal.signal(
+                sig,
+                lambda *_args: loop.call_soon_threadsafe(app_state.shutdown_event.set),
+            )
+
+
 async def main() -> None:
-    logger.info("Polymarket BTC 5-minute tracker starting...")
+    logger.info("Polymarket crypto 5m/15m tracker starting...")
 
     await db.init_pool()
     await db.create_core_tables()
 
     app_state = AppState()
-
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: app_state.shutdown_event.set())
+    _install_signal_handlers(loop, app_state)
 
     async with httpx.AsyncClient() as http_client:
         await recover_unresolved_markets(app_state, http_client)
 
         tasks = [
-            asyncio.create_task(market_discovery_loop(app_state, http_client), name="discovery"),
+            asyncio.create_task(
+                market_discovery_loop(app_state, http_client), name="discovery"
+            ),
             asyncio.create_task(websocket_listener(app_state), name="ws-listener"),
-            asyncio.create_task(price_recorder_loop(app_state), name="price-recorder"),
-            asyncio.create_task(resolution_watcher_loop(app_state, http_client), name="resolution-watcher"),
+            asyncio.create_task(
+                price_recorder_loop(app_state), name="price-recorder"
+            ),
+            asyncio.create_task(
+                resolution_watcher_loop(app_state, http_client),
+                name="resolution-watcher",
+            ),
         ]
 
         await app_state.shutdown_event.wait()

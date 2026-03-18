@@ -6,7 +6,7 @@ import numpy as np
 
 from shared.strategies.S10.config import S10Config
 from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
-from shared.strategies.helpers import get_price, path_efficiency, valid_points
+from shared.strategies.helpers import current_second, get_price, path_efficiency, valid_points
 
 
 class S10Strategy(BaseStrategy):
@@ -17,11 +17,11 @@ class S10Strategy(BaseStrategy):
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
         prices = snapshot.prices
         cfg = self.config
-
-        if cfg.impulse_end <= cfg.impulse_start:
+        sec = current_second(snapshot)
+        if sec <= cfg.impulse_end:
             return None
 
-        impulse_points = valid_points(prices, cfg.impulse_start, cfg.impulse_end)
+        impulse_points = valid_points(prices, cfg.impulse_start, min(cfg.impulse_end, sec - 1))
         if len(impulse_points) < 6:
             return None
 
@@ -30,110 +30,84 @@ class S10Strategy(BaseStrategy):
         if impulse_efficiency < cfg.impulse_efficiency_min:
             return None
 
-        start_price = impulse_values[0]
-        end_price = impulse_values[-1]
-        net_move = float(end_price - start_price)
-
+        start_price = float(impulse_values[0])
+        end_price = float(impulse_values[-1])
+        net_move = end_price - start_price
         if abs(net_move) < cfg.impulse_threshold:
             return None
 
         if net_move > 0:
-            return self._evaluate_uptrend(prices, impulse_points, start_price, cfg, impulse_efficiency)
+            return self._evaluate_uptrend(prices, sec, impulse_points, start_price, cfg, impulse_efficiency)
+        return self._evaluate_downtrend(prices, sec, impulse_points, start_price, cfg, impulse_efficiency)
 
-        return self._evaluate_downtrend(prices, impulse_points, start_price, cfg, impulse_efficiency)
-
-    def _evaluate_uptrend(
-        self,
-        prices: np.ndarray,
-        impulse_points: list[tuple[int, float]],
-        start_price: float,
-        cfg: S10Config,
-        impulse_efficiency: float,
-    ) -> Signal | None:
+    def _evaluate_uptrend(self, prices, sec, impulse_points, start_price, cfg, impulse_efficiency):
         peak_sec, peak_price = max(impulse_points, key=lambda item: item[1])
+        if sec <= peak_sec or sec > peak_sec + cfg.retrace_window:
+            return None
+
         impulse_size = peak_price - start_price
         if impulse_size <= 0:
             return None
 
-        scan_end = min(peak_sec + cfg.retrace_window, len(prices) - 1)
-        pullback_active = False
-        pullback_low = peak_price
+        pullback_points = valid_points(prices, peak_sec + 1, sec)
+        if len(pullback_points) < 2:
+            return None
 
-        for sec in range(peak_sec + 1, scan_end + 1):
-            price = get_price(prices, sec, tolerance=2)
-            if price is None:
-                continue
+        pullback_low = min(price for _, price in pullback_points)
+        current_price = pullback_points[-1][1]
+        retrace_fraction = (peak_price - pullback_low) / impulse_size
+        if retrace_fraction < cfg.retrace_min or retrace_fraction > cfg.retrace_max:
+            return None
+        if current_price - pullback_low < cfg.reacceleration_threshold:
+            return None
+        if current_price <= start_price:
+            return None
 
-            retrace_fraction = (peak_price - price) / impulse_size
-            if not pullback_active:
-                if cfg.retrace_min <= retrace_fraction <= cfg.retrace_max:
-                    pullback_active = True
-                    pullback_low = price
-                continue
+        return Signal(
+            direction="Up",
+            strategy_name=cfg.strategy_name,
+            entry_price=max(0.01, min(0.99, current_price)),
+            signal_data={
+                "entry_second": sec,
+                "observed_up_price": current_price,
+                "impulse_size": impulse_size,
+                "impulse_efficiency": impulse_efficiency,
+                "peak_second": peak_sec,
+            },
+        )
 
-            if retrace_fraction > cfg.retrace_max:
-                return None
-
-            pullback_low = min(pullback_low, price)
-            if price - pullback_low >= cfg.reacceleration_threshold and price > start_price:
-                return Signal(
-                    direction="Up",
-                    strategy_name=cfg.strategy_name,
-                    entry_price=max(0.01, min(0.99, price)),
-                    signal_data={
-                        "entry_second": sec,
-                        "impulse_size": impulse_size,
-                        "impulse_efficiency": impulse_efficiency,
-                        "peak_second": peak_sec,
-                    },
-                )
-
-        return None
-
-    def _evaluate_downtrend(
-        self,
-        prices: np.ndarray,
-        impulse_points: list[tuple[int, float]],
-        start_price: float,
-        cfg: S10Config,
-        impulse_efficiency: float,
-    ) -> Signal | None:
+    def _evaluate_downtrend(self, prices, sec, impulse_points, start_price, cfg, impulse_efficiency):
         trough_sec, trough_price = min(impulse_points, key=lambda item: item[1])
+        if sec <= trough_sec or sec > trough_sec + cfg.retrace_window:
+            return None
+
         impulse_size = start_price - trough_price
         if impulse_size <= 0:
             return None
 
-        scan_end = min(trough_sec + cfg.retrace_window, len(prices) - 1)
-        pullback_active = False
-        pullback_high = trough_price
+        pullback_points = valid_points(prices, trough_sec + 1, sec)
+        if len(pullback_points) < 2:
+            return None
 
-        for sec in range(trough_sec + 1, scan_end + 1):
-            price = get_price(prices, sec, tolerance=2)
-            if price is None:
-                continue
+        pullback_high = max(price for _, price in pullback_points)
+        current_price = pullback_points[-1][1]
+        retrace_fraction = (pullback_high - trough_price) / impulse_size
+        if retrace_fraction < cfg.retrace_min or retrace_fraction > cfg.retrace_max:
+            return None
+        if pullback_high - current_price < cfg.reacceleration_threshold:
+            return None
+        if current_price >= start_price:
+            return None
 
-            retrace_fraction = (price - trough_price) / impulse_size
-            if not pullback_active:
-                if cfg.retrace_min <= retrace_fraction <= cfg.retrace_max:
-                    pullback_active = True
-                    pullback_high = price
-                continue
-
-            if retrace_fraction > cfg.retrace_max:
-                return None
-
-            pullback_high = max(pullback_high, price)
-            if pullback_high - price >= cfg.reacceleration_threshold and price < start_price:
-                return Signal(
-                    direction="Down",
-                    strategy_name=cfg.strategy_name,
-                    entry_price=max(0.01, min(0.99, 1.0 - price)),
-                    signal_data={
-                        "entry_second": sec,
-                        "impulse_size": impulse_size,
-                        "impulse_efficiency": impulse_efficiency,
-                        "trough_second": trough_sec,
-                    },
-                )
-
-        return None
+        return Signal(
+            direction="Down",
+            strategy_name=cfg.strategy_name,
+            entry_price=max(0.01, min(0.99, 1.0 - current_price)),
+            signal_data={
+                "entry_second": sec,
+                "observed_up_price": current_price,
+                "impulse_size": impulse_size,
+                "impulse_efficiency": impulse_efficiency,
+                "trough_second": trough_sec,
+            },
+        )

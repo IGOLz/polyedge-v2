@@ -10,6 +10,41 @@ from collections import defaultdict
 
 from shared.config import DB_CONFIG
 
+CRYPTO_FEATURE_COLUMNS = [
+    "market_up_price_market_open",
+    "market_up_delta_from_market_open",
+    "market_up_delta_5s",
+    "market_up_delta_10s",
+    "market_up_delta_30s",
+    "underlying_bar_open",
+    "underlying_bar_high",
+    "underlying_bar_low",
+    "underlying_close",
+    "underlying_volume",
+    "underlying_quote_volume",
+    "underlying_trade_count",
+    "underlying_taker_buy_base_volume",
+    "underlying_taker_buy_quote_volume",
+    "underlying_market_open_close",
+    "underlying_return_from_market_open",
+    "underlying_return_5s",
+    "underlying_return_10s",
+    "underlying_return_30s",
+    "underlying_realized_vol_10s",
+    "underlying_realized_vol_30s",
+    "direction_mismatch_market_open",
+    "direction_mismatch_5s",
+    "direction_mismatch_10s",
+    "direction_mismatch_30s",
+]
+
+BOOL_FEATURE_COLUMNS = {
+    "direction_mismatch_market_open",
+    "direction_mismatch_5s",
+    "direction_mismatch_10s",
+    "direction_mismatch_30s",
+}
+
 
 async def _load_from_db():
     """Load all resolved markets and ticks from database."""
@@ -27,15 +62,18 @@ async def _load_from_db():
             SELECT market_id, market_type, started_at, ended_at, final_outcome
             FROM market_outcomes
             WHERE resolved = TRUE
-              AND final_outcome IN ('Up', 'Down')
+              AND UPPER(final_outcome) IN ('UP', 'DOWN')
             ORDER BY started_at
         """)
 
         markets_raw = [dict(r) for r in market_rows]
+        for market in markets_raw:
+            outcome = (market.get("final_outcome") or "").upper()
+            market["final_outcome"] = "Up" if outcome == "UP" else "Down"
         print(f"  Found {len(markets_raw)} resolved markets")
 
         if not markets_raw:
-            return []
+            return [], defaultdict(list), defaultdict(list)
 
         market_ids = [m['market_id'] for m in markets_raw]
 
@@ -56,10 +94,90 @@ async def _load_from_db():
 
         print(f"  Loaded {len(tick_rows)} ticks across {len(ticks_by_market)} markets")
 
+        feature_rows_by_market = defaultdict(list)
+        feature_table_exists = await conn.fetchval(
+            "SELECT to_regclass('public.market_crypto_features_1s') IS NOT NULL;"
+        )
+
+        if feature_table_exists:
+            print("Loading aligned crypto features...")
+            feature_columns_sql = ", ".join(CRYPTO_FEATURE_COLUMNS)
+            feature_rows = await conn.fetch(
+                f"""
+                SELECT market_id, elapsed_second, {feature_columns_sql}
+                FROM market_crypto_features_1s
+                WHERE market_id = ANY($1)
+                ORDER BY market_id, elapsed_second
+                """,
+                market_ids,
+            )
+
+            for row in feature_rows:
+                feature_rows_by_market[row["market_id"]].append(dict(row))
+
+            print(
+                f"  Loaded {len(feature_rows)} feature rows across "
+                f"{len(feature_rows_by_market)} markets"
+            )
+
     finally:
         await conn.close()
 
-    return markets_raw, ticks_by_market
+    return markets_raw, ticks_by_market, feature_rows_by_market
+
+
+def _build_feature_series(feature_rows, total_seconds):
+    if not feature_rows:
+        return {}
+
+    feature_series = {
+        column: np.full(total_seconds, np.nan)
+        for column in CRYPTO_FEATURE_COLUMNS
+    }
+
+    for row in feature_rows:
+        second = int(row["elapsed_second"])
+        if second < 0 or second >= total_seconds:
+            continue
+
+        for column in CRYPTO_FEATURE_COLUMNS:
+            value = row.get(column)
+            if value is None:
+                continue
+            if column in BOOL_FEATURE_COLUMNS:
+                feature_series[column][second] = 1.0 if value else 0.0
+            else:
+                feature_series[column][second] = float(value)
+
+    return feature_series
+
+
+def _annotate_streak_metadata(markets):
+    streak_state = {}
+    resolved_markets = sorted(markets, key=lambda m: m['ended_at'] or m['started_at'])
+    resolved_idx = 0
+
+    for market in sorted(markets, key=lambda m: m['started_at']):
+        market_start = market['started_at']
+
+        while resolved_idx < len(resolved_markets):
+            resolved_market = resolved_markets[resolved_idx]
+            resolved_time = resolved_market['ended_at'] or resolved_market['started_at']
+            if resolved_time is None or resolved_time > market_start:
+                break
+
+            market_type = resolved_market['market_type']
+            outcome = resolved_market['final_outcome']
+            prior_direction, prior_length = streak_state.get(market_type, (None, 0))
+            if outcome == prior_direction:
+                streak_state[market_type] = (outcome, prior_length + 1)
+            else:
+                streak_state[market_type] = (outcome, 1)
+            resolved_idx += 1
+
+        prior_direction, prior_length = streak_state.get(market['market_type'], (None, 0))
+        market['prior_market_type_streak_direction'] = prior_direction
+        market['prior_market_type_streak_length'] = prior_length
 
 
 def load_all_data():
@@ -70,7 +188,7 @@ def load_all_data():
       - started_at, ended_at, final_outcome, hour
       - ticks: numpy array indexed by second (NaN for missing)
     """
-    markets_raw, ticks_by_market = asyncio.run(_load_from_db())
+    markets_raw, ticks_by_market, feature_rows_by_market = asyncio.run(_load_from_db())
 
     if not markets_raw:
         print("No resolved markets found.")
@@ -83,10 +201,19 @@ def load_all_data():
         if len(raw_ticks) < 10:
             continue
 
-        market_type = m['market_type']
+        market_type = m.get('market_type')
+        if not market_type or '_' not in market_type:
+            continue
+
         parts = market_type.split('_')
+        if len(parts) != 2:
+            continue
+
         asset = parts[0]
-        duration_minutes = int(parts[1].replace('m', ''))
+        try:
+            duration_minutes = int(parts[1].replace('m', ''))
+        except ValueError:
+            continue
         total_seconds = duration_minutes * 60
 
         # Build tick array indexed by elapsed second
@@ -108,7 +235,13 @@ def load_all_data():
             'final_outcome': m['final_outcome'],
             'hour': started_at.hour,
             'prices': tick_array,
+            'feature_series': _build_feature_series(
+                feature_rows_by_market.get(mid, []),
+                total_seconds,
+            ),
         })
+
+    _annotate_streak_metadata(markets)
 
     print(f"Processed {len(markets)} markets with sufficient tick data")
 

@@ -46,21 +46,19 @@ def ticks_to_snapshot(market: MarketInfo, ticks: list[Tick]) -> MarketSnapshot:
     """Convert live ticks to a :class:`MarketSnapshot`.
 
     In live context, ``elapsed_seconds`` reflects real elapsed time since
-    market start — *not* ``total_seconds``.  This is the key difference from
-    the backtest adapter in S02, where ``elapsed_seconds == total_seconds``
-    because the full price series is available.
+    market start — *not* ``total_seconds``.
 
-    ``prices`` is a numpy array indexed by elapsed second, with ``NaN`` for
-    seconds without tick data.  Multiple ticks in the same second use
-    last-write-wins.
+    ``prices`` contains only the history available so far, indexed by elapsed
+    second, with ``NaN`` for seconds without tick data. Multiple ticks in the
+    same second use last-write-wins.
     """
     total_seconds = int((market.ended_at - market.started_at).total_seconds())
     elapsed_seconds = (datetime.now(timezone.utc) - market.started_at).total_seconds()
-
-    prices = np.full(total_seconds, np.nan)
+    current_second = max(0, min(total_seconds - 1, int(elapsed_seconds)))
+    prices = np.full(current_second + 1, np.nan)
     for tick in ticks:
         second = int((tick.time - market.started_at).total_seconds())
-        if 0 <= second < total_seconds:
+        if 0 <= second <= current_second:
             prices[second] = tick.up_price  # last-write-wins for same second
 
     return MarketSnapshot(
@@ -68,7 +66,7 @@ def ticks_to_snapshot(market: MarketInfo, ticks: list[Tick]) -> MarketSnapshot:
         market_type=market.market_type,
         prices=prices,
         total_seconds=total_seconds,
-        elapsed_seconds=elapsed_seconds,
+        elapsed_seconds=current_second,
         metadata={"started_at": market.started_at},
     )
 
