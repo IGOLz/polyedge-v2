@@ -1,0 +1,2 @@
+config_id,total_bets,wins,losses,win_rate_pct,total_pnl,avg_bet_pnl,profit_factor,expected_value,sharpe_ratio,sortino_ratio,max_drawdown,std_dev_pnl,pct_profitable_assets,pct_profitable_durations,consistency_score,q1_pnl,q2_pnl,q3_pnl,q4_pnl,ranking_score
+S1,5929,2126,3803,35.86,-65.238,-0.011003,0.9522,-0.011003,-0.0235,-0.1719,85.4739,0.469136,0.0,0.0,99.49,-42.2704,-31.1006,13.2826,-5.1496,57.42

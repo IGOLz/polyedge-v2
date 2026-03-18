@@ -1,0 +1,48 @@
+TOP 10 CONFIGURATIONS - shared_strategies
+====================================================================================================
+
+Rank 1:
+  config_id: S1
+  total_bets: 5929
+  wins: 2126
+  losses: 3803
+  win_rate_pct: 35.86
+  total_pnl: -65.238
+  avg_bet_pnl: -0.011003
+  profit_factor: 0.9522
+  expected_value: -0.011003
+  sharpe_ratio: -0.0235
+  sortino_ratio: -0.1719
+  max_drawdown: 85.4739
+  std_dev_pnl: 0.469136
+  pct_profitable_assets: 0.0
+  pct_profitable_durations: 0.0
+  consistency_score: 99.49
+  q1_pnl: -42.2704
+  q2_pnl: -31.1006
+  q3_pnl: 13.2826
+  q4_pnl: -5.1496
+  ranking_score: 57.42
+
+  Sample trades:
+    0x2195502c81df74.. s= 30 dir=Down entry=0.380 res=Up   pnl=-0.3800
+    0x63ea28131cc717.. s= 42 dir=Down entry=0.400 res=Up   pnl=-0.4000
+    0xc54b84803f582c.. s= 30 dir=Down entry=0.380 res=Up   pnl=-0.3800
+    0xe272da5cd6c35b.. s= 34 dir=Down entry=0.410 res=Up   pnl=-0.4100
+    0xb35a3173dc02a5.. s= 30 dir=Down entry=0.390 res=Up   pnl=-0.3900
+    0xf4fcbdc6900ac1.. s= 46 dir=Down entry=0.410 res=Down pnl=+0.5748
+    0x18d0bc3ba198d2.. s= 30 dir=Down entry=0.400 res=Up   pnl=-0.4000
+    0x4223fc294904ef.. s= 35 dir=Down entry=0.410 res=Up   pnl=-0.4100
+    0xf09e370d8e665c.. s= 30 dir=Up   entry=0.380 res=Up   pnl=+0.6052
+    0x88579b6c361419.. s= 32 dir=Down entry=0.410 res=Up   pnl=-0.4100
+    0x70007a7743b990.. s= 42 dir=Down entry=0.400 res=Up   pnl=-0.4000
+    0xedf76061043bd6.. s= 40 dir=Down entry=0.400 res=Up   pnl=-0.4000
+    0x1affe31d067c92.. s= 36 dir=Down entry=0.390 res=Up   pnl=-0.3900
+    0xea278df5a03213.. s= 37 dir=Down entry=0.400 res=Up   pnl=-0.4000
+    0x0b8b4277c3c3db.. s= 30 dir=Down entry=0.370 res=Up   pnl=-0.3700
+    0xcfb951c40e9647.. s= 36 dir=Up   entry=0.420 res=Up   pnl=+0.5647
+    0xca32bdbe8d36c2.. s= 56 dir=Down entry=0.410 res=Up   pnl=-0.4100
+    0xbf7c7b9da85bb0.. s= 33 dir=Up   entry=0.410 res=Up   pnl=+0.5748
+    0xa1d2ed1a8c1f5f.. s= 30 dir=Down entry=0.370 res=Down pnl=+0.6153
+    0x8c3d5feb1d6dec.. s= 37 dir=Up   entry=0.380 res=Down pnl=-0.3800
+

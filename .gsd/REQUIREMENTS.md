@@ -274,6 +274,96 @@ This file is the explicit capability and coverage contract for the project.
 | R020 | core-capability | validated | M003/S03 | none | M003 |
 | R021 | core-capability | validated | M003/S03 | none | M003 |
 | R022 | quality-attribute | validated | M003/S02 | M003/S04 | M003 |
+| R023 | core-capability | active | M004/S01 | none | unmapped |
+| R024 | core-capability | active | M004/S01 | M004/S02 | unmapped |
+| R025 | core-capability | active | M004/S02 | M004/S03, M004/S04 | unmapped |
+| R026 | primary-user-loop | active | M004/S03 | none | unmapped |
+| R027 | operability | active | M004/S04 | none | unmapped |
+| R028 | operability | active | M004/S04 | none | unmapped |
+| R029 | core-capability | active | M004/S01 | none | unmapped |
+| R030 | operability | active | M004/S01 | none | unmapped |
+| R031 | operability | active | M004/S04 | M004/S02 | unmapped |
+| R032 | quality-attribute | deferred | none | none | unmapped |
+| R033 | constraint | out-of-scope | none | none | n/a |
+
+## Coverage Summary
+
+- Active requirements: 21
+- Validated requirements: 9
+- Deferred requirements: 1
+- Out of scope: 2
+- Mapped to slices: 30
+- Unmapped active requirements: 9
+- **Why:** User needs to understand which trades exited early and why
+- **Source:** inferred
+- **Primary Owner:** M004/S04
+- **Supporting Slices:** M004/S02
+- **Validation:** unmapped
+- **Notes:** —
+
+## Deferred
+
+### R032: Trailing stop loss (dynamic SL that moves with profit)
+
+- **Class:** quality-attribute
+- **Status:** deferred
+- **Why:** More sophisticated exit logic; defer until fixed SL/TP proves useful
+- **Source:** research
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** unmapped
+- **Notes:** May be valuable for momentum strategies; revisit after M004 results
+
+## Out of Scope
+
+### R013: The actual M3/M4/momentum/etc. strategy parameters and logic will be rewritten in the future; this milestone only ports them as-is to prove the framework
+
+- **Class:** constraint
+- **Status:** out-of-scope
+- **Why:** Prevents scope creep — we're building the framework, not optimizing strategies
+- **Source:** user
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** n/a
+- **Notes:** Strategies ported are disposable first tenants of the new framework. Superseded by M003 which replaces them with real strategies.
+
+### R033: Live trading bot integration of SL/TP (this milestone is backtest-only)
+
+- **Class:** constraint
+- **Status:** out-of-scope
+- **Why:** Milestone scope is backtest analysis only; live trading integration is a future milestone
+- **Source:** inferred
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** n/a
+- **Notes:** After M004 proves SL/TP works in backtest, a future milestone will integrate into trading bot
+
+## Traceability
+
+| ID | Class | Status | Primary owner | Supporting | Proof |
+|---|---|---|---|---|---|
+| R001 | core-capability | active | M001/S01 | M001/S02, M001/S03 | unmapped |
+| R002 | core-capability | active | M001/S01 | M003/S01 | unmapped |
+| R003 | core-capability | active | M001/S01 | M001/S02, M001/S03 | unmapped |
+| R004 | core-capability | active | M001/S01 | none | unmapped |
+| R005 | primary-user-loop | active | M001/S02 | M003/S03 | unmapped |
+| R006 | primary-user-loop | active | M001/S03 | none | unmapped |
+| R007 | quality-attribute | active | M001/S04 | none | unmapped |
+| R008 | core-capability | active | M001/S01 | M003/S01 | unmapped |
+| R009 | constraint | active | — | M001/S03 | unmapped |
+| R010 | constraint | active | — | none | unmapped |
+| R011 | operability | active | M001/S05 | M003/S01 | unmapped |
+| R012 | differentiator | active | M001/S05 | M001/S02 | unmapped |
+| R013 | constraint | out-of-scope | none | none | n/a |
+| R014 | core-capability | validated | M003/S01 | M003/S03 | M003 |
+| R015 | core-capability | validated | M003/S01 | none | M003 |
+| R016 | quality-attribute | validated | M003/S02 | none | M003 |
+| R017 | quality-attribute | validated | M003/S02 | none | M003 |
+| R018 | primary-user-loop | validated | M003/S03 | M003/S04 | M003 |
+| R019 | operability | validated | M003/S04 | none | M003 |
+| R020 | core-capability | validated | M003/S03 | none | M003 |
+| R021 | core-capability | validated | M003/S03 | none | M003 |
+| R022 | quality-attribute | validated | M003/S02 | M003/S04 | M003 |
 
 ## Coverage Summary
 
