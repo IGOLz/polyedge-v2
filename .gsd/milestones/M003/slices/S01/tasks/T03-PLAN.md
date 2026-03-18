@@ -56,3 +56,22 @@ This proves the scaffolding works end-to-end and satisfies the slice's demo: run
 - `scripts/verify_s01_scaffolding.sh` — comprehensive verification script
 - Script execution output showing all checks pass
 - Proof that the slice's demo is true: registry discovers all 7 strategies, each can be instantiated, and evaluate returns None
+
+## Observability Impact
+
+**New Signals Created:**
+- **Verification script exit code** — `scripts/verify_s01_scaffolding.sh` returns 0 on success, non-zero on failure; becomes the authoritative slice health check
+- **Structured check output** — each verification step prints PASS/FAIL with diagnostic context (expected vs actual counts, missing files, registry discovery results)
+- **Registry discovery evidence** — script output shows the discovered strategy IDs and count, proving the scaffolding is registry-compatible
+
+**How to Inspect:**
+- **Run verification**: `bash scripts/verify_s01_scaffolding.sh` from working directory — green PASS messages confirm success, red FAIL messages identify the broken component
+- **Individual checks**: script is modular; comment out sections to isolate failures
+- **Manual spot-check**: `python -c "from shared.strategies.registry import discover_strategies; print(sorted(discover_strategies().keys()))"` shows registry state without running full suite
+
+**Failure Visibility:**
+- **Missing script**: `test -x scripts/verify_s01_scaffolding.sh` fails
+- **Partial scaffolding**: script prints "FAIL: Expected 8 strategies, found N" with list of discovered IDs
+- **Import crash**: script Python blocks fail with traceback, revealing the broken strategy folder
+- **Metadata mismatch**: script prints "FAIL: S3 strategy_id is 'wrong_value', expected 'S3_reversion'"
+- **Stub regression**: script detects non-None evaluate return, indicating someone added logic prematurely

@@ -72,7 +72,7 @@
   - Verify: `for i in {1..7}; do test -d src/shared/strategies/S$i && test -f src/shared/strategies/S$i/strategy.py || exit 1; done`
   - Done when: 7 new strategy folders exist, each with `__init__.py`, `config.py`, `strategy.py` containing correctly named classes and IDs from the naming map
 
-- [ ] **T03: Write verification script and prove registry discovery** `est:25m`
+- [x] **T03: Write verification script and prove registry discovery** `est:25m`
   - Why: Deliver the slice's verification contract and prove the scaffolding works end-to-end
   - Files: `scripts/verify_s01_scaffolding.sh`
   - Do: Write bash script implementing all checks from the Verification section above. Check folder deletion, TEMPLATE updates, new folder existence, registry discovery (Python snippet calling `discover_strategies()` and checking for all 7 + TEMPLATE), and instantiation (Python snippet calling `get_strategy('S1')` through `get_strategy('S7')` and asserting correct IDs). Script exits 0 only if all checks pass. Run the script and fix any failures.
