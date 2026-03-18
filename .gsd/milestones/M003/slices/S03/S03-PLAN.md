@@ -127,7 +127,7 @@ Database-dependent full backtests deferred to S04 or user verification (worktree
   - Verify: Test on synthetic data with manufactured streaks (price rising for 4 consecutive windows); verify signal generated on 5th window
   - Done when: S6 detects intra-market streaks correctly; returns None when insufficient data or no streak detected; parameter grid returns 20-40 combinations
 
-- [ ] **T04: Implement S7 (Composite Ensemble) with inline multi-pattern detection** `est:1h`
+- [x] **T04: Implement S7 (Composite Ensemble) with inline multi-pattern detection** `est:1h`
   - Why: Last strategy, most architecturally complex; depends on understanding patterns from S1-S6
   - Files: `src/shared/strategies/S7/config.py`, `src/shared/strategies/S7/strategy.py`
   - Do:
