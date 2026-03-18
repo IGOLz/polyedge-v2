@@ -18,6 +18,8 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M004 complete.** Parameter Grid Optimization with Stop Loss & Take Profit — transformed backtesting from fixed-parameter testing to exhaustive grid search with stop loss and take profit as universal exit parameters. All 7 strategies (S1-S7) now declare SL/TP parameter ranges in their config grids (3 values each, creating 9× multiplier on existing grid dimensions). Engine scans prices second-by-second with direction-specific threshold logic (Up: SL when price ≤ stop_loss, TP when price ≥ take_profit; Down: inverted thresholds). Trade dataclass extended with exit_reason field ('sl', 'tp', 'resolution'). Grid search orchestrator uses dataclass introspection to split parameter dicts and thread exit params through run_strategy() to make_trade(). Console and CSV output display explicit SL/TP values for all ranked combinations. Grid sizes range 648-1728 combinations per strategy. Verification script with 7 automated checks proves end-to-end integration. All 9 requirements (R023-R031) validated.
 
+**M005 in progress.** Optimization Overhaul — expanding parameter grids from ~1000 to millions of combinations per strategy, adding multiprocessing parallelization, trailing stop loss, ROI metric, rich Markdown reports, Windows encoding fixes, and CLI documentation.
+
 ### What M001 Delivered
 
 - **Shared strategy package** (`shared/strategies/`): base types (StrategyConfig, MarketSnapshot, Signal, BaseStrategy), folder-based auto-discovery registry, S1 (spike reversion), S2 (volatility), and TEMPLATE skeleton.
@@ -42,34 +44,34 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 **S03 (Strategy Implementations):** All 7 strategies implemented with real signal detection:
 - **S1 Calibration:** Exploits systematic mispricing near 50/50 prices (108 combinations)
 - **S2 Momentum:** Detects directional velocity in first 30-60 seconds, fades strong moves (72 combinations)
-- **S3 Mean Reversion:** Two-phase spike → reversion detection (144 combinations)
+- **S3 Mean Reversion:** Two-phase spike detection then reversion detection (144 combinations)
 - **S4 Volatility Regime:** Enters contrarian under high volatility + extreme price (108 combinations)
 - **S5 Time-Phase Entry:** Filters by elapsed time and hour-of-day (108 combinations)
 - **S6 Streak/Sequence:** Intra-market consecutive price move detection (72 combinations)
 - **S7 Composite Ensemble:** Voting across patterns, enters on consensus (192 combinations)
 
-**S04 (Operator Playbook + Verification):** 1189-line playbook with per-strategy documentation, 18 metrics with formulas and thresholds, 6-threshold Go/No-Go framework (total_pnl > 0, sharpe_ratio > 1.0, profit_factor > 1.2, win_rate > 52%, max_drawdown < 50% of total_pnl, consistency_score > 60), CLI reference, parameter optimization guide, troubleshooting for 6 failure modes, M003 milestone verification script with 8 check categories proving all deliverables integrate correctly.
+**S04 (Operator Playbook + Verification):** 1189-line playbook with per-strategy documentation, 18 metrics with formulas and thresholds, 6-threshold Go/No-Go framework, CLI reference, parameter optimization guide, troubleshooting for 6 failure modes, M003 milestone verification script with 8 check categories.
 
 ### What M004 Delivered
 
-**S01 (Parameter Grid Foundation):** All 7 strategies (S1-S7) plus TEMPLATE declare stop_loss and take_profit parameter ranges in `get_param_grid()`. Each strategy has 3 SL and 3 TP absolute price thresholds (9× multiplier on existing grid dimensions). Strategy-specific ranges tuned to typical entry prices per D013 (e.g., S1 entry 0.45-0.55 → SL [0.35, 0.40, 0.45], TP [0.65, 0.70, 0.75]). Grid sizes range 648-1728 combinations per strategy. TEMPLATE updated with working example and documented absolute price threshold semantics. Verification script proves all grids include SL/TP.
+**S01 (Parameter Grid Foundation):** All 7 strategies (S1-S7) plus TEMPLATE declare stop_loss and take_profit parameter ranges in `get_param_grid()`. Strategy-specific ranges tuned to typical entry prices per D013. Grid sizes range 648-1728 combinations per strategy.
 
-**S02 (Stop Loss & Take Profit Engine):** Implemented `simulate_sl_tp_exit()` function that scans prices second-by-second with direction-specific thresholds (Up: SL when price ≤ stop_loss, TP when price ≥ take_profit; Down: inverted thresholds per D012). Trade dataclass extended with `exit_reason: str` field ('sl', 'tp', 'resolution'). Integrated with `make_trade()` via keyword-only stop_loss and take_profit parameters. Fixed direction-agnostic PnL bug by adding direction parameter to `calculate_pnl_exit()`. 13 comprehensive unit tests cover Up/Down × SL/TP/resolution matrix, NaN handling, and PnL correctness.
+**S02 (Stop Loss & Take Profit Engine):** `simulate_sl_tp_exit()` function scanning prices second-by-second with direction-specific thresholds. Trade dataclass extended with `exit_reason` field. 13 comprehensive unit tests.
 
-**S03 (Grid Search Orchestrator):** Extended optimize.py to use dataclass introspection for separating config fields from exit params (stop_loss, take_profit). Split parameter dicts in optimization loop and thread exit_params through run_strategy() to make_trade(). Augmented metrics dict with SL/TP values. Full Cartesian product grid search includes SL/TP dimensions (972 combinations for S1). Results CSV includes stop_loss and take_profit columns. Dry-run mode lists identified exit parameters.
+**S03 (Grid Search Orchestrator):** Extended optimize.py with dataclass introspection for separating config fields from exit params. Full Cartesian product grid search includes SL/TP dimensions.
 
-**S04 (Exit Simulation Fix & Output Display):** Fixed market dict key mismatch (data loader now returns 'prices', not 'ticks'). SL/TP simulation now runs during backtest with diverse exit reasons (32 SL exits, 1 TP exit on 50-market sample). Enhanced console top 10 summary to display explicit SL/TP values alongside metrics (format: `SL=0.40, TP=0.75`).
+**S04 (Exit Simulation Fix & Output Display):** Fixed market dict key mismatch. Enhanced console top 10 summary with explicit SL/TP values.
 
-**S05 (Integration Verification):** Built comprehensive verification script (`verify_m004_milestone.sh`) with 7 automated checks: strategy grids include SL/TP, dry-run shows 972 combinations, full optimization produces CSV, CSV has ≥100 rows with SL/TP columns in expected ranges, console displays SL/TP for top 10, exit reason diversity verified programmatically, all 8 strategies import without errors. All checks pass (exit 0).
+**S05 (Integration Verification):** Comprehensive verification script with 7 automated checks.
 
 ### Full Strategy Lifecycle
 
-Create from TEMPLATE → implement evaluate() → add get_param_grid() → backtest with `python3 -m analysis.backtest_strategies` → optimize with `python3 -m analysis.optimize` → deploy to live trading → compare `reports/backtest/S1.json` vs `reports/live/S1.json`.
+Create from TEMPLATE -> implement evaluate() -> add get_param_grid() -> backtest with `python3 -m analysis.backtest_strategies` -> optimize with `python3 -m analysis.optimize` -> deploy to live trading -> compare `reports/backtest/S1.json` vs `reports/live/S1.json`.
 
 ## Architecture / Key Patterns
 
 - `src/shared/` — config, asyncpg pool, models, API, WebSocket, HTTP helpers
-- `src/shared/strategies/` — base classes, registry, report model, S1–S7 strategies, TEMPLATE (folder-per-strategy auto-discovery)
+- `src/shared/strategies/` — base classes, registry, report model, S1-S7 strategies, TEMPLATE (folder-per-strategy auto-discovery)
 - `src/core/` — market discovery, WS listener, tick recording, resolution polling (never touch)
 - `src/analysis/` — backtest engine (with dynamic fees + slippage), data loader, strategy backtests, optimizer (psycopg2/pandas)
 - `src/trading/` — bot main loop, strategy evaluation via shared adapter, order execution, redemption, report generation (async)
@@ -102,3 +104,4 @@ bash scripts/verify_m004_milestone.sh                   # 7 checks — M004 comp
 - [x] M002: Unified Strategy Reports — both backtest and live trading produce per-strategy reports in identical JSON + Markdown format
 - [x] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 7 real prediction market strategies, upgrade engine with dynamic fees + slippage
 - [x] M004: Parameter Grid Optimization with Stop Loss & Take Profit — transform backtesting from fixed-parameter testing to exhaustive grid search across parameter combinations with SL/TP as universal exit parameters
+- [ ] M005: Optimization Overhaul — expand grids to millions of combos, multiprocessing, trailing SL, rich reports, Windows compat, CLI docs
