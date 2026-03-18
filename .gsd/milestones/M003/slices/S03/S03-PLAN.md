@@ -102,7 +102,7 @@ Database-dependent full backtests deferred to S04 or user verification (worktree
     Repeat for S2, S3.
   - Done when: All three strategies have real evaluate() implementations that handle synthetic price patterns without crashing; parameter grids return 10-50 combinations; imports work; spot-check evaluation returns None or valid Signal
 
-- [ ] **T02: Implement S4 (Volatility Regime), S5 (Time-Phase Entry)** `est:1h`
+- [x] **T02: Implement S4 (Volatility Regime), S5 (Time-Phase Entry)** `est:1h`
   - Why: These have partial references in modules; simplified standalone versions prove statistical calculation patterns work with MarketSnapshot
   - Files: `src/shared/strategies/S4/config.py`, `src/shared/strategies/S4/strategy.py`, `src/shared/strategies/S5/config.py`, `src/shared/strategies/S5/strategy.py`
   - Do:

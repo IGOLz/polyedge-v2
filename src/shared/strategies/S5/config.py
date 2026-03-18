@@ -12,20 +12,26 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S5Config(StrategyConfig):
-    """Configuration for a new strategy.
+    """Configuration for S5 (Time-Phase Entry) strategy.
 
-    TODO: Rename this class to ``S<N>Config`` (e.g. ``S3Config``).
-    TODO: Replace the example fields below with your strategy's parameters.
+    Enter when current time falls within allowed window AND price is in target range.
+    Exploits patterns where certain time phases have better entry success.
     """
 
-    # Example: price threshold for entry filter
-    example_threshold: float = 0.50
+    # Entry window start time (seconds since market start)
+    entry_window_start: int = 60
 
-    # Example: rolling window size in seconds
-    example_window_seconds: int = 30
+    # Entry window end time (seconds since market start)
+    entry_window_end: int = 180
 
-    # Example: minimum spread to consider
-    example_min_spread: float = 0.05
+    # Optional hour-of-day filter (None = all hours allowed)
+    allowed_hours: list[int] | None = None
+
+    # Price range low bound (entry when price in this range)
+    price_range_low: float = 0.45
+
+    # Price range high bound (entry when price in this range)
+    price_range_high: float = 0.55
 
 
 def get_default_config() -> S5Config:
@@ -41,19 +47,17 @@ def get_default_config() -> S5Config:
 
 
 def get_param_grid() -> dict[str, list]:
-    """Return grid-search parameter space for this strategy.
+    """Return grid-search parameter space for S5 strategy.
 
     The optimizer generates the Cartesian product of all parameter values
     and backtests every combination.
 
-    Example:
-        return {
-            "example_threshold": [0.30, 0.40, 0.50],
-            "example_window_seconds": [10, 20, 30],
-        }
-
-    Returns:
-        Empty dict (no optimization) — replace with real parameters.
+    Grid size: 3×3×3×2×2 = 108 combinations
     """
-    # TODO: Define parameter ranges in S03
-    return {}
+    return {
+        "entry_window_start": [30, 60, 90],
+        "entry_window_end": [120, 180, 240],
+        "allowed_hours": [None, [10, 11, 12, 13, 14, 15], [14, 15, 16, 17, 18]],
+        "price_range_low": [0.40, 0.45],
+        "price_range_high": [0.55, 0.60],
+    }
