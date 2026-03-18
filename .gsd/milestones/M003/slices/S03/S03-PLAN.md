@@ -114,7 +114,7 @@ Database-dependent full backtests deferred to S04 or user verification (worktree
   - Verify: Same pattern as T01 — spot-check with synthetic data, verify parameter grids, confirm imports work
   - Done when: S4 and S5 have real evaluate() implementations; parameter grids return meaningful combinations; strategies handle edge cases (flat prices, NaN-heavy data, out-of-window eval_second)
 
-- [ ] **T03: Implement S6 (Streak/Sequence) simplified intra-market version** `est:45m`
+- [x] **T03: Implement S6 (Streak/Sequence) simplified intra-market version** `est:45m`
   - Why: Original streak strategy requires cross-market state; this proves edge-case detection patterns work within pure function constraints
   - Files: `src/shared/strategies/S6/config.py`, `src/shared/strategies/S6/strategy.py`
   - Do:

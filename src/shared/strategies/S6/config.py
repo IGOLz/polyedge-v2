@@ -1,8 +1,7 @@
-"""TEMPLATE strategy configuration — copy and customize for new strategies.
+"""S6 strategy configuration — Streak/Sequence detection parameters.
 
-Rename this module's class and replace the example fields with your strategy's
-real parameters.  Keep ``get_default_config()`` returning an instance with
-sensible production defaults.
+Detects consecutive same-direction price moves within a single market
+and enters contrarian when streak length reaches threshold.
 """
 
 from dataclasses import dataclass
@@ -12,28 +11,27 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S6Config(StrategyConfig):
-    """Configuration for a new strategy.
+    """Configuration for S6 Streak/Sequence strategy.
 
-    TODO: Rename this class to ``S<N>Config`` (e.g. ``S3Config``).
-    TODO: Replace the example fields below with your strategy's parameters.
+    Detects consecutive same-direction price moves within a single market
+    and enters contrarian when streak length reaches threshold.
     """
 
-    # Example: price threshold for entry filter
-    example_threshold: float = 0.50
+    # Size of each time window in seconds
+    window_size: int = 15
 
-    # Example: rolling window size in seconds
-    example_window_seconds: int = 30
+    # Number of consecutive same-direction windows to trigger entry
+    streak_length: int = 3
 
-    # Example: minimum spread to consider
-    example_min_spread: float = 0.05
+    # Minimum price move to classify window direction (not flat)
+    min_move_threshold: float = 0.03
+
+    # Minimum number of windows required before evaluating
+    min_windows: int = 5
 
 
 def get_default_config() -> S6Config:
-    """Return the production-default S6 configuration.
-
-    TODO: Update ``strategy_id`` to your folder name (e.g. ``'S3'``)
-          and ``strategy_name`` to a descriptive slug (e.g. ``'S3_momentum'``).
-    """
+    """Return the production-default S6 configuration."""
     return S6Config(
         strategy_id="S6",
         strategy_name="S6_streak",
@@ -46,14 +44,12 @@ def get_param_grid() -> dict[str, list]:
     The optimizer generates the Cartesian product of all parameter values
     and backtests every combination.
 
-    Example:
-        return {
-            "example_threshold": [0.30, 0.40, 0.50],
-            "example_window_seconds": [10, 20, 30],
-        }
-
     Returns:
-        Empty dict (no optimization) — replace with real parameters.
+        4 × 3 × 3 × 2 = 72 parameter combinations
     """
-    # TODO: Define parameter ranges in S03
-    return {}
+    return {
+        "window_size": [10, 15, 20, 30],
+        "streak_length": [3, 4, 5],
+        "min_move_threshold": [0.02, 0.03, 0.05],
+        "min_windows": [4, 5],
+    }
