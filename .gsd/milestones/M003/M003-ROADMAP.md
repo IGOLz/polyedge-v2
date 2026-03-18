@@ -56,7 +56,7 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Clean slate + strategy scaffolding** `risk:low` `depends:[]`
+- [x] **S01: Clean slate + strategy scaffolding** `risk:low` `depends:[]`
   > After this: Old S1/S2 deleted, TEMPLATE updated, 7 empty strategy folders with config stubs and `__init__.py` created. Registry discovers all 7 (with no-op evaluate returning None).
 
 - [ ] **S02: Engine upgrades — dynamic fees + slippage** `risk:medium` `depends:[]`
