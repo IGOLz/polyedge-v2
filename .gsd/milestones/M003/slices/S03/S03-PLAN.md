@@ -74,7 +74,7 @@ Database-dependent full backtests deferred to S04 or user verification (worktree
 
 ## Tasks
 
-- [ ] **T01: Implement S1 (Calibration), S2 (Momentum), S3 (Mean Reversion)** `est:2h`
+- [x] **T01: Implement S1 (Calibration), S2 (Momentum), S3 (Mean Reversion)** `est:2h`
   - Why: These three have complete reference implementations and are foundational patterns; proves the evaluate() → Signal → Trade pipeline works with real detection logic
   - Files: `src/shared/strategies/S1/config.py`, `src/shared/strategies/S1/strategy.py`, `src/shared/strategies/S2/config.py`, `src/shared/strategies/S2/strategy.py`, `src/shared/strategies/S3/config.py`, `src/shared/strategies/S3/strategy.py`
   - Do:

@@ -12,20 +12,19 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S3Config(StrategyConfig):
-    """Configuration for a new strategy.
-
-    TODO: Rename this class to ``S<N>Config`` (e.g. ``S3Config``).
-    TODO: Replace the example fields below with your strategy's parameters.
+    """Configuration for S3 Mean Reversion strategy.
+    
+    Detect early price spikes, wait for partial reversion,
+    then enter contrarian bet on continued reversion to balanced price.
     """
 
-    # Example: price threshold for entry filter
-    example_threshold: float = 0.50
-
-    # Example: rolling window size in seconds
-    example_window_seconds: int = 30
-
-    # Example: minimum spread to consider
-    example_min_spread: float = 0.05
+    # Spike detection parameters
+    spike_threshold: float = 0.75  # price threshold for spike detection
+    spike_lookback: int = 30  # seconds to scan for spike
+    
+    # Reversion detection parameters
+    reversion_pct: float = 0.10  # fraction of peak-to-balanced to revert
+    min_reversion_sec: int = 60  # seconds after peak to scan for reversion
 
 
 def get_default_config() -> S3Config:
@@ -41,19 +40,16 @@ def get_default_config() -> S3Config:
 
 
 def get_param_grid() -> dict[str, list]:
-    """Return grid-search parameter space for this strategy.
+    """Return grid-search parameter space for S3 Mean Reversion strategy.
 
-    The optimizer generates the Cartesian product of all parameter values
-    and backtests every combination.
-
-    Example:
-        return {
-            "example_threshold": [0.30, 0.40, 0.50],
-            "example_window_seconds": [10, 20, 30],
-        }
-
-    Returns:
-        Empty dict (no optimization) — replace with real parameters.
+    Tests various spike thresholds, lookback windows, reversion percentages,
+    and minimum reversion seconds to find optimal mean reversion parameters.
+    
+    Total combinations: 4×3×4×3 = 144
     """
-    # TODO: Define parameter ranges in S03
-    return {}
+    return {
+        "spike_threshold": [0.70, 0.75, 0.80, 0.85],
+        "spike_lookback": [15, 30, 60],
+        "reversion_pct": [0.05, 0.08, 0.10, 0.15],
+        "min_reversion_sec": [30, 60, 120],
+    }

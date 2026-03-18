@@ -12,20 +12,21 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S2Config(StrategyConfig):
-    """Configuration for a new strategy.
-
-    TODO: Rename this class to ``S<N>Config`` (e.g. ``S3Config``).
-    TODO: Replace the example fields below with your strategy's parameters.
+    """Configuration for S2 Momentum strategy.
+    
+    Detect directional velocity between two time points and enter
+    contrarian on strong momentum.
     """
 
-    # Example: price threshold for entry filter
-    example_threshold: float = 0.50
-
-    # Example: rolling window size in seconds
-    example_window_seconds: int = 30
-
-    # Example: minimum spread to consider
-    example_min_spread: float = 0.05
+    # Time window for velocity calculation
+    eval_window_start: int = 30  # seconds (price_30s)
+    eval_window_end: int = 60  # seconds (price_60s)
+    
+    # Minimum absolute velocity to trigger entry
+    momentum_threshold: float = 0.03  # price change per second
+    
+    # Tolerance for NaN-aware price lookup
+    tolerance: int = 10  # seconds
 
 
 def get_default_config() -> S2Config:
@@ -41,19 +42,16 @@ def get_default_config() -> S2Config:
 
 
 def get_param_grid() -> dict[str, list]:
-    """Return grid-search parameter space for this strategy.
+    """Return grid-search parameter space for S2 Momentum strategy.
 
-    The optimizer generates the Cartesian product of all parameter values
-    and backtests every combination.
-
-    Example:
-        return {
-            "example_threshold": [0.30, 0.40, 0.50],
-            "example_window_seconds": [10, 20, 30],
-        }
-
-    Returns:
-        Empty dict (no optimization) — replace with real parameters.
+    Tests various evaluation windows, momentum thresholds, and tolerance
+    to find optimal early momentum detection parameters.
+    
+    Total combinations: 3×3×4×2 = 72
     """
-    # TODO: Define parameter ranges in S03
-    return {}
+    return {
+        "eval_window_start": [25, 30, 35],
+        "eval_window_end": [55, 60, 65],
+        "momentum_threshold": [0.02, 0.03, 0.05, 0.08],
+        "tolerance": [5, 10],
+    }
