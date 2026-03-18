@@ -56,16 +56,16 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Clean slate + strategy scaffolding** `risk:low` `depends:[]`
+- [x] **S01: Clean slate + strategy scaffolding** `risk:low` `depends:[]`
   > After this: Old S1/S2 deleted, TEMPLATE updated, 7 empty strategy folders with config stubs and `__init__.py` created. Registry discovers all 7 (with no-op evaluate returning None).
 
-- [ ] **S02: Engine upgrades — dynamic fees + slippage** `risk:medium` `depends:[]`
+- [x] **S02: Engine upgrades — dynamic fees + slippage** `risk:medium` `depends:[]`
   > After this: `make_trade()` applies Polymarket dynamic fee formula and configurable slippage. Running a backtest with `--slippage 0.01` vs `--slippage 0` produces different PnL. Fee at price=0.50 is higher than fee at price=0.10.
 
-- [ ] **S03: Implement all strategies** `risk:high` `depends:[S01,S02]`
+- [x] **S03: Implement all strategies** `risk:high` `depends:[S01,S02]`
   > After this: Each of 7 strategies has real `evaluate()` logic grounded in prediction market research. `python3 -m analysis.backtest_strategies --strategy S1` runs for each SID and produces trades (or zero trades with explanation in metadata). Reports are generated in `reports/backtest/`.
 
-- [ ] **S04: Operator playbook + verification** `risk:low` `depends:[S03]`
+- [x] **S04: Operator playbook + verification** `risk:low` `depends:[S03]`
   > After this: `src/docs/STRATEGY_PLAYBOOK.md` exists with per-strategy CLI commands, metric definitions, profitability thresholds, and interpretation guide. Verification script passes all checks. User can copy-paste commands and understand results.
 
 ## Boundary Map
