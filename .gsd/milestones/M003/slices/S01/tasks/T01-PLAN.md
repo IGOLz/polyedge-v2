@@ -49,3 +49,21 @@ This establishes the clean baseline that all 7 new strategies will inherit when 
 - `src/shared/strategies/S1/` and `S2/` deleted
 - `src/shared/strategies/TEMPLATE/config.py` updated with `get_param_grid()` function
 - `src/shared/strategies/TEMPLATE/README.md` section 6 updated to make param grid non-optional
+
+## Observability Impact
+
+**Signals Changed:**
+- File system: `src/shared/strategies/S1/` and `S2/` no longer exist — visible via `ls` or `test -d`
+- TEMPLATE config: `get_param_grid()` function now present — inspectable via `grep` or Python import
+- TEMPLATE README: Section 6 title no longer contains "(Optional)" — visible in file content
+
+**Inspection:**
+- Verify deletions: `! test -d src/shared/strategies/S1` and `! test -d src/shared/strategies/S2` (exit 0 if deleted)
+- Verify TEMPLATE function: `grep -q "def get_param_grid" src/shared/strategies/TEMPLATE/config.py` (exit 0 if present)
+- Verify README update: `grep -q "## 6. Add \`get_param_grid()\`" src/shared/strategies/TEMPLATE/README.md` (exit 0 if updated)
+- Manual check: Read `src/shared/strategies/TEMPLATE/config.py` to see full `get_param_grid()` implementation with docstring
+
+**Failure States:**
+- Old strategies not deleted: Directories still exist, verification check fails with exit code 1
+- Missing `get_param_grid()`: Grep fails, Python import of TEMPLATE config won't find the function
+- README not updated: Section 6 still says "(Optional)", future readers may skip param grid definition

@@ -83,10 +83,11 @@ return Signal(
 > backtest adapter's Signal→Trade bridge reads this key first, falling back to
 > `reversion_second` then `0`.
 
-## 6. (Optional) Add `get_param_grid()` for parameter optimization
+## 6. Add `get_param_grid()` for parameter optimization
 
-If you want to use the grid-search optimizer (`python -m analysis.optimize`),
-add a `get_param_grid()` function to your `config.py`:
+All strategies should define a parameter grid for optimization, even if it starts empty.
+
+Add a `get_param_grid()` function to your `config.py`:
 
 ```python
 def get_param_grid() -> dict[str, list]:

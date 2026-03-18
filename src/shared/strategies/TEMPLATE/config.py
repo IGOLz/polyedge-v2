@@ -38,3 +38,21 @@ def get_default_config() -> TemplateConfig:
         strategy_id="TEMPLATE",
         strategy_name="TEMPLATE_strategy",
     )
+
+
+def get_param_grid() -> dict[str, list]:
+    """Return grid-search parameter space for this strategy.
+
+    The optimizer generates the Cartesian product of all parameter values
+    and backtests every combination.
+
+    Example:
+        return {
+            "example_threshold": [0.30, 0.40, 0.50],
+            "example_window_seconds": [10, 20, 30],
+        }
+
+    Returns:
+        Empty dict (no optimization) — replace with real parameters.
+    """
+    return {}

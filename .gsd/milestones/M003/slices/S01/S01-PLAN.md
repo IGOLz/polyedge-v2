@@ -33,9 +33,32 @@
 - New wiring introduced in this slice: none — registry auto-discovery already exists
 - What remains before the milestone is truly usable end-to-end: S02 must add dynamic fees and slippage to the engine; S03 must implement real `evaluate()` logic for all 7 strategies; S04 must write operator playbook
 
+## Observability / Diagnostics
+
+**Runtime Signals:**
+- Registry discovery: `discover_strategies()` output includes strategy IDs and counts — inspect via Python REPL or logging
+- Instantiation: `get_strategy('S1')` returns valid strategy instance with correct `strategy_id` and `strategy_name` attributes
+- Stub behavior: All new strategies' `evaluate()` returns `None` — visible via direct call or engine backtest (no signals generated)
+
+**Inspection Surfaces:**
+- `scripts/verify_s01_scaffolding.sh` — automated verification script that checks folder structure, registry discovery, and instantiation
+- Manual check: `ls src/shared/strategies/` shows 7 new folders (S1-S7) and TEMPLATE, no old S1/S2
+- Python snippet: `from shared.strategies.registry import discover_strategies; print(discover_strategies().keys())` lists all discovered strategies
+- Individual strategy check: `from shared.strategies.registry import get_strategy; s = get_strategy('S1'); print(s.config.strategy_id, s.config.strategy_name)`
+
+**Failure Visibility:**
+- Missing strategy folder: `discover_strategies()` won't include it in returned dict, verification script fails
+- Wrong class name: Registry discovery fails or imports crash with `AttributeError`
+- Wrong strategy ID: Instantiation succeeds but `strategy_id` assertion in verification script fails
+- Missing `get_param_grid()`: `AttributeError` when optimizer tries to access function
+
+**Redaction Constraints:**
+- No sensitive data in this slice — all code is scaffolding and stubs
+- Strategy names are public research descriptions, no proprietary logic until S03
+
 ## Tasks
 
-- [ ] **T01: Delete old strategies and update TEMPLATE** `est:20m`
+- [x] **T01: Delete old strategies and update TEMPLATE** `est:20m`
   - Why: Clear out disposable proof-of-concept strategies and establish the new strategy shape (with param grid) that all new strategies will inherit
   - Files: `src/shared/strategies/S1/`, `src/shared/strategies/S2/`, `src/shared/strategies/TEMPLATE/config.py`, `src/shared/strategies/TEMPLATE/README.md`
   - Do: (1) Delete `S1/` and `S2/` folders entirely. (2) Add `get_param_grid()` skeleton to TEMPLATE config.py returning empty dict with docstring explaining grid-search usage. (3) Update TEMPLATE README.md section 6 to make param grid non-optional and more prominent. Use the exact patterns from S01-RESEARCH.md.
