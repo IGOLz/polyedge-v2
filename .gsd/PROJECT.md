@@ -16,7 +16,7 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M002 complete.** Unified strategy reports — both analysis backtest and live trading produce per-strategy reports in identical JSON + Markdown format via `StrategyReport`.
 
-**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling. S01 complete (scaffolding).
+**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling. S01 complete (scaffolding), S02 complete (engine upgrades).
 
 ### What M001 Delivered
 
@@ -40,6 +40,14 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 - **Registry discovery**: All 8 strategies (TEMPLATE + S1-S7) discovered via auto-discovery, each instantiates with correct metadata.
 - **Stub implementations**: All strategies have `evaluate()` returning None and `get_param_grid()` returning `{}` with TODOs for S03.
 - **Verification script**: `scripts/verify_s01_scaffolding.sh` with 25 checks proving scaffolding correctness.
+
+### What M003/S02 Delivered
+
+- **Dynamic fee formula** (`polymarket_dynamic_fee()`): Implements Polymarket's actual fee structure (`base_rate × min(price, 1-price)`). Fees peak at ~3.15% for 50/50 markets, drop to ~0.63% for confident outcomes. Replaces flat 2% assumption.
+- **Slippage modeling**: `make_trade()` accepts `slippage` parameter, adjusts entry prices before PnL calculation (Up: +slippage, Down: -slippage), clamped to [0.01, 0.99]. Original entry_price stored for reporting.
+- **CLI controls**: `--slippage` and `--fee-base-rate` flags on `backtest_strategies.py` for user control. Defaults: slippage=0.0, base_rate=0.063.
+- **Updated PnL calculations**: Both `calculate_pnl_hold()` and `calculate_pnl_exit()` use dynamic fees based on entry price (fee-on-purchase model).
+- **Backward compatibility break**: Removed `fee_rate` parameter in favor of `base_rate`. Acceptable since M003 replaces all old strategies.
 
 ### Full Strategy Lifecycle
 
