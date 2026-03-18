@@ -16,7 +16,7 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M002 complete.** Unified strategy reports — both analysis backtest and live trading produce per-strategy reports in identical JSON + Markdown format via `StrategyReport`.
 
-**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling. S01 complete (scaffolding), S02 complete (engine upgrades).
+**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling. S01 complete (scaffolding), S02 complete (engine upgrades), S03 complete (all strategies implemented with real detection logic).
 
 ### What M001 Delivered
 
@@ -49,6 +49,14 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 - **Updated PnL calculations**: Both `calculate_pnl_hold()` and `calculate_pnl_exit()` use dynamic fees based on entry price (fee-on-purchase model).
 - **Backward compatibility break**: Removed `fee_rate` parameter in favor of `base_rate`. Acceptable since M003 replaces all old strategies.
 
+### What M003/S03 Delivered
+
+- **7 research-backed strategies with real signal detection**: S1 (calibration mispricing), S2 (early momentum), S3 (mean reversion), S4 (volatility regime), S5 (time-phase entry), S6 (streak/sequence), S7 (composite ensemble).
+- **Parameter grids for optimization**: 72-192 combinations per strategy exploring detection thresholds, entry windows, and strategy-specific tuning parameters.
+- **Shared implementation patterns**: NaN-aware `_get_price()` helper, entry price clamping to [0.01, 0.99], signal_data['entry_second'] for diagnostic visibility, contrarian entry bias.
+- **Comprehensive verification**: `scripts/verify_s03_strategies.sh` validates all 7 strategies across imports, instantiation, parameter grids, synthetic evaluation, signal structure, and edge case handling (100% pass rate).
+- **Registry integration**: All 7 strategies discoverable via `discover_strategies()`, ready for backtest runner integration.
+
 ### Full Strategy Lifecycle
 
 Create from TEMPLATE → implement evaluate() → add get_param_grid() → backtest with `python3 -m analysis.backtest_strategies` → optimize with `python3 -m analysis.optimize` → deploy to live trading → compare `reports/backtest/S1.json` vs `reports/live/S1.json`.
@@ -76,6 +84,7 @@ cd src && PYTHONPATH=. python3 scripts/verify_s03.py    # 18 checks — trading 
 cd src && PYTHONPATH=. python3 scripts/parity_test.py   # 24 checks — signal parity proof
 cd src && PYTHONPATH=. python3 scripts/verify_reports.py # 47 checks — unified reports
 bash scripts/verify_s01_scaffolding.sh                  # 25 checks — M003/S01 strategy scaffolding
+bash scripts/verify_s03_strategies.sh                   # 42 checks — M003/S03 all strategies implemented
 ```
 
 ## Milestone Sequence

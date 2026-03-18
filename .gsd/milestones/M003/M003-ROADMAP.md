@@ -62,7 +62,7 @@ This milestone is complete only when all are true:
 - [x] **S02: Engine upgrades — dynamic fees + slippage** `risk:medium` `depends:[]`
   > After this: `make_trade()` applies Polymarket dynamic fee formula and configurable slippage. Running a backtest with `--slippage 0.01` vs `--slippage 0` produces different PnL. Fee at price=0.50 is higher than fee at price=0.10.
 
-- [ ] **S03: Implement all strategies** `risk:high` `depends:[S01,S02]`
+- [x] **S03: Implement all strategies** `risk:high` `depends:[S01,S02]`
   > After this: Each of 7 strategies has real `evaluate()` logic grounded in prediction market research. `python3 -m analysis.backtest_strategies --strategy S1` runs for each SID and produces trades (or zero trades with explanation in metadata). Reports are generated in `reports/backtest/`.
 
 - [ ] **S04: Operator playbook + verification** `risk:low` `depends:[S03]`
