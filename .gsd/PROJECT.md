@@ -16,7 +16,7 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M002 complete.** Unified strategy reports — both analysis backtest and live trading produce per-strategy reports in identical JSON + Markdown format via `StrategyReport`.
 
-**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling. S01 complete (scaffolding), S02 complete (engine upgrades), S03 complete (all strategies implemented with real detection logic).
+**M003 complete.** Research-backed strategy overhaul — replaced disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, upgraded engine with dynamic Polymarket fees and slippage modeling, delivered operator playbook with 6-threshold deployment framework and comprehensive verification script proving all deliverables integrate correctly.
 
 ### What M001 Delivered
 
@@ -49,13 +49,23 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 - **Updated PnL calculations**: Both `calculate_pnl_hold()` and `calculate_pnl_exit()` use dynamic fees based on entry price (fee-on-purchase model).
 - **Backward compatibility break**: Removed `fee_rate` parameter in favor of `base_rate`. Acceptable since M003 replaces all old strategies.
 
-### What M003/S03 Delivered
+### What M003/S04 Delivered
 
-- **7 research-backed strategies with real signal detection**: S1 (calibration mispricing), S2 (early momentum), S3 (mean reversion), S4 (volatility regime), S5 (time-phase entry), S6 (streak/sequence), S7 (composite ensemble).
-- **Parameter grids for optimization**: 72-192 combinations per strategy exploring detection thresholds, entry windows, and strategy-specific tuning parameters.
-- **Shared implementation patterns**: NaN-aware `_get_price()` helper, entry price clamping to [0.01, 0.99], signal_data['entry_second'] for diagnostic visibility, contrarian entry bias.
-- **Comprehensive verification**: `scripts/verify_s03_strategies.sh` validates all 7 strategies across imports, instantiation, parameter grids, synthetic evaluation, signal structure, and edge case handling (100% pass rate).
-- **Registry integration**: All 7 strategies discoverable via `discover_strategies()`, ready for backtest runner integration.
+- **Comprehensive operator playbook** (`src/docs/STRATEGY_PLAYBOOK.md`): 1189-line reference covering Quick Start, Strategy Reference (all 7 strategies with entry conditions, parameters, grid sizes, behavioral notes), CLI Reference (backtest_strategies.py and optimize.py flags), Metric Interpretation (18 metrics with formulas and thresholds), Go/No-Go Decision Framework (6-threshold criteria for deployment), Parameter Optimization workflow, Troubleshooting (6 failure modes).
+- **6-threshold deployment criteria**: total_pnl > 0, sharpe_ratio > 1.0, profit_factor > 1.2, win_rate_pct > 52%, max_drawdown < 50% of total_pnl, consistency_score > 60. Provides quantitative framework for strategy deployment decisions.
+- **M003 milestone verification script** (`scripts/verify_m003_milestone.sh`): 345-line bash script with 8 check categories (file structure, imports, registry, fee dynamics, slippage, backtest execution, optimizer grids, core immutability), exits 0 on success, 1 with diagnostics on failure, uses synthetic data only (no DB dependency).
+- **Context-aware metric thresholds**: All thresholds calibrated for 5-minute crypto prediction markets with Polymarket dynamic fees and ~1 cent slippage (not generic trading thresholds).
+- **Prerequisite documentation**: Playbook explains DB dependency (real backtests require TimescaleDB data), S06 intra-market limitation, S07 inline duplication, and zero-trade scenarios.
+
+### M003 Complete — What Was Delivered
+
+**S01 (Scaffolding):** 7 new strategy folders (S1-S7) with research-backed naming (calibration, momentum, reversion, volatility, time_phase, streak, composite), updated TEMPLATE with param grid support, registry discovery of all 8 strategies, verification script with 25 checks.
+
+**S02 (Engine Upgrades):** Dynamic Polymarket fee formula (`base_rate × min(price, 1-price)`) peaking at ~3.15% for 50/50 markets, configurable slippage penalty adjusting entry prices, CLI controls (`--slippage`, `--fee-base-rate`), updated PnL calculations using dynamic fees, backward compatibility break (removed flat `fee_rate` parameter).
+
+**S03 (Strategy Implementations):** All 7 strategies implemented with real signal detection (calibration mispricing, early momentum, mean reversion, volatility regime, time-phase entry, streak/sequence, composite ensemble), parameter grids for optimization (72-192 combinations), shared patterns (NaN-aware price lookups, entry price clamping, signal_data diagnostics), comprehensive verification with 42 checks.
+
+**S04 (Operator Playbook + Verification):** 1189-line playbook with per-strategy documentation, 18 metrics with formulas and thresholds, 6-threshold Go/No-Go framework, CLI reference, parameter optimization guide, troubleshooting for 6 failure modes, M003 milestone verification script with 8 check categories proving all deliverables integrate correctly.
 
 ### Full Strategy Lifecycle
 
@@ -85,10 +95,11 @@ cd src && PYTHONPATH=. python3 scripts/parity_test.py   # 24 checks — signal p
 cd src && PYTHONPATH=. python3 scripts/verify_reports.py # 47 checks — unified reports
 bash scripts/verify_s01_scaffolding.sh                  # 25 checks — M003/S01 strategy scaffolding
 bash scripts/verify_s03_strategies.sh                   # 42 checks — M003/S03 all strategies implemented
+bash scripts/verify_m003_milestone.sh                   # 8 checks — M003 complete (file structure, imports, registry, fee dynamics, slippage, backtest execution, optimizer grids, core immutability)
 ```
 
 ## Milestone Sequence
 
 - [x] M001: Unified Strategy Framework — shared strategy definitions consumed identically by analysis (backtest) and trading (live)
 - [x] M002: Unified Strategy Reports — both backtest and live trading produce per-strategy reports in identical JSON + Markdown format
-- [ ] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 7 real prediction market strategies, upgrade engine with dynamic fees + slippage (S01 complete: scaffolding)
+- [x] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 7 real prediction market strategies, upgrade engine with dynamic fees + slippage

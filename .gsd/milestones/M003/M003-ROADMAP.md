@@ -65,7 +65,7 @@ This milestone is complete only when all are true:
 - [x] **S03: Implement all strategies** `risk:high` `depends:[S01,S02]`
   > After this: Each of 7 strategies has real `evaluate()` logic grounded in prediction market research. `python3 -m analysis.backtest_strategies --strategy S1` runs for each SID and produces trades (or zero trades with explanation in metadata). Reports are generated in `reports/backtest/`.
 
-- [ ] **S04: Operator playbook + verification** `risk:low` `depends:[S03]`
+- [x] **S04: Operator playbook + verification** `risk:low` `depends:[S03]`
   > After this: `src/docs/STRATEGY_PLAYBOOK.md` exists with per-strategy CLI commands, metric definitions, profitability thresholds, and interpretation guide. Verification script passes all checks. User can copy-paste commands and understand results.
 
 ## Boundary Map
