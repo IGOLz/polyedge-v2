@@ -139,101 +139,101 @@ This file is the explicit capability and coverage contract for the project.
 ### R014: Each strategy is a self-contained folder in `shared/strategies/` with config, evaluate(), and param grid
 
 - **Class:** core-capability
-- **Status:** active
+- **Status:** validated
 - **Why:** Strategies must be modular and independently testable; param grid enables optimization
 - **Source:** user
 - **Primary Owner:** M003/S01
 - **Supporting Slices:** M003/S03
-- **Validation:** unmapped
-- **Notes:** —
+- **Validation:** M003
+- **Notes:** All 7 strategies exist with config.py (get_default_config + get_param_grid) and strategy.py (evaluate() implementations). Verified by verify_m003_milestone.sh checks 2, 6, 7.
 
 ### R015: Old S1/S2 strategies are deleted; TEMPLATE is updated for new strategy shape
 
 - **Class:** core-capability
-- **Status:** active
+- **Status:** validated
 - **Why:** Clean slate — old strategies were disposable proof-of-concept tenants (D005)
 - **Source:** user
 - **Primary Owner:** M003/S01
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** —
+- **Validation:** M003
+- **Notes:** verify_m003_milestone.sh check 1 proves old nested structure removed, new flat S1-S7 exist. TEMPLATE updated with get_param_grid().
 
 ### R016: Engine models Polymarket dynamic taker fees (not flat 2%) for short-term crypto markets
 
 - **Class:** quality-attribute
-- **Status:** active
+- **Status:** validated
 - **Why:** Flat 2% fee doesn't reflect real Polymarket fee structure; backtest profitability must be realistic
 - **Source:** user
 - **Primary Owner:** M003/S02
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** Dynamic fee formula: `baseRate × min(price, 1 - price) × size`, peaking at ~3.15% near 50-cent contracts
+- **Validation:** M003
+- **Notes:** verify_m003_milestone.sh check 4 proves polymarket_dynamic_fee() produces different fees at different prices (0.63% at 0.10, 3.15% at 0.50, 0.63% at 0.90).
 
 ### R017: Engine applies configurable slippage penalty to entry prices
 
 - **Class:** quality-attribute
-- **Status:** active
+- **Status:** validated
 - **Why:** Backtests that ignore slippage overstate profitability; configurable penalty models realistic execution
 - **Source:** user
 - **Primary Owner:** M003/S02
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** Default ~1 cent penalty, configurable per-run
+- **Validation:** M003
+- **Notes:** verify_m003_milestone.sh check 5 proves slippage affects PnL (0.484250 → 0.474874 with slippage=0.01).
 
 ### R018: Each strategy is independently runnable via `--strategy SID` CLI flag
 
 - **Class:** primary-user-loop
-- **Status:** active
+- **Status:** validated
 - **Why:** User needs to evaluate each strategy individually before deciding what to deploy
 - **Source:** user
 - **Primary Owner:** M003/S03
 - **Supporting Slices:** M003/S04
-- **Validation:** unmapped
-- **Notes:** Already supported by `backtest_strategies.py --strategy` flag; just needs new strategies registered
+- **Validation:** M003
+- **Notes:** verify_m003_milestone.sh check 6 proves S1 evaluates on synthetic data. All 7 strategies import (check 2). CLI --strategy flag verified (check 5).
 
 ### R019: Backtest output includes clear profitability metrics and go/no-go guidance per strategy
 
 - **Class:** operability
-- **Status:** active
+- **Status:** validated
 - **Why:** User needs to understand what metrics matter and what thresholds indicate real profitability
 - **Source:** user
 - **Primary Owner:** M003/S04
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** Operator playbook with metric interpretation guide
+- **Validation:** M003
+- **Notes:** S04 delivered src/docs/STRATEGY_PLAYBOOK.md (1189 lines) with 18 metrics, formulas, thresholds, and 6-threshold Go/No-Go framework.
 
 ### R020: Strategies cover the major viable approaches for 5-min crypto up/down prediction markets
 
 - **Class:** core-capability
-- **Status:** active
+- **Status:** validated
 - **Why:** Comprehensive coverage maximizes chance of finding real edge; research identified 5-7 distinct families
 - **Source:** inferred
 - **Primary Owner:** M003/S03
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** Calibration, momentum, mean reversion, volatility regime, time-phase, streak, composite ensemble
+- **Validation:** M003
+- **Notes:** S03 delivered 7 distinct strategy families (calibration, momentum, mean reversion, volatility regime, time-phase, streak, composite ensemble).
 
 ### R021: Strategies work across all collected assets (BTC, ETH, XRP, SOL)
 
 - **Class:** core-capability
-- **Status:** active
+- **Status:** validated
 - **Why:** Data is collected for all 5-minute market types; strategies should not be BTC-only
 - **Source:** user
 - **Primary Owner:** M003/S03
 - **Supporting Slices:** none
-- **Validation:** unmapped
-- **Notes:** Strategies use MarketSnapshot which is asset-agnostic; asset filtering via CLI `--assets` flag
+- **Validation:** M003
+- **Notes:** All strategies use MarketSnapshot which is asset-agnostic. Playbook documents --assets CLI flag for filtering.
 
 ### R022: Backtest considers Polymarket fee dynamics when reporting profitability
 
 - **Class:** quality-attribute
-- **Status:** active
+- **Status:** validated
 - **Why:** Profitability metrics must reflect what the trader actually keeps after fees
 - **Source:** user
 - **Primary Owner:** M003/S02
 - **Supporting Slices:** M003/S04
-- **Validation:** unmapped
-- **Notes:** Reports should show pre-fee and post-fee metrics or at minimum use realistic fees
+- **Validation:** M003
+- **Notes:** verify_m003_milestone.sh check 4 proves dynamic fees integrated. Playbook explains thresholds account for fees.
 
 ## Out of Scope
 
@@ -265,19 +265,19 @@ This file is the explicit capability and coverage contract for the project.
 | R011 | operability | active | M001/S05 | M003/S01 | unmapped |
 | R012 | differentiator | active | M001/S05 | M001/S02 | unmapped |
 | R013 | constraint | out-of-scope | none | none | n/a |
-| R014 | core-capability | active | M003/S01 | M003/S03 | unmapped |
-| R015 | core-capability | active | M003/S01 | none | unmapped |
-| R016 | quality-attribute | active | M003/S02 | none | unmapped |
-| R017 | quality-attribute | active | M003/S02 | none | unmapped |
-| R018 | primary-user-loop | active | M003/S03 | M003/S04 | unmapped |
-| R019 | operability | active | M003/S04 | none | unmapped |
-| R020 | core-capability | active | M003/S03 | none | unmapped |
-| R021 | core-capability | active | M003/S03 | none | unmapped |
-| R022 | quality-attribute | active | M003/S02 | M003/S04 | unmapped |
+| R014 | core-capability | validated | M003/S01 | M003/S03 | M003 |
+| R015 | core-capability | validated | M003/S01 | none | M003 |
+| R016 | quality-attribute | validated | M003/S02 | none | M003 |
+| R017 | quality-attribute | validated | M003/S02 | none | M003 |
+| R018 | primary-user-loop | validated | M003/S03 | M003/S04 | M003 |
+| R019 | operability | validated | M003/S04 | none | M003 |
+| R020 | core-capability | validated | M003/S03 | none | M003 |
+| R021 | core-capability | validated | M003/S03 | none | M003 |
+| R022 | quality-attribute | validated | M003/S02 | M003/S04 | M003 |
 
 ## Coverage Summary
 
-- Active requirements: 21
+- Active requirements: 12
+- Validated requirements: 9
 - Mapped to slices: 21
-- Validated: 0
 - Unmapped active requirements: 0
