@@ -142,7 +142,7 @@ Database-dependent full backtests deferred to S04 or user verification (worktree
   - Verify: Test on synthetic data where 2+ patterns trigger; verify composite signal generated; test cases where only 1 pattern triggers (should return None)
   - Done when: S7 generates signals only when min_agreement is met; returns None otherwise; parameter grid explores ensemble configuration space (10-30 combinations)
 
-- [ ] **T05: Write comprehensive verification script covering all strategies** `est:30m`
+- [x] **T05: Write comprehensive verification script covering all strategies** `est:30m`
   - Why: Slice-level verification must prove all 7 strategies work correctly with automated checks before moving to S04
   - Files: `scripts/verify_s03_strategies.sh`
   - Do:
