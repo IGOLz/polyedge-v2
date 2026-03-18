@@ -72,3 +72,25 @@ This task batches all 7 strategy creations because they follow an identical patt
   - `config.py` with `S{N}Config` class and `get_default_config()` returning correct IDs from naming map
   - `strategy.py` with `S{N}Strategy` class and stub `evaluate()` returning None
   - All files ready for S03 to populate with real logic
+
+## Observability Impact
+
+**Signals Added:**
+- Registry discovery count: `discover_strategies()` now returns 8 strategies (TEMPLATE + 7 new) instead of 1
+- Strategy instantiation: Each `get_strategy('S1')` through `get_strategy('S7')` succeeds and returns valid instance
+- Strategy metadata: Each instance has correct `strategy_id` and `strategy_name` attributes matching the naming map
+- Stub behavior marker: All new strategies' `evaluate()` returns `None` — visible signal that logic is not yet implemented
+
+**Inspection Commands:**
+- `ls src/shared/strategies/` — shows 8 folders (TEMPLATE, S1-S7), directory count changed from 1 to 8
+- `python -c "from shared.strategies.registry import discover_strategies; print(sorted(discover_strategies().keys()))"` — lists all discovered strategy IDs
+- `python -c "from shared.strategies.registry import get_strategy; s = get_strategy('S3'); print(f'{s.config.strategy_id} | {s.config.strategy_name}')"` — verify individual strategy metadata
+- `grep -r "class.*Strategy" src/shared/strategies/S[1-7]/ | wc -l` — should output 7 (one class per strategy)
+- `grep -r "TemplateStrategy\|TemplateConfig" src/shared/strategies/S[1-7]/` — should produce no matches
+
+**Failure Visibility:**
+- Missing strategy folder: `discover_strategies()` returns < 8 items, `ls` count mismatch
+- Import failure: `get_strategy('SN')` raises `ImportError` or `AttributeError`
+- Wrong class names: Registry discovery fails with traceback, grep verification fails
+- Wrong IDs/names: Instantiation succeeds but metadata assertions fail (e.g., `strategy_name` doesn't match naming map)
+- Leftover Template references: grep finds "TemplateStrategy" or "TemplateConfig" in new strategy files

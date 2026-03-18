@@ -65,7 +65,7 @@
   - Verify: `! test -d src/shared/strategies/S1`, `! test -d src/shared/strategies/S2`, `grep -q "get_param_grid" src/shared/strategies/TEMPLATE/config.py`
   - Done when: Old S1/S2 deleted, TEMPLATE config.py contains `get_param_grid()`, README section 6 updated
 
-- [ ] **T02: Create 7 new strategy folders from TEMPLATE** `est:45m`
+- [x] **T02: Create 7 new strategy folders from TEMPLATE** `est:45m`
   - Why: Populate the strategies folder with scaffolding for all 7 research-backed strategies; S03 will implement real logic
   - Files: `src/shared/strategies/S1/` through `S7/` (7 new folders)
   - Do: For each strategy S1-S7: (1) Copy TEMPLATE folder to new strategy folder. (2) Rename classes: `TemplateConfig` → `S{N}Config`, `TemplateStrategy` → `S{N}Strategy`. (3) Update `get_default_config()` to return correct `strategy_id` and `strategy_name` from the naming map in S01-RESEARCH.md. (4) Add empty `get_param_grid()` with TODO comment: `# TODO: Define parameter ranges in S03`. (5) Keep `evaluate()` returning `None` with comment: `# TODO: Implement in S03`. (6) Update import in strategy.py: `from shared.strategies.S{N}.config import S{N}Config`. Follow the per-strategy stub pattern from S01-RESEARCH.md exactly.
