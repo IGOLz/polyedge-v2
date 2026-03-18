@@ -49,11 +49,27 @@ diff -u /tmp/no_slippage.txt /tmp/with_slippage.txt | grep -E '(total_pnl|PnL=)'
 
 # 3. Verify CLI flags are accepted without error
 PYTHONPATH=. python3 -m analysis.backtest_strategies --strategy S1 --slippage 0.01 --fee-base-rate 0.05 > /dev/null 2>&1 && echo "✓ CLI flags accepted" || echo "✗ CLI flags rejected"
+
+# 4. Verify error handling for invalid inputs (diagnostic check)
+python3 << 'EOF'
+from analysis.backtest.engine import polymarket_dynamic_fee
+
+# Test price clamping for out-of-range values
+fee_negative = polymarket_dynamic_fee(-0.5, 0.063)
+fee_over_one = polymarket_dynamic_fee(1.5, 0.063)
+
+# Both should be clamped and produce valid fees (0.0 or near-zero)
+assert fee_negative >= 0.0 and fee_negative <= 0.05, f"Negative price should clamp to valid range, got fee {fee_negative}"
+assert fee_over_one >= 0.0 and fee_over_one <= 0.05, f"Price > 1.0 should clamp to valid range, got fee {fee_over_one}"
+
+print("✓ Invalid input handling verified (price clamping works)")
+EOF
 ```
 
 **Acceptance criteria:**
-- All three verification commands pass
+- All four verification commands pass
 - Fee formula produces correct values at 0.50, 0.10, 0.90
+- Invalid price inputs are clamped and produce valid fees
 - Running with different slippage values produces different PnL
 - CLI accepts both new flags without error
 
@@ -79,7 +95,7 @@ PYTHONPATH=. python3 -m analysis.backtest_strategies --strategy S1 --slippage 0.
 
 ## Tasks
 
-- [ ] **T01: Implement dynamic fee formula and update PnL calculations** `est:45m`
+- [x] **T01: Implement dynamic fee formula and update PnL calculations** `est:45m`
   - Why: R016 requires dynamic fees; this is the foundational math that everything else depends on
   - Files: `src/analysis/backtest/engine.py`
   - Do:
