@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "taskId": "T01",
+  "unitId": "M003/S04/T01",
+  "timestamp": 1773845397354,
+  "passed": false,
+  "discoverySource": "task-plan",
+  "checks": [
+    {
+      "command": "grep -q \"Quick Start\" src/docs/STRATEGY_PLAYBOOK.md",
+      "exitCode": 0,
+      "durationMs": 8,
+      "verdict": "pass"
+    },
+    {
+      "command": "grep -q \"Sharpe Ratio\" src/docs/STRATEGY_PLAYBOOK.md",
+      "exitCode": 1,
+      "durationMs": 5,
+      "verdict": "fail"
+    }
+  ],
+  "retryAttempt": 1,
+  "maxRetries": 2
+}

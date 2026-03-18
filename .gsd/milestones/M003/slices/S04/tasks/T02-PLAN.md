@@ -75,3 +75,26 @@ Must use synthetic data only for checks 4-6 (no DB dependency per S02 forward in
 ## Expected Output
 
 - `scripts/verify_m003_milestone.sh` — executable bash script (~200-250 lines) with 8 check groups validating all M003 deliverables, using Python heredocs for programmatic checks, exiting 0 on success with summary message "All M003 verification checks passed", exiting 1 with detailed diagnostics on any failure, using synthetic-only data for all backtest checks (no DB dependency)
+
+## Observability Impact
+
+**New signals added:**
+- **Exit code 0/1**: `bash scripts/verify_m003_milestone.sh` provides binary go/no-go signal for M003 completion
+- **Structured check output**: Each of 8 check groups prints "Check N: [description]" header followed by PASS/FAIL with diagnostic details
+- **Failure diagnostics**: On any check failure, script prints specific command/output that failed before exiting 1
+
+**Inspection surface:**
+- Run `bash scripts/verify_m003_milestone.sh` to get complete M003 validation report (file structure, imports, registry, engine behavior, optimizer, core immutability)
+- Check logs show which specific check failed (file missing, import error, wrong strategy count, fee formula broken, etc.)
+- Script source is human-readable with clear check labels and Python heredocs showing exact validation logic
+
+**Failure state visibility:**
+- **Import failures**: Check 2 reports which strategy failed to import and the Python traceback
+- **Registry miscount**: Check 3 reports discovered strategy count vs expected (8)
+- **Engine regression**: Checks 4-5 report actual vs expected fee/slippage behavior with numeric values
+- **Core drift**: Check 8 reports git diff output showing any src/core/ changes violating R010
+- **Missing files**: Check 1 reports which expected strategy folders/files are absent
+
+**What changes from agent perspective:**
+- Before T02: No automated way to verify M003 deliverables integrate correctly; must manually check each component
+- After T02: Single command (`bash scripts/verify_m003_milestone.sh`) provides comprehensive validation; exit 0 confirms all requirements met, exit 1 with diagnostics pinpoints specific failures
