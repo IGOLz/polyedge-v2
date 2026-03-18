@@ -1,9 +1,8 @@
-"""S2: Volatility strategy.
+"""S2 Strategy: Early Momentum — detect directional velocity in first 30-60 seconds.
 
-Detects calibrated volatility at a fixed evaluation second and enters a
-contrarian position when spread and volatility conditions are met.  Ported
-from trading/strategies.py::evaluate_m4_signal() — logic only, no imports
-from that module.
+Entry logic: Calculate velocity between two time points (30s and 60s).
+If velocity >= threshold, enter Down (contrarian to upward momentum).
+If velocity <= -threshold, enter Up (contrarian to downward momentum).
 """
 
 from __future__ import annotations
@@ -14,74 +13,114 @@ from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
 from shared.strategies.S2.config import S2Config
 
 
+def _get_price(prices: np.ndarray, target_sec: int, tolerance: int = 5) -> float | None:
+    """Get price at target second with NaN tolerance.
+    
+    Args:
+        prices: numpy array of prices indexed by elapsed second
+        target_sec: target second to retrieve price
+        tolerance: seconds to scan ±target_sec if target is NaN
+        
+    Returns:
+        price at target_sec, or nearest valid price within tolerance, or None
+    """
+    if target_sec < 0 or target_sec >= len(prices):
+        return None
+    
+    # Check target first
+    price = prices[target_sec]
+    if not np.isnan(price):
+        return float(price)
+    
+    # Scan ±tolerance for nearest valid price
+    for offset in range(1, tolerance + 1):
+        # Check target_sec + offset
+        idx_plus = target_sec + offset
+        if idx_plus < len(prices):
+            price = prices[idx_plus]
+            if not np.isnan(price):
+                return float(price)
+        
+        # Check target_sec - offset
+        idx_minus = target_sec - offset
+        if idx_minus >= 0:
+            price = prices[idx_minus]
+            if not np.isnan(price):
+                return float(price)
+    
+    return None
+
+
 class S2Strategy(BaseStrategy):
-    """Volatility-based signal detector."""
+    """S2 Strategy: Early Momentum — detect directional velocity in first 30-60 seconds
+
+    Entry logic: Calculate velocity = (price_60s - price_30s) / time_delta.
+    If velocity >= threshold, enter Down (contrarian to rising price).
+    If velocity <= -threshold, enter Up (contrarian to falling price).
+    """
 
     config: S2Config
 
     # ── public contract ─────────────────────────────────────────────
 
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
-        """Detect calibrated volatility at eval_second → contrarian entry.
+        """Detect momentum signal from market snapshot.
 
-        Returns a :class:`Signal` when all conditions are met, otherwise
-        *None*.  Never raises on NaN-heavy or flat data.
+        Contract:
+        - Pure function: no side effects, no async, no database access.
+        - Return a ``Signal`` when entry conditions are met, ``None`` otherwise.
+        - Never raise on NaN-heavy, flat, or insufficient data — just return None.
         """
         prices = snapshot.prices
         cfg = self.config
 
-        # Guard: need enough data past eval_second
-        if len(prices) <= cfg.eval_second:
+        # Guard: need enough data to reach eval_window_end
+        if len(prices) < cfg.eval_window_end:
             return None
 
-        # Step 1: get price at eval_second, reject NaN
-        price = float(prices[cfg.eval_second])
-        if np.isnan(price):
+        # Get price at eval_window_start (e.g., 30s)
+        price_30s = _get_price(prices, cfg.eval_window_start, cfg.tolerance)
+        if price_30s is None:
             return None
 
-        # Step 2: base deviation filter — price must deviate from 0.50
-        if abs(price - 0.50) < cfg.base_deviation:
+        # Get price at eval_window_end (e.g., 60s)
+        price_60s = _get_price(prices, cfg.eval_window_end, cfg.tolerance)
+        if price_60s is None:
             return None
 
-        # Step 3: spread filter — must be within [min_spread, max_spread]
-        spread = abs(2.0 * price - 1.0)
-        if spread < cfg.min_spread or spread > cfg.max_spread:
-            return None
+        # Calculate velocity (price change per second)
+        time_delta = cfg.eval_window_end - cfg.eval_window_start
+        velocity = (price_60s - price_30s) / time_delta
 
-        # Step 4: volatility calculation over the window ending at eval_second
-        vol_start = cfg.eval_second - cfg.volatility_window_seconds
-        vol_end = cfg.eval_second + 1  # inclusive of eval_second
-        vol_slice = prices[vol_start:vol_end]
+        # Check for strong upward momentum → enter Down (contrarian)
+        if velocity >= cfg.momentum_threshold:
+            entry_price = max(0.01, min(0.99, 1.0 - price_60s))  # clamp
+            return Signal(
+                direction="Down",
+                strategy_name=cfg.strategy_name,
+                entry_price=entry_price,
+                signal_data={
+                    "entry_second": cfg.eval_window_end,
+                    "velocity": velocity,
+                    "price_30s": price_30s,
+                    "price_60s": price_60s,
+                },
+            )
 
-        # Filter NaN values; need at least 2 valid data points
-        valid_values = vol_slice[~np.isnan(vol_slice)]
-        if len(valid_values) < 2:
-            return None
+        # Check for strong downward momentum → enter Up (contrarian)
+        if velocity <= -cfg.momentum_threshold:
+            entry_price = max(0.01, min(0.99, price_60s))  # clamp
+            return Signal(
+                direction="Up",
+                strategy_name=cfg.strategy_name,
+                entry_price=entry_price,
+                signal_data={
+                    "entry_second": cfg.eval_window_end,
+                    "velocity": velocity,
+                    "price_30s": price_30s,
+                    "price_60s": price_60s,
+                },
+            )
 
-        volatility = float(np.nanstd(vol_slice))  # ddof=0 (population std)
-
-        # Step 5: volatility threshold check
-        if volatility < cfg.volatility_threshold:
-            return None
-
-        # Step 6: contrarian direction
-        if price > 0.50:
-            direction = "Down"
-            entry_price = 1.0 - price
-        else:
-            direction = "Up"
-            entry_price = price
-
-        # Build signal with strategy-specific detection metadata
-        return Signal(
-            direction=direction,
-            strategy_name=cfg.strategy_name,
-            entry_price=entry_price,
-            signal_data={
-                "eval_second": cfg.eval_second,
-                "spread": round(spread, 6),
-                "volatility": round(volatility, 6),
-                "entry_second": cfg.eval_second,
-                "price_at_eval": round(price, 6),
-            },
-        )
+        # No momentum signal detected
+        return None

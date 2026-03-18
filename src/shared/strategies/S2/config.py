@@ -1,6 +1,8 @@
-"""S2 (Volatility) strategy configuration.
+"""TEMPLATE strategy configuration — copy and customize for new strategies.
 
-Parameter values sourced from trading/constants.py M4_CONFIG.
+Rename this module's class and replace the example fields with your strategy's
+real parameters.  Keep ``get_default_config()`` returning an instance with
+sensible production defaults.
 """
 
 from dataclasses import dataclass
@@ -10,39 +12,46 @@ from shared.strategies.base import StrategyConfig
 
 @dataclass
 class S2Config(StrategyConfig):
-    """Configuration for the volatility strategy."""
-
-    # Evaluation timing
-    eval_second: int = 30
-    eval_window: int = 2
-
-    # Volatility detection
-    volatility_window_seconds: int = 10
-    volatility_threshold: float = 0.05
-
-    # Spread filter
-    min_spread: float = 0.05
-    max_spread: float = 0.50
-
-    # Base deviation filter
-    base_deviation: float = 0.08
-
-
-def get_param_grid() -> dict[str, list]:
-    """Return grid-search parameter space for S2.
-
-    Covers three key tunable parameters with 3 values each (27 combinations).
+    """Configuration for S2 Momentum strategy.
+    
+    Detect directional velocity between two time points and enter
+    contrarian on strong momentum.
     """
-    return {
-        "volatility_threshold": [0.03, 0.05, 0.07],
-        "min_spread": [0.03, 0.05, 0.07],
-        "base_deviation": [0.06, 0.08, 0.10],
-    }
+
+    # Time window for velocity calculation
+    eval_window_start: int = 30  # seconds (price_30s)
+    eval_window_end: int = 60  # seconds (price_60s)
+    
+    # Minimum absolute velocity to trigger entry
+    momentum_threshold: float = 0.03  # price change per second
+    
+    # Tolerance for NaN-aware price lookup
+    tolerance: int = 10  # seconds
 
 
 def get_default_config() -> S2Config:
-    """Return the production-default S2 configuration."""
+    """Return the production-default S2 configuration.
+
+    TODO: Update ``strategy_id`` to your folder name (e.g. ``'S3'``)
+          and ``strategy_name`` to a descriptive slug (e.g. ``'S3_momentum'``).
+    """
     return S2Config(
         strategy_id="S2",
-        strategy_name="S2_volatility",
+        strategy_name="S2_momentum",
     )
+
+
+def get_param_grid() -> dict[str, list]:
+    """Return grid-search parameter space for S2 Momentum strategy.
+
+    Tests various evaluation windows, momentum thresholds, and tolerance
+    to find optimal early momentum detection parameters.
+    
+    Total combinations: 3×3×4×2 = 72
+    """
+    return {
+        "eval_window_start": [25, 30, 35],
+        "eval_window_end": [55, 60, 65],
+        "momentum_threshold": [0.02, 0.03, 0.05, 0.08],
+        "tolerance": [5, 10],
+    }

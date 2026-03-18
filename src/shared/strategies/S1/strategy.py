@@ -1,9 +1,7 @@
-"""S1: Spike Reversion strategy.
+"""S1 Strategy: Calibration Mispricing — exploit systematic bias in 50/50 pricing.
 
-Detects a price spike in the early seconds of a market, waits for partial
-reversion, then enters a contrarian position.  Ported from
-analysis/backtest/module_3_mean_reversion.py — logic only, no imports from
-that module.
+Entry logic: Enter contrarian when price deviates significantly from balanced (0.50).
+If price < 0.45, bet Up. If price > 0.55, bet Down. Evaluation window 30-60s.
 """
 
 from __future__ import annotations
@@ -14,138 +12,110 @@ from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
 from shared.strategies.S1.config import S1Config
 
 
+def _get_price(prices: np.ndarray, target_sec: int, tolerance: int = 5) -> float | None:
+    """Get price at target second with NaN tolerance.
+    
+    Args:
+        prices: numpy array of prices indexed by elapsed second
+        target_sec: target second to retrieve price
+        tolerance: seconds to scan ±target_sec if target is NaN
+        
+    Returns:
+        price at target_sec, or nearest valid price within tolerance, or None
+    """
+    if target_sec < 0 or target_sec >= len(prices):
+        return None
+    
+    # Check target first
+    price = prices[target_sec]
+    if not np.isnan(price):
+        return float(price)
+    
+    # Scan ±tolerance for nearest valid price
+    for offset in range(1, tolerance + 1):
+        # Check target_sec + offset
+        idx_plus = target_sec + offset
+        if idx_plus < len(prices):
+            price = prices[idx_plus]
+            if not np.isnan(price):
+                return float(price)
+        
+        # Check target_sec - offset
+        idx_minus = target_sec - offset
+        if idx_minus >= 0:
+            price = prices[idx_minus]
+            if not np.isnan(price):
+                return float(price)
+    
+    return None
+
+
 class S1Strategy(BaseStrategy):
-    """Spike-reversion signal detector."""
+    """S1 Strategy: Calibration Mispricing — exploit systematic bias in 50/50 pricing
+
+    Entry logic: Scan entry_window for price deviation from 0.50.
+    If price < price_low_threshold and deviation >= min_deviation, bet Up (contrarian).
+    If price > price_high_threshold and deviation >= min_deviation, bet Down (contrarian).
+    """
 
     config: S1Config
-
-    # ── internal helpers ────────────────────────────────────────────
-
-    def _find_spike(
-        self,
-        prices: np.ndarray,
-    ) -> tuple[str, int, float] | None:
-        """Scan first *spike_detection_window_seconds* for a spike.
-
-        Returns ``(spike_direction, peak_second, peak_price)`` or *None*.
-
-        * ``'Up'``  — up-price spiked high  (>= spike_threshold_up)
-        * ``'Down'`` — up-price dropped low, i.e. down-price spiked
-                       (``1 - min_price >= spike_threshold_down`` equivalent
-                        rewritten as ``min_price <= 1 - spike_threshold_down``)
-        """
-        cfg = self.config
-        window = prices[: cfg.spike_detection_window_seconds]
-        valid_mask = ~np.isnan(window)
-        if not np.any(valid_mask):
-            return None
-
-        valid_prices = window[valid_mask]
-        valid_indices = np.where(valid_mask)[0]
-
-        # Up-spike: up_price ≥ threshold_up
-        max_price = float(np.max(valid_prices))
-        if max_price >= cfg.spike_threshold_up:
-            peak_idx = int(valid_indices[np.argmax(valid_prices)])
-            return ("Up", peak_idx, max_price)
-
-        # Down-spike: up_price drops so low that (1 - min_price) ≥ spike_threshold_up
-        # Original backtest check: ``(1.0 - min_price) >= spike_threshold``
-        # spike_threshold_down (0.20) is the *up-price* floor; anything at or
-        # below it counts as a down-spike.
-        min_price = float(np.min(valid_prices))
-        if min_price <= cfg.spike_threshold_down:
-            peak_idx = int(valid_indices[np.argmin(valid_prices)])
-            return ("Down", peak_idx, min_price)
-
-        return None
-
-    def _find_reversion(
-        self,
-        prices: np.ndarray,
-        spike_direction: str,
-        peak_second: int,
-        peak_price: float,
-    ) -> tuple[int, float, str] | None:
-        """After a spike, scan for sufficient reversion.
-
-        Returns ``(reversion_second, entry_price, signal_direction)`` or
-        *None*.  ``signal_direction`` is contrarian to the spike.
-        """
-        cfg = self.config
-        total = len(prices)
-        end = min(peak_second + cfg.min_reversion_ticks + 1, total)
-
-        for sec in range(peak_second + 1, end):
-            price = prices[sec]
-            if np.isnan(price):
-                continue
-
-            if spike_direction == "Up":
-                # Up-price spiked high → wait for it to drop back
-                reversion_amount = (peak_price - price) / peak_price
-                if reversion_amount >= cfg.reversion_reversal_pct:
-                    entry_price = 1.0 - price  # buy DOWN token
-                    return (sec, float(entry_price), "Down")
-            else:
-                # Down-spike (up-price was very low) → wait for recovery
-                denominator = 1.0 - peak_price
-                if denominator <= 0:
-                    continue
-                reversion_amount = (price - peak_price) / denominator
-                if reversion_amount >= cfg.reversion_reversal_pct:
-                    entry_price = price  # buy UP token
-                    return (sec, float(entry_price), "Up")
-
-        return None
 
     # ── public contract ─────────────────────────────────────────────
 
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
-        """Detect spike → reversion → contrarian entry.
+        """Detect calibration mispricing signal from market snapshot.
 
-        Returns a :class:`Signal` when all conditions are met, otherwise
-        *None*.  Never raises on NaN-heavy or flat data.
+        Contract:
+        - Pure function: no side effects, no async, no database access.
+        - Return a ``Signal`` when entry conditions are met, ``None`` otherwise.
+        - Never raise on NaN-heavy, flat, or insufficient data — just return None.
         """
         prices = snapshot.prices
         cfg = self.config
 
-        # Guard: need enough data for the detection window
-        if len(prices) < cfg.spike_detection_window_seconds:
+        # Guard: need enough data to reach entry window
+        if len(prices) < cfg.entry_window_start:
             return None
 
-        # Step 1: find spike
-        spike = self._find_spike(prices)
-        if spike is None:
-            return None
-        spike_direction, peak_second, peak_price = spike
-
-        # Step 2: find reversion
-        reversion = self._find_reversion(
-            prices, spike_direction, peak_second, peak_price
-        )
-        if reversion is None:
-            return None
-        reversion_second, entry_price, signal_direction = reversion
-
-        # Step 3: entry-price filter
-        if entry_price > cfg.entry_price_threshold:
-            return None
-
-        # Build signal_data with strategy-specific detection metadata
-        signal_data: dict = {
-            "spike_direction": spike_direction,
-            "reversion_price": entry_price,
-            "reversion_second": reversion_second,
-        }
-        if spike_direction == "Up":
-            signal_data["spike_max_price"] = peak_price
-        else:
-            signal_data["spike_min_price"] = peak_price
-
-        return Signal(
-            direction=signal_direction,
-            strategy_name=cfg.strategy_name,
-            entry_price=entry_price,
-            signal_data=signal_data,
-        )
+        # Scan prices in entry window for deviation from 0.50
+        window_end = min(cfg.entry_window_end, len(prices))
+        
+        for sec in range(cfg.entry_window_start, window_end):
+            price = _get_price(prices, sec, tolerance=5)
+            if price is None:
+                continue
+            
+            # Check for low price → bet Up (contrarian)
+            if price < cfg.price_low_threshold:
+                deviation = 0.50 - price
+                if deviation >= cfg.min_deviation:
+                    entry_price = max(0.01, min(0.99, price))  # clamp
+                    return Signal(
+                        direction="Up",
+                        strategy_name=cfg.strategy_name,
+                        entry_price=entry_price,
+                        signal_data={
+                            "entry_second": sec,
+                            "deviation": deviation,
+                            "price": price,
+                        },
+                    )
+            
+            # Check for high price → bet Down (contrarian)
+            if price > cfg.price_high_threshold:
+                deviation = price - 0.50
+                if deviation >= cfg.min_deviation:
+                    entry_price = max(0.01, min(0.99, 1.0 - price))  # clamp
+                    return Signal(
+                        direction="Down",
+                        strategy_name=cfg.strategy_name,
+                        entry_price=entry_price,
+                        signal_data={
+                            "entry_second": sec,
+                            "deviation": deviation,
+                            "price": price,
+                        },
+                    )
+        
+        # No signal detected in entry window
+        return None

@@ -11,6 +11,26 @@ from dataclasses import dataclass
 DEFAULT_FEE_RATE = 0.02
 
 
+def polymarket_dynamic_fee(price: float, base_rate: float = 0.063) -> float:
+    """Calculate Polymarket dynamic taker fee.
+    
+    Formula: base_rate × min(price, 1 - price)
+    
+    Fees peak at ~3.15% for 50-cent tokens (balanced markets) and drop to
+    ~0.63% for extreme prices (confident outcomes). Base rate of 0.063
+    produces the observed peak fee.
+    
+    Args:
+        price: Token price (0.0 to 1.0)
+        base_rate: Fee base rate (default 0.063)
+    
+    Returns:
+        Fee as a decimal (e.g., 0.0315 for 3.15%)
+    """
+    price = max(0.0, min(1.0, price))  # clamp to valid range
+    return base_rate * min(price, 1.0 - price)
+
+
 @dataclass
 class Trade:
     market_id: str
@@ -27,33 +47,52 @@ class Trade:
     hour: int
 
 
-def calculate_pnl_hold(entry_price, direction, actual_result, fee_rate=DEFAULT_FEE_RATE):
+def calculate_pnl_hold(entry_price, direction, actual_result, base_rate=0.063):
     """PnL for hold-to-resolution. Win: (1 - entry) * (1 - fee). Loss: -entry."""
     won = (direction == actual_result)
     if won:
         gross = 1.0 - entry_price
-        return gross - fee_rate * gross
+        return gross - polymarket_dynamic_fee(entry_price, base_rate) * gross
     else:
         return -entry_price
 
 
-def calculate_pnl_exit(entry_price, exit_price, fee_rate=DEFAULT_FEE_RATE):
+def calculate_pnl_exit(entry_price, exit_price, base_rate=0.063):
     """PnL for mid-market exit. PnL = exit - entry, minus fee on profit."""
     gross = exit_price - entry_price
-    fee = fee_rate * max(0.0, gross)
+    fee = polymarket_dynamic_fee(entry_price, base_rate) * max(0.0, gross)
     return gross - fee
 
 
 def make_trade(market, second_entered, entry_price, direction,
-               second_exited=-1, exit_price=None, fee_rate=DEFAULT_FEE_RATE):
-    """Create a Trade object with PnL calculated."""
+               second_exited=-1, exit_price=None, 
+               slippage=0.0, base_rate=0.063):
+    """Create a Trade object with PnL calculated.
+    
+    Args:
+        slippage: Entry price penalty (default 0.0). Added to Up bets, subtracted from Down.
+        base_rate: Polymarket dynamic fee base rate (default 0.063).
+    
+    Note: Removed fee_rate parameter. Old code using fee_rate should pass base_rate instead.
+          To approximate flat 2% fee, use base_rate ≈ 0.0317 (produces ~2% at extreme prices).
+    """
     actual = market['final_outcome']
+    
+    # Apply slippage penalty (unfavorable direction)
+    adjusted_entry = entry_price
+    if slippage != 0.0:
+        if direction == "Up":
+            adjusted_entry = entry_price + slippage
+        else:  # Down
+            adjusted_entry = entry_price - slippage
+        # Clamp to valid token price range
+        adjusted_entry = max(0.01, min(0.99, adjusted_entry))
 
     if exit_price is not None and second_exited >= 0:
-        pnl = calculate_pnl_exit(entry_price, exit_price, fee_rate)
+        pnl = calculate_pnl_exit(adjusted_entry, exit_price, base_rate)
         outcome = 'win' if pnl > 0 else 'loss'
     else:
-        pnl = calculate_pnl_hold(entry_price, direction, actual, fee_rate)
+        pnl = calculate_pnl_hold(adjusted_entry, direction, actual, base_rate)
         outcome = 'win' if direction == actual else 'loss'
         second_exited = market['total_seconds']
         exit_price = 1.0 if outcome == 'win' else 0.0

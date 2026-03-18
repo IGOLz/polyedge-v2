@@ -14,9 +14,7 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 
 **M001 complete.** The unified strategy framework is fully operational. All 12 requirements validated, 11 decisions recorded.
 
-**M002 complete.** Unified strategy reports — both analysis backtest and live trading produce per-strategy reports in identical JSON + Markdown format via `StrategyReport`.
-
-**M003 in progress.** Research-backed strategy overhaul — replacing disposable S1/S2 with 5-7 real strategies for 5-minute crypto up/down markets, plus engine upgrades for dynamic Polymarket fees and slippage modeling.
+**M003 complete.** Research-backed strategy overhaul — replaced disposable S1/S2 with 7 research-backed strategies for 5-minute crypto up/down markets, upgraded engine with dynamic Polymarket fees and slippage modeling, delivered operator playbook with 6-threshold deployment framework and comprehensive verification script proving all deliverables integrate correctly.
 
 ### What M001 Delivered
 
@@ -32,6 +30,23 @@ Project was consolidated from three separate repos (polyedge-core, polyedge-lab,
 - **Backtest reports**: `analysis/backtest_strategies.py` now generates per-strategy `{SID}.json` and `{SID}.md` in `reports/backtest/` alongside existing CSV output.
 - **Live trading reports**: `trading/report.py` queries `bot_trades`, computes the full metric set (matching engine.compute_metrics), generates per-strategy reports in `reports/live/`.
 - **Auto-generation**: Trading bot generates reports every hour via `strategy_report_loop`.
+
+### What M003 Delivered
+
+**S01 (Scaffolding):** 7 new strategy folders (S1-S7) with research-backed naming (calibration, momentum, reversion, volatility, time_phase, streak, composite), updated TEMPLATE with param grid support, registry discovery of all 8 strategies, verification script with 25 checks.
+
+**S02 (Engine Upgrades):** Dynamic Polymarket fee formula (`base_rate × min(price, 1-price)`) peaking at ~3.15% for 50/50 markets, configurable slippage penalty adjusting entry prices, CLI controls (`--slippage`, `--fee-base-rate`), updated PnL calculations using dynamic fees, backward compatibility break (removed flat `fee_rate` parameter).
+
+**S03 (Strategy Implementations):** All 7 strategies implemented with real signal detection:
+- **S1 Calibration:** Exploits systematic mispricing near 50/50 prices (108 combinations)
+- **S2 Momentum:** Detects directional velocity in first 30-60 seconds, fades strong moves (72 combinations)
+- **S3 Mean Reversion:** Two-phase spike → reversion detection (144 combinations)
+- **S4 Volatility Regime:** Enters contrarian under high volatility + extreme price (108 combinations)
+- **S5 Time-Phase Entry:** Filters by elapsed time and hour-of-day (108 combinations)
+- **S6 Streak/Sequence:** Intra-market consecutive price move detection (72 combinations)
+- **S7 Composite Ensemble:** Voting across patterns, enters on consensus (192 combinations)
+
+**S04 (Operator Playbook + Verification):** 1189-line playbook with per-strategy documentation, 18 metrics with formulas and thresholds, 6-threshold Go/No-Go framework (total_pnl > 0, sharpe_ratio > 1.0, profit_factor > 1.2, win_rate > 52%, max_drawdown < 50% of total_pnl, consistency_score > 60), CLI reference, parameter optimization guide, troubleshooting for 6 failure modes, M003 milestone verification script with 8 check categories proving all deliverables integrate correctly.
 
 ### Full Strategy Lifecycle
 
@@ -59,10 +74,13 @@ cd src && PYTHONPATH=. python3 scripts/verify_s02.py    # 18 checks — analysis
 cd src && PYTHONPATH=. python3 scripts/verify_s03.py    # 18 checks — trading adapter
 cd src && PYTHONPATH=. python3 scripts/parity_test.py   # 24 checks — signal parity proof
 cd src && PYTHONPATH=. python3 scripts/verify_reports.py # 47 checks — unified reports
+bash scripts/verify_s01_scaffolding.sh                  # 25 checks — M003/S01 strategy scaffolding
+bash scripts/verify_s03_strategies.sh                   # 42 checks — M003/S03 all strategies implemented
+bash scripts/verify_m003_milestone.sh                   # 8 checks — M003 complete (exit 0 = all deliverables verified)
 ```
 
 ## Milestone Sequence
 
 - [x] M001: Unified Strategy Framework — shared strategy definitions consumed identically by analysis (backtest) and trading (live)
 - [x] M002: Unified Strategy Reports — both backtest and live trading produce per-strategy reports in identical JSON + Markdown format
-- [ ] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 5-7 real prediction market strategies, upgrade engine with dynamic fees + slippage
+- [x] M003: Research-Backed Strategy Overhaul — replace disposable strategies with 7 real prediction market strategies, upgrade engine with dynamic fees + slippage
