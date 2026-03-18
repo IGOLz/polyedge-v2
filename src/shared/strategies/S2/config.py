@@ -47,11 +47,16 @@ def get_param_grid() -> dict[str, list]:
     Tests various evaluation windows, momentum thresholds, and tolerance
     to find optimal early momentum detection parameters.
     
-    Total combinations: 3×3×4×2 = 72
+    Total combinations: 3×3×4×2×3×3 = 648
     """
     return {
         "eval_window_start": [25, 30, 35],
         "eval_window_end": [55, 60, 65],
         "momentum_threshold": [0.02, 0.03, 0.05, 0.08],
         "tolerance": [5, 10],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry prices around 0.50 at momentum detection.
+        # Engine handles direction logic (swap SL/TP for Down bets).
+        "stop_loss": [0.40, 0.45, 0.50],
+        "take_profit": [0.60, 0.65, 0.70],
     }

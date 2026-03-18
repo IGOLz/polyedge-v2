@@ -107,7 +107,7 @@ def load_all_data():
             'ended_at': m['ended_at'],
             'final_outcome': m['final_outcome'],
             'hour': started_at.hour,
-            'ticks': tick_array,
+            'prices': tick_array,
         })
 
     print(f"Processed {len(markets)} markets with sufficient tick data")

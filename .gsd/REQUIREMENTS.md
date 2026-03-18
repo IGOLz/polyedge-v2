@@ -235,71 +235,104 @@ This file is the explicit capability and coverage contract for the project.
 - **Validation:** M003
 - **Notes:** verify_m003_milestone.sh check 4 proves dynamic fees integrated. Playbook explains thresholds account for fees.
 
-## Out of Scope
+### R023: All strategies declare stop_loss and take_profit parameter ranges in their config grids
 
-### R013: The actual M3/M4/momentum/etc. strategy parameters and logic will be rewritten in the future; this milestone only ports them as-is to prove the framework
-
-- **Class:** constraint
-- **Status:** out-of-scope
-- **Why:** Prevents scope creep — we're building the framework, not optimizing strategies
+- **Class:** core-capability
+- **Status:** validated
+- **Why:** Grid search must explore SL/TP combinations systematically; strategies declare their viable exit parameter ranges
 - **Source:** user
-- **Primary Owner:** none
+- **Primary Owner:** M004/S01
 - **Supporting Slices:** none
-- **Validation:** n/a
-- **Notes:** Strategies ported are disposable first tenants of the new framework. Superseded by M003 which replaces them with real strategies.
+- **Validation:** M004
+- **Notes:** S01 delivered: all 7 strategies (S1-S7) have get_param_grid() returning dicts with stop_loss and take_profit keys, each with 3 values. Grid sizes range 648-1728 combinations per strategy. S05 verified end-to-end integration via verify_m004_milestone.sh check 1.
 
-## Traceability
+### R024: TEMPLATE demonstrates stop_loss and take_profit pattern with documented semantics
 
-| ID | Class | Status | Primary owner | Supporting | Proof |
-|---|---|---|---|---|---|
-| R001 | core-capability | active | M001/S01 | M001/S02, M001/S03 | unmapped |
-| R002 | core-capability | active | M001/S01 | M003/S01 | unmapped |
-| R003 | core-capability | active | M001/S01 | M001/S02, M001/S03 | unmapped |
-| R004 | core-capability | active | M001/S01 | none | unmapped |
-| R005 | primary-user-loop | active | M001/S02 | M003/S03 | unmapped |
-| R006 | primary-user-loop | active | M001/S03 | none | unmapped |
-| R007 | quality-attribute | active | M001/S04 | none | unmapped |
-| R008 | core-capability | active | M001/S01 | M003/S01 | unmapped |
-| R009 | constraint | active | — | M001/S03 | unmapped |
-| R010 | constraint | active | — | none | unmapped |
-| R011 | operability | active | M001/S05 | M003/S01 | unmapped |
-| R012 | differentiator | active | M001/S05 | M001/S02 | unmapped |
-| R013 | constraint | out-of-scope | none | none | n/a |
-| R014 | core-capability | validated | M003/S01 | M003/S03 | M003 |
-| R015 | core-capability | validated | M003/S01 | none | M003 |
-| R016 | quality-attribute | validated | M003/S02 | none | M003 |
-| R017 | quality-attribute | validated | M003/S02 | none | M003 |
-| R018 | primary-user-loop | validated | M003/S03 | M003/S04 | M003 |
-| R019 | operability | validated | M003/S04 | none | M003 |
-| R020 | core-capability | validated | M003/S03 | none | M003 |
-| R021 | core-capability | validated | M003/S03 | none | M003 |
-| R022 | quality-attribute | validated | M003/S02 | M003/S04 | M003 |
-| R023 | core-capability | active | M004/S01 | none | unmapped |
-| R024 | core-capability | active | M004/S01 | M004/S02 | unmapped |
-| R025 | core-capability | active | M004/S02 | M004/S03, M004/S04 | unmapped |
-| R026 | primary-user-loop | active | M004/S03 | none | unmapped |
-| R027 | operability | active | M004/S04 | none | unmapped |
-| R028 | operability | active | M004/S04 | none | unmapped |
-| R029 | core-capability | active | M004/S01 | none | unmapped |
-| R030 | operability | active | M004/S01 | none | unmapped |
-| R031 | operability | active | M004/S04 | M004/S02 | unmapped |
-| R032 | quality-attribute | deferred | none | none | unmapped |
-| R033 | constraint | out-of-scope | none | none | n/a |
+- **Class:** core-capability
+- **Status:** validated
+- **Why:** Future strategy authors need clear example of how to declare SL/TP parameters and understand absolute price threshold semantics
+- **Source:** user
+- **Primary Owner:** M004/S01
+- **Supporting Slices:** M004/S02
+- **Validation:** M004
+- **Notes:** S01 delivered: TEMPLATE/config.py has working get_param_grid() with SL/TP keys and comments explaining absolute price thresholds and direction handling. TEMPLATE is now executable (returns real dict, not empty). S05 verified TEMPLATE imports without errors and includes SL/TP parameters via verify_m004_milestone.sh check 7.
 
-## Coverage Summary
+### R025: Engine simulates stop loss and take profit exits by tracking price every second
 
-- Active requirements: 21
-- Validated requirements: 9
-- Deferred requirements: 1
-- Out of scope: 2
-- Mapped to slices: 30
-- Unmapped active requirements: 9
+- **Class:** core-capability
+- **Status:** validated
+- **Why:** Backtest must model early exits accurately; holding to resolution overstates profitability
+- **Source:** user
+- **Primary Owner:** M004/S02
+- **Supporting Slices:** M004/S03, M004/S04
+- **Validation:** M004/S02
+- **Notes:** S02 delivered: simulate_sl_tp_exit() scans prices array second-by-second after entry, checks SL/TP thresholds with direction-specific logic (Up: SL when price ≤ stop_loss, TP when price ≥ take_profit; Down: inverted thresholds per D012), handles NaN prices, returns (exit_second, exit_price, exit_reason). Integrated with make_trade() to accept optional stop_loss and take_profit parameters. Verified by 13 unit tests covering Up/Down × SL/TP/resolution matrix, NaN handling, edge cases, and PnL correctness.
+
+### R026: Grid search generates Cartesian product including SL/TP dimensions
+
+- **Class:** primary-user-loop
+- **Status:** validated
+- **Why:** User needs to explore full parameter space including exit thresholds
+- **Source:** user
+- **Primary Owner:** M004/S03
+- **Supporting Slices:** none
+- **Validation:** M004/S03
+- **Notes:** S03 delivered: optimize.py introspects config dataclass to split param_dict into strategy_params (config fields) and exit_params (stop_loss, take_profit), threads exit_params through run_strategy() to make_trade(), and augments metrics dict with SL/TP values. Verified by dry-run showing 972 combinations for S1 with SL/TP dimensions, and results CSV containing stop_loss and take_profit columns with correct per-combination values.
+
+### R027: Backtest output CSV includes stop_loss, take_profit, and exit_reason columns
+
+- **Class:** operability
+- **Status:** validated
+- **Why:** User needs to see which SL/TP values each ranked combination used
+- **Source:** user
+- **Primary Owner:** M004/S04
+- **Supporting Slices:** none
+- **Validation:** M004/S04
+- **Notes:** S04 delivered: Results CSV contains stop_loss and take_profit columns with per-configuration values. Note: exit_reason field exists on individual Trade objects (validated in S02), but aggregated metrics CSVs don't contain per-trade fields. This is correct by design—metrics summarize outcomes across trades.
+
+### R028: Top 10 summary prints explicit SL/TP values for each ranked combination
+
+- **Class:** operability
+- **Status:** validated
+- **Why:** User needs quick access to best parameter sets without parsing full CSV
+- **Source:** user
+- **Primary Owner:** M004/S04
+- **Supporting Slices:** none
+- **Validation:** M004/S04
+- **Notes:** S04 delivered: optimize.py top 10 console output enhanced to display stop_loss and take_profit values alongside existing metrics (Bets, WR, PnL, Sharpe, Score). Format: `SL=0.40, TP=0.75` per ranked combination. Verified by grep pattern match on console output.
+
+### R029: Strategy-specific SL/TP ranges are tuned to each strategy's typical entry prices
+
+- **Class:** core-capability
+- **Status:** validated
+- **Why:** Generic ranges waste parameter space; strategy-aware ranges improve search efficiency
+- **Source:** inferred
+- **Primary Owner:** M004/S01
+- **Supporting Slices:** none
+- **Validation:** M004
+- **Notes:** S01 delivered: S1-S7 have customized SL/TP ranges per decision D013. Examples: S1 entry 0.45-0.55 → SL [0.35,0.40,0.45], TP [0.65,0.70,0.75]; S3 spike-based → SL [0.15,0.20,0.25], TP [0.75,0.80,0.85]. S05 verified end-to-end via verify_m004_milestone.sh check 4 proving CSV has SL/TP values in expected ranges.
+
+### R030: TEMPLATE provides clear example with documented absolute price threshold semantics
+
+- **Class:** operability
+- **Status:** validated
+- **Why:** Future strategy authors must understand that SL/TP are absolute prices, not percentages, and that engine handles direction swapping
+- **Source:** inferred
+- **Primary Owner:** M004/S01
+- **Supporting Slices:** none
+- **Validation:** M004
+- **Notes:** S01 delivered: TEMPLATE/config.py has comments explaining absolute price semantics and direction-handling logic. Example shows stop_loss: [0.35, 0.40, 0.45] with clear explanation that engine swaps for Down bets. S05 verified TEMPLATE imports and includes SL/TP parameters via verify_m004_milestone.sh check 7.
+
+### R031: Trades distinguish SL exit vs TP exit vs hold-to-resolution in output
+
+- **Class:** operability
+- **Status:** validated
 - **Why:** User needs to understand which trades exited early and why
 - **Source:** inferred
 - **Primary Owner:** M004/S04
 - **Supporting Slices:** M004/S02
-- **Validation:** unmapped
-- **Notes:** —
+- **Validation:** M004/S02
+- **Notes:** S02 delivered: Trade dataclass extended with exit_reason field (defaults to 'resolution' for backward compatibility). Three semantic values: 'sl' (stop loss hit), 'tp' (take profit hit), 'resolution' (held to market close). Field is populated by simulate_sl_tp_exit() and included in CSV output via save_trade_log(). Verified by unit tests showing correct exit_reason for all exit paths.
 
 ## Deferred
 
@@ -364,10 +397,63 @@ This file is the explicit capability and coverage contract for the project.
 | R020 | core-capability | validated | M003/S03 | none | M003 |
 | R021 | core-capability | validated | M003/S03 | none | M003 |
 | R022 | quality-attribute | validated | M003/S02 | M003/S04 | M003 |
+| R023 | core-capability | validated | M004/S01 | none | M004 |
+| R024 | core-capability | validated | M004/S01 | M004/S02 | M004 |
+| R025 | core-capability | validated | M004/S02 | M004/S03, M004/S04 | M004/S02 |
+| R026 | primary-user-loop | validated | M004/S03 | none | M004/S03 |
+| R027 | operability | validated | M004/S04 | none | M004/S04 |
+| R028 | operability | validated | M004/S04 | none | M004/S04 |
+| R029 | core-capability | validated | M004/S01 | none | M004 |
+| R030 | operability | validated | M004/S01 | none | M004 |
+| R031 | operability | validated | M004/S04 | M004/S02 | M004/S02 |
+| R032 | quality-attribute | deferred | none | none | unmapped |
+| R033 | constraint | out-of-scope | none | none | n/a |
 
 ## Coverage Summary
 
 - Active requirements: 12
-- Validated requirements: 9
-- Mapped to slices: 21
-- Unmapped active requirements: 0
+- Validated requirements: 18
+- Deferred requirements: 1
+- Out of scope: 2
+- Total requirements: 33
+- Mapped to slices: 30
+- With proof: 25
+- Unmapped active requirements: 9
+
+## Deferred
+
+### R032: Trailing stop loss (dynamic SL that moves with profit)
+
+- **Class:** quality-attribute
+- **Status:** deferred
+- **Why:** More sophisticated exit logic; defer until fixed SL/TP proves useful
+- **Source:** research
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** unmapped
+- **Notes:** May be valuable for momentum strategies; revisit after M004 results
+
+## Out of Scope
+
+### R013: The actual M3/M4/momentum/etc. strategy parameters and logic will be rewritten in the future; this milestone only ports them as-is to prove the framework
+
+- **Class:** constraint
+- **Status:** out-of-scope
+- **Why:** Prevents scope creep — we're building the framework, not optimizing strategies
+- **Source:** user
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** n/a
+- **Notes:** Strategies ported are disposable first tenants of the new framework. Superseded by M003 which replaces them with real strategies.
+
+### R033: Live trading bot integration of SL/TP (this milestone is backtest-only)
+
+- **Class:** constraint
+- **Status:** out-of-scope
+- **Why:** Milestone scope is backtest analysis only; live trading integration is a future milestone
+- **Source:** inferred
+- **Primary Owner:** none
+- **Supporting Slices:** none
+- **Validation:** n/a
+- **Notes:** After M004 proves SL/TP works in backtest, a future milestone will integrate into trading bot
+

@@ -51,7 +51,7 @@ def get_param_grid() -> dict[str, list]:
     The optimizer generates the Cartesian product of all parameter values
     and backtests every combination.
 
-    Grid size: 3×3×3×2×2 = 108 combinations
+    Grid size: 3×3×3×2×2×3×3 = 972 combinations
     """
     return {
         "lookback_window": [30, 60, 90],
@@ -59,4 +59,9 @@ def get_param_grid() -> dict[str, list]:
         "eval_second": [60, 120, 180],
         "extreme_price_low": [0.25, 0.30],
         "extreme_price_high": [0.70, 0.75],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry prices vary by regime (0.45-0.55 typical for volatility strategy).
+        # Engine handles direction logic (swap SL/TP for Down bets).
+        "stop_loss": [0.35, 0.40, 0.45],
+        "take_profit": [0.65, 0.70, 0.75],
     }

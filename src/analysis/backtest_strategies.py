@@ -50,7 +50,7 @@ def market_to_snapshot(market: dict) -> MarketSnapshot:
     return MarketSnapshot(
         market_id=market["market_id"],
         market_type=market["market_type"],
-        prices=market["ticks"],  # numpy ndarray, seconds-indexed, NaN for missing
+        prices=market["prices"],  # numpy ndarray, seconds-indexed, NaN for missing
         total_seconds=market["total_seconds"],
         elapsed_seconds=market["total_seconds"],  # backtest: full market data
         metadata={
@@ -72,6 +72,9 @@ def run_strategy(
     markets: list[dict],
     slippage: float = 0.0,
     base_rate: float = 0.063,
+    *,
+    stop_loss: float | None = None,
+    take_profit: float | None = None,
 ) -> tuple[list[Trade], dict]:
     """Run a single strategy against all *markets*.
 
@@ -96,10 +99,18 @@ def run_strategy(
                 signal.direction,
                 slippage=slippage,
                 base_rate=base_rate,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
             )
             trades.append(trade)
 
     metrics = compute_metrics(trades, config_id=strategy_id)
+    
+    # Augment metrics with SL/TP parameters if provided
+    if stop_loss is not None:
+        metrics['stop_loss'] = stop_loss
+    if take_profit is not None:
+        metrics['take_profit'] = take_profit
 
     print(
         f"[{strategy_id}] Evaluating {len(markets)} markets "

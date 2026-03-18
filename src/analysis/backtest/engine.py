@@ -45,6 +45,7 @@ class Trade:
     pnl: float
     outcome: str             # 'win' or 'loss'
     hour: int
+    exit_reason: str = 'resolution'  # 'sl', 'tp', or 'resolution'
 
 
 def calculate_pnl_hold(entry_price, direction, actual_result, base_rate=0.063):
@@ -57,21 +58,123 @@ def calculate_pnl_hold(entry_price, direction, actual_result, base_rate=0.063):
         return -entry_price
 
 
-def calculate_pnl_exit(entry_price, exit_price, base_rate=0.063):
-    """PnL for mid-market exit. PnL = exit - entry, minus fee on profit."""
-    gross = exit_price - entry_price
+def calculate_pnl_exit(entry_price, exit_price, direction, base_rate=0.063):
+    """PnL for mid-market exit. 
+    
+    For Up bets: PnL = exit - entry (you bought Yes token)
+    For Down bets: PnL = (1-exit) - (1-entry) = entry - exit (you bought No token)
+    
+    Args:
+        entry_price: Up token price at entry
+        exit_price: Up token price at exit
+        direction: 'Up' or 'Down'
+        base_rate: Fee rate
+    
+    Returns:
+        PnL after fees
+    """
+    if direction == 'Down':
+        # Down bet: you bought No token at (1-entry_price), sell at (1-exit_price)
+        # PnL = (1-exit_price) - (1-entry_price) = entry_price - exit_price
+        gross = entry_price - exit_price
+    else:
+        # Up bet: you bought Yes token at entry_price, sell at exit_price
+        gross = exit_price - entry_price
+    
     fee = polymarket_dynamic_fee(entry_price, base_rate) * max(0.0, gross)
     return gross - fee
 
 
+def simulate_sl_tp_exit(
+    prices: np.ndarray,
+    entry_second: int,
+    entry_price: float,
+    direction: str,
+    stop_loss: float,
+    take_profit: float
+) -> tuple[int, float, str]:
+    """Simulate early exit when stop loss or take profit threshold is hit.
+    
+    Args:
+        prices: Array of prices indexed by elapsed seconds
+        entry_second: Second when trade was entered
+        entry_price: Price at entry (for reference, not used in logic)
+        direction: 'Up' or 'Down'
+        stop_loss: Absolute price threshold for SL (assuming Up bet)
+        take_profit: Absolute price threshold for TP (assuming Up bet)
+    
+    Returns:
+        (exit_second, exit_price, exit_reason) tuple where exit_reason is 'sl', 'tp', or 'resolution'
+    
+    Direction handling (per D012):
+    - Up bets: SL when price <= stop_loss, TP when price >= take_profit
+    - Down bets: Invert thresholds (Down token price = 1.0 - up_price)
+        SL when price >= 1.0 - stop_loss
+        TP when price <= 1.0 - take_profit
+    
+    NaN handling: Skips invalid prices, checks next valid second.
+    If both SL and TP hit in same second, prioritizes SL (risk management).
+    """
+    # Direction-specific threshold setup
+    if direction == 'Down':
+        # Down token price = 1.0 - up_price, so invert thresholds
+        sl_threshold = 1.0 - stop_loss
+        tp_threshold = 1.0 - take_profit
+    else:  # 'Up'
+        sl_threshold = stop_loss
+        tp_threshold = take_profit
+    
+    # Scan prices from entry onward
+    last_valid_price = entry_price
+    for second in range(entry_second + 1, len(prices)):
+        current_price = prices[second]
+        
+        # Skip NaN prices
+        if np.isnan(current_price):
+            continue
+        
+        last_valid_price = current_price
+        
+        # Check thresholds based on direction
+        if direction == 'Down':
+            # Down bet: SL when price rises above sl_threshold
+            if current_price >= sl_threshold:
+                return (second, current_price, 'sl')
+            # TP when price drops below tp_threshold
+            if current_price <= tp_threshold:
+                return (second, current_price, 'tp')
+        else:  # 'Up'
+            # Up bet: SL when price drops below sl_threshold
+            if current_price <= sl_threshold:
+                return (second, current_price, 'sl')
+            # TP when price rises above tp_threshold
+            if current_price >= tp_threshold:
+                return (second, current_price, 'tp')
+    
+    # No threshold hit - hold to resolution
+    return (len(prices) - 1, last_valid_price, 'resolution')
+
+
 def make_trade(market, second_entered, entry_price, direction,
                second_exited=-1, exit_price=None, 
-               slippage=0.0, base_rate=0.063):
+               slippage=0.0, base_rate=0.063,
+               *,
+               stop_loss=None, take_profit=None):
     """Create a Trade object with PnL calculated.
     
     Args:
+        market: Market dict with price data
+        second_entered: Second when trade entered
+        entry_price: Price at entry
+        direction: 'Up' or 'Down'
+        second_exited: Second when exited (default -1 for hold to resolution)
+        exit_price: Price at exit (default None)
         slippage: Entry price penalty (default 0.0). Added to Up bets, subtracted from Down.
         base_rate: Polymarket dynamic fee base rate (default 0.063).
+        stop_loss: Optional absolute price threshold for stop loss exit.
+                   If both stop_loss and take_profit provided, simulator scans prices
+                   and exits early when threshold hit.
+        take_profit: Optional absolute price threshold for take profit exit.
     
     Note: Removed fee_rate parameter. Old code using fee_rate should pass base_rate instead.
           To approximate flat 2% fee, use base_rate ≈ 0.0317 (produces ~2% at extreme prices).
@@ -88,10 +191,26 @@ def make_trade(market, second_entered, entry_price, direction,
         # Clamp to valid token price range
         adjusted_entry = max(0.01, min(0.99, adjusted_entry))
 
+    # Determine exit conditions
+    exit_reason = 'resolution'
+    if stop_loss is not None and take_profit is not None:
+        # Use simulator to detect early exit
+        prices = market.get('prices')
+        if prices is not None:
+            sim_exit_second, sim_exit_price, exit_reason = simulate_sl_tp_exit(
+                prices, second_entered, adjusted_entry, direction,
+                stop_loss, take_profit
+            )
+            # Use simulator results
+            second_exited = sim_exit_second
+            exit_price = sim_exit_price
+
+    # Calculate PnL based on exit type
     if exit_price is not None and second_exited >= 0:
-        pnl = calculate_pnl_exit(adjusted_entry, exit_price, base_rate)
+        pnl = calculate_pnl_exit(adjusted_entry, exit_price, direction, base_rate)
         outcome = 'win' if pnl > 0 else 'loss'
     else:
+        # No SL/TP provided, or no prices array - use hold-to-resolution logic
         pnl = calculate_pnl_hold(adjusted_entry, direction, actual, base_rate)
         outcome = 'win' if direction == actual else 'loss'
         second_exited = market['total_seconds']
@@ -110,6 +229,7 @@ def make_trade(market, second_entered, entry_price, direction,
         pnl=round(pnl, 6),
         outcome=outcome,
         hour=market['hour'],
+        exit_reason=exit_reason,
     )
 
 
@@ -352,5 +472,6 @@ def save_trade_log(trades, filepath):
             'pnl': t.pnl,
             'outcome': t.outcome,
             'hour': t.hour,
+            'exit_reason': t.exit_reason,
         })
     pd.DataFrame(rows).to_csv(filepath, index=False)

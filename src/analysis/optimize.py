@@ -101,6 +101,14 @@ def optimize_strategy(
     print(f"\nTotal combinations: {total_combos}")
 
     if dry_run:
+        # Verify param split logic during dry-run
+        base_config = config_module.get_default_config()
+        config_fields = {f.name for f in dataclasses.fields(type(base_config))}
+        exit_param_names = [name for name in param_names if name not in config_fields]
+        
+        if exit_param_names:
+            print(f"\nExit parameters (not in config dataclass): {exit_param_names}")
+        
         print("\n[dry-run] Exiting without running backtests.")
         return None
 
@@ -111,6 +119,10 @@ def optimize_strategy(
 
     strategy_cls = registry[strategy_id]
     get_default_config = config_module.get_default_config
+    base_config = get_default_config()
+
+    # Introspect config dataclass to identify valid fields
+    config_fields = {f.name for f in dataclasses.fields(type(base_config))}
 
     all_metrics: list[dict] = []
     trades_by_config: dict[str, list[Trade]] = {}
@@ -120,20 +132,29 @@ def optimize_strategy(
     for i, combo in enumerate(combinations, 1):
         param_dict = dict(zip(param_names, combo))
 
+        # Split param_dict into strategy params and exit params
+        strategy_params = {k: v for k, v in param_dict.items() if k in config_fields}
+        exit_params = {k: v for k, v in param_dict.items() if k not in config_fields}
+
         # Build descriptive config label
         param_parts = [f"{k}={v}" for k, v in param_dict.items()]
         config_label = f"{strategy_id}_{'_'.join(param_parts)}"
 
-        # Create config with overridden params
-        base_config = get_default_config()
-        custom_config = dataclasses.replace(base_config, **param_dict)
+        # Create config with overridden params (strategy params only)
+        custom_config = dataclasses.replace(base_config, **strategy_params)
 
         # Instantiate strategy with custom config
         strategy = strategy_cls(custom_config)
 
-        # Run backtest
+        # Run backtest with exit params threaded through
         print(f"  [{i}/{total_combos}] {config_label}")
-        trades, metrics = run_strategy(config_label, strategy, markets)
+        trades, metrics = run_strategy(
+            config_label,
+            strategy,
+            markets,
+            stop_loss=exit_params.get('stop_loss'),
+            take_profit=exit_params.get('take_profit'),
+        )
 
         all_metrics.append(metrics)
         trades_by_config[config_label] = trades
@@ -156,7 +177,9 @@ def optimize_strategy(
             f"WR={row['win_rate_pct']:.1f}%, "
             f"PnL={row['total_pnl']:.4f}, "
             f"Sharpe={row['sharpe_ratio']:.3f}, "
-            f"Score={row['ranking_score']:.1f}"
+            f"Score={row['ranking_score']:.1f}, "
+            f"SL={row.get('stop_loss', 'N/A')}, "
+            f"TP={row.get('take_profit', 'N/A')}"
         )
 
     # Save results

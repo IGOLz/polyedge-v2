@@ -50,19 +50,19 @@ This milestone is complete only when all are true:
 
 ## Slices
 
-- [ ] **S01: Parameter Grid Foundation** `risk:low` `depends:[]`
+- [x] **S01: Parameter Grid Foundation** `risk:low` `depends:[]`
   > After this: All 7 strategies (S1-S7) have `get_param_grid()` returning entry params + `stop_loss`/`take_profit` keys; TEMPLATE demonstrates pattern; fixture test verifies grids are non-empty and include SL/TP.
 
-- [ ] **S02: Stop Loss & Take Profit Engine** `risk:medium` `depends:[S01]`
+- [x] **S02: Stop Loss & Take Profit Engine** `risk:medium` `depends:[S01]`
   > After this: Engine has `simulate_sl_tp_exit()` that scans price array and returns early exit second/price/reason when SL or TP hit; Trade dataclass extended with `exit_reason` field; unit tests prove correct PnL for SL/TP exits on synthetic data.
 
-- [ ] **S03: Grid Search Orchestrator** `risk:low` `depends:[S02]`
+- [x] **S03: Grid Search Orchestrator** `risk:low` `depends:[S02]`
   > After this: `optimize.py` extracts SL/TP from strategy grids, generates Cartesian product including exit params, passes SL/TP to engine when creating trades; dry-run for S1 shows ≥100 combinations.
 
-- [ ] **S04: Ranking & Output** `risk:low` `depends:[S03]`
-  > After this: Backtest output CSV includes `stop_loss`, `take_profit`, and `exit_reason` columns; top 10 summary prints explicit SL/TP values for each ranked combination; best config clearly surfaced.
+- [x] **S04: Exit Simulation Fix & Output Display** `risk:low` `depends:[S03]`
+  > After this: Market dict key mismatch fixed (data loader returns `prices` not just `ticks`); SL/TP simulation actually runs during backtest; top 10 summary prints explicit SL/TP values for each ranked combination; exit_reason shows mix of 'sl', 'tp', 'resolution' values.
 
-- [ ] **S05: Integration Verification** `risk:low` `depends:[S04]`
+- [x] **S05: Integration Verification** `risk:low` `depends:[S04]`
   > After this: Verification script proves full pipeline: S1 grid includes SL/TP, dry-run shows dimensions, full optimize run produces CSV with ≥100 combinations, top 10 include explicit SL/TP, at least one trade has exit_reason='sl' and one has 'tp'.
 
 ## Boundary Map
@@ -99,8 +99,9 @@ Consumes from S02:
 ### S03 → S04
 
 Produces:
-- `analysis/optimize.py` — Extends grid generation: reads SL/TP from strategy `get_param_grid()`, generates Cartesian product including exit params, passes to engine
-- Updated `make_trade()` calls with SL/TP parameters
+- `analysis/optimize.py` — Grid generation with SL/TP dimensions (972 combinations for S1)
+- Results CSV with `stop_loss`, `take_profit`, `exit_reason` columns
+- Metrics dict augmentation with SL/TP values
 
 Consumes from S01:
 - `get_param_grid()` return values with SL/TP keys
@@ -112,13 +113,14 @@ Consumes from S02:
 ### S04 → S05
 
 Produces:
-- `analysis/optimize.py` — Output CSV includes `stop_loss`, `take_profit`, `exit_reason` columns
-- `analysis/optimize.py` — Top 10 summary prints explicit SL/TP values
-- Updated `compute_metrics()` to preserve SL/TP in output dict
+- Fixed market dict key mismatch (data loader provides `prices` for engine)
+- Working SL/TP simulation with non-uniform exit_reason values
+- Top 10 summary display with explicit SL/TP values for each ranked combination
 
 Consumes from S03:
 - Grid generation with SL/TP combinations
-- Trade objects with exit_reason populated
+- Trade objects with exit_reason field
+- Results CSV with SL/TP columns
 
 ### S05 (Integration Verification)
 

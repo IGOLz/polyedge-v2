@@ -56,7 +56,7 @@ def get_param_grid() -> dict[str, list]:
     thresholds, and key thresholds for each detection pattern.
 
     Returns:
-        Parameter grid with ~96 combinations.
+        Parameter grid with ~864 combinations.
     """
     return {
         "min_agreement": [2, 3],
@@ -66,4 +66,9 @@ def get_param_grid() -> dict[str, list]:
         "calibration_deviation": [0.05, 0.08, 0.10],
         "momentum_threshold": [0.03, 0.05],
         "volatility_threshold": [0.08, 0.10],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry prices 0.45-0.60 for composite ensemble signals.
+        # Engine handles direction logic (swap SL/TP for Down bets).
+        "stop_loss": [0.35, 0.40, 0.45],
+        "take_profit": [0.65, 0.70, 0.75],
     }

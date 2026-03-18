@@ -46,13 +46,15 @@ def get_param_grid() -> dict[str, list]:
     The optimizer generates the Cartesian product of all parameter values
     and backtests every combination.
 
-    Example:
-        return {
-            "example_threshold": [0.30, 0.40, 0.50],
-            "example_window_seconds": [10, 20, 30],
-        }
-
-    Returns:
-        Empty dict (no optimization) — replace with real parameters.
+    Example configuration below shows structure — replace with your strategy's parameters.
     """
-    return {}
+    return {
+        "example_threshold": [0.30, 0.40, 0.50],
+        "example_window_seconds": [10, 20, 30],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # For a Down bet (shorting Up token), stop_loss should be higher than entry_price,
+        # and take_profit should be lower. Engine handles direction logic.
+        # Tune ranges based on your strategy's typical entry prices.
+        "stop_loss": [0.35, 0.40, 0.45],
+        "take_profit": [0.65, 0.70, 0.75],
+    }

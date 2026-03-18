@@ -45,11 +45,16 @@ def get_param_grid() -> dict[str, list]:
     and backtests every combination.
 
     Returns:
-        4 × 3 × 3 × 2 = 72 parameter combinations
+        4 × 3 × 3 × 2 × 3 × 3 = 648 parameter combinations
     """
     return {
         "window_size": [10, 15, 20, 30],
         "streak_length": [3, 4, 5],
         "min_move_threshold": [0.02, 0.03, 0.05],
         "min_windows": [4, 5],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry prices 0.40-0.60 for streak-detected entries.
+        # Engine handles direction logic (swap SL/TP for Down bets).
+        "stop_loss": [0.30, 0.35, 0.40],
+        "take_profit": [0.70, 0.75, 0.80],
     }

@@ -45,11 +45,17 @@ def get_param_grid() -> dict[str, list]:
     Tests various spike thresholds, lookback windows, reversion percentages,
     and minimum reversion seconds to find optimal mean reversion parameters.
     
-    Total combinations: 4×3×4×3 = 144
+    Total combinations: 4×3×4×3×3×3 = 1296
     """
     return {
         "spike_threshold": [0.70, 0.75, 0.80, 0.85],
         "spike_lookback": [15, 30, 60],
         "reversion_pct": [0.05, 0.08, 0.10, 0.15],
         "min_reversion_sec": [30, 60, 120],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry at spikes (0.75-0.85 for Down bets, 0.15-0.25 for Up bets).
+        # These values work for Up bets; Down bets swap semantics.
+        # Engine handles direction logic and filters invalid combinations.
+        "stop_loss": [0.15, 0.20, 0.25],
+        "take_profit": [0.75, 0.80, 0.85],
     }

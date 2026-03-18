@@ -48,7 +48,7 @@ def get_param_grid() -> dict[str, list]:
     Tests various entry windows, price thresholds, and minimum deviations
     to find optimal calibration mispricing exploitation parameters.
     
-    Total combinations: 3×3×2×2×3 = 108
+    Total combinations: 3×3×2×2×3×3×3 = 972
     """
     return {
         "entry_window_start": [30, 45, 60],
@@ -56,4 +56,9 @@ def get_param_grid() -> dict[str, list]:
         "price_low_threshold": [0.40, 0.45],
         "price_high_threshold": [0.55, 0.60],
         "min_deviation": [0.05, 0.08, 0.10],
+        # Stop loss and take profit are absolute price thresholds (not relative offsets).
+        # Entry prices typically 0.45-0.55 for calibration mispricing strategy.
+        # Engine handles direction logic (swap SL/TP for Down bets).
+        "stop_loss": [0.35, 0.40, 0.45],
+        "take_profit": [0.65, 0.70, 0.75],
     }
