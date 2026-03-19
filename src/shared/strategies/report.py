@@ -123,13 +123,13 @@ class StrategyReport:
     def to_json(self, path: str) -> None:
         """Write report as JSON file."""
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, default=str)
 
     def to_markdown(self, path: str) -> None:
         """Write report as Markdown file for human consumption."""
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(self._render_markdown())
 
     def _render_markdown(self) -> str:

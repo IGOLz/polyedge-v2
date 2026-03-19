@@ -85,6 +85,28 @@ docker compose ps
 docker compose logs -f trading
 ```
 
+### Trading Only With External Core/DB
+
+If another project is already running `core` and writing live data to PostgreSQL,
+you can run only the trading bot from this repo.
+
+Set the external database host in `.env` or in the shell:
+
+```bash
+export POSTGRES_HOST=<external-db-host>
+export POSTGRES_PORT=5432
+```
+
+Then start only trading without local dependencies:
+
+```bash
+docker compose up -d --no-deps trading
+docker compose logs -f trading
+```
+
+This skips local `core`, `analysis`, and local `timescaledb`. The bot will use
+the external database instead.
+
 ## Core Modes
 
 `core` is the production collector. It initializes the database, resumes unresolved markets from the database, and writes `market_ticks` and `market_outcomes`.
