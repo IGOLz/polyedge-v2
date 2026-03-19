@@ -71,6 +71,7 @@ def run_strategy(
     *,
     stop_loss: float | None = None,
     take_profit: float | None = None,
+    log_summary: bool = True,
 ) -> tuple[list[Trade], dict]:
     """Run a single strategy against all eligible markets."""
     trades: list[Trade] = []
@@ -119,11 +120,12 @@ def run_strategy(
     if take_profit is not None:
         metrics["take_profit"] = take_profit
 
-    print(
-        f"[{strategy_id}] Evaluating {len(eligible_markets)} markets "
-        f"(skipped {skipped_markets} without required feature data) "
-        f"-> {len(trades)} trades"
-    )
+    if log_summary:
+        print(
+            f"[{strategy_id}] Evaluating {len(eligible_markets)} markets "
+            f"(skipped {skipped_markets} without required feature data) "
+            f"-> {len(trades)} trades"
+        )
 
     return trades, metrics
 

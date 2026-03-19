@@ -43,6 +43,7 @@ src/
 |---------|-----------|---------|----------|
 | `timescaledb` | polyedge-db | Shared PostgreSQL + TimescaleDB | Only if crashed |
 | `core` | polyedge-core | Data collection (24/7) | **NEVER** on updates |
+| `core-debug` | polyedge-core-debug | Dry-run validation, no DB writes | On-demand |
 | `analysis` | polyedge-analysis | Strategy backtests | On-demand |
 | `trading` | polyedge-trading | Live trading bot | Safe to restart |
 
@@ -83,6 +84,23 @@ docker compose run --rm analysis
 docker compose ps
 docker compose logs -f trading
 ```
+
+## Core Modes
+
+`core` is the production collector. It initializes the database, resumes unresolved markets from the database, and writes `market_ticks` and `market_outcomes`.
+
+`core-debug` is a dry-run validator. It still runs discovery, websocket subscriptions, in-memory tick progression, market end detection, heartbeat logging, and resolution polling, but it never reads from or writes to PostgreSQL.
+
+Use debug mode when the old collector is still running and writing to the database:
+
+```bash
+docker compose --profile debug up -d core-debug
+docker compose logs -f core-debug
+```
+
+You should see logs confirming tracked markets, websocket subscriptions, heartbeat messages, debug tick checks, and market resolution checks, without any database writes.
+
+When you're ready to promote this repo to the main collector, stop `core-debug` and run the normal `core` service instead.
 
 ## Key Design Decisions
 

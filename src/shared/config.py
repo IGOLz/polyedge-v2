@@ -23,6 +23,13 @@ def _optional(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def _optional_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 # ── PostgreSQL ──────────────────────────────────────────────────────────
 
 DB_CONFIG = {
@@ -51,9 +58,16 @@ POLYMARKET_API = {
 TIMING = {
     "market_discovery_interval": 30,     # seconds between REST polls
     "price_record_interval": 1,          # seconds between tick writes
+    "volume_poll_interval": 10,          # seconds between market volume refreshes
     "heartbeat_interval": 60,            # seconds between heartbeat logs
     "resolution_poll_interval": 10,      # seconds between resolution checks
     "ws_reconnect_max_backoff": 30,      # max seconds for WS reconnect backoff
+}
+
+# ── Core runtime switches ───────────────────────────────────────────────
+
+CORE_RUNTIME = {
+    "debug_mode": _optional_bool("CORE_DEBUG_MODE", False),
 }
 
 # ── Trading authentication (only loaded when env vars are present) ──────

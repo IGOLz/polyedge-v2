@@ -39,6 +39,16 @@ def _safe_float(value) -> Optional[float]:
     return result
 
 
+def _extract_market_volume(data: dict) -> Optional[float]:
+    if not isinstance(data, dict):
+        return None
+    return (
+        _safe_float(data.get("volume"))
+        or _safe_float(data.get("volumeNum"))
+        or _safe_float(data.get("volume_num"))
+    )
+
+
 def _normalize_text(*parts: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", " ".join(parts).lower()).strip()
 
@@ -91,6 +101,7 @@ async def enrich_with_clob(
     market_type: str,
     started_at: datetime,
     ended_at: datetime,
+    initial_volume: Optional[float] = None,
 ) -> Optional[MarketState]:
     """Fetch token IDs and seed price information from the CLOB market endpoint."""
     try:
@@ -143,6 +154,7 @@ async def enrich_with_clob(
         ended_at=ended_at,
         market_type=market_type,
         latest_up_price=initial_up_price,
+        latest_volume=initial_volume,
         last_emitted_up_price=initial_up_price,
     )
 
@@ -233,15 +245,30 @@ async def fetch_open_crypto_markets(client: httpx.AsyncClient) -> list[MarketSta
                 continue
 
             seen_market_ids.add(market_id)
-            candidates.append((market_id, f"{asset}_{duration}m", start_dt, end_dt))
+            candidates.append(
+                (
+                    market_id,
+                    f"{asset}_{duration}m",
+                    start_dt,
+                    end_dt,
+                    _extract_market_volume(market),
+                )
+            )
 
     if not candidates:
         return []
 
     enriched = await asyncio.gather(
         *[
-            enrich_with_clob(client, market_id, market_type, started_at, ended_at)
-            for market_id, market_type, started_at, ended_at in candidates
+            enrich_with_clob(
+                client,
+                market_id,
+                market_type,
+                started_at,
+                ended_at,
+                initial_volume,
+            )
+            for market_id, market_type, started_at, ended_at, initial_volume in candidates
         ],
         return_exceptions=True,
     )
@@ -262,6 +289,58 @@ async def fetch_open_btc_5min_markets(client: httpx.AsyncClient) -> list[MarketS
     """Backward-compatible wrapper around the generic crypto market discovery."""
     markets = await fetch_open_crypto_markets(client)
     return [market for market in markets if market.market_type == "BTC_5m"]
+
+
+async def fetch_open_crypto_market_volumes(client: httpx.AsyncClient) -> dict[str, float]:
+    """Fetch the latest cumulative volume for currently open tracked crypto markets."""
+    now = datetime.now(timezone.utc)
+    volumes: dict[str, float] = {}
+
+    for config in ASSET_CONFIG.values():
+        for tag_slug in config["tag_slugs"]:
+            for event in await _fetch_events_for_tag(client, tag_slug):
+                markets = event.get("markets") or []
+                series_list = event.get("series") or []
+                series_text = " ".join((s.get("slug") or "") for s in series_list)
+                event_slug = event.get("slug") or ""
+                event_title = event.get("title") or event.get("name") or ""
+
+                for market in markets:
+                    slug = market.get("slug") or ""
+                    question = market.get("question") or ""
+                    combined_parts = (slug, question, event_slug, event_title, series_text)
+
+                    asset = _detect_asset(*combined_parts)
+                    if asset not in ASSET_CONFIG:
+                        continue
+                    duration = _detect_duration(*combined_parts)
+                    if duration not in SUPPORTED_DURATIONS:
+                        continue
+                    if not _is_up_down_market(*combined_parts):
+                        continue
+                    if market.get("closed", False):
+                        continue
+
+                    market_id = market.get("conditionId") or market.get("condition_id")
+                    if not market_id:
+                        continue
+
+                    end_str = market.get("endDate") or market.get("end_date")
+                    if not end_str:
+                        continue
+                    try:
+                        end_dt = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        continue
+
+                    if end_dt <= now:
+                        continue
+
+                    volume = _extract_market_volume(market)
+                    if volume is not None:
+                        volumes[market_id] = volume
+
+    return volumes
 
 
 async def fetch_market_resolution(

@@ -54,6 +54,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_HOST: timescaledb
       POSTGRES_PORT: 5432
+      CORE_DEBUG_MODE: "false"
     volumes:
       - ./logs/core:/app/logs
     restart: unless-stopped
@@ -63,6 +64,25 @@ services:
     labels:
       polyedge.role: "core"
       polyedge.update: "never"
+
+  # ── Core debug: safe parallel validation, never writes to DB ──────────
+  core-debug:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.core
+    container_name: polyedge-core-debug
+    platform: linux/arm64
+    profiles: ["debug"]
+    environment:
+      CORE_DEBUG_MODE: "true"
+    volumes:
+      - ./logs/core:/app/logs
+    restart: "no"
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "core-debug"
+      polyedge.update: "safe"
 
   # ── Analysis: Strategy research (run on-demand) ───────────────────────
   analysis:

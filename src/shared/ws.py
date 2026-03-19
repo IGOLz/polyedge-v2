@@ -115,6 +115,7 @@ async def run_websocket_listener(
     on_price_update: Callable,
     shutdown_event: asyncio.Event,
     reconnect_event: asyncio.Event,
+    on_connection_state: Optional[Callable] = None,
 ) -> None:
     """Listen to market data for all tracked markets and route price updates."""
     attempt = 0
@@ -151,6 +152,8 @@ async def run_websocket_listener(
             ) as ws:
                 attempt = 0
                 await ws.send(build_subscription_message(asset_ids))
+                if on_connection_state is not None:
+                    await on_connection_state(True, len(asset_ids))
                 logger.info("WS subscribed to %d tracked market asset(s)", len(asset_ids))
                 reconnect_event.clear()
                 last_ping = asyncio.get_running_loop().time()
@@ -199,12 +202,16 @@ async def run_websocket_listener(
                             await on_price_update(market_id, price)
 
         except ConnectionClosed as exc:
+            if on_connection_state is not None:
+                await on_connection_state(False, len(asset_ids))
             logger.info(
                 "WS disconnected (code=%s) - retrying (attempt %d)",
                 exc.code,
                 attempt + 1,
             )
         except Exception as exc:
+            if on_connection_state is not None:
+                await on_connection_state(False, len(asset_ids))
             logger.error("WS error: %s - retrying (attempt %d)", exc, attempt + 1)
 
         if shutdown_event.is_set():
