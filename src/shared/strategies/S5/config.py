@@ -10,6 +10,8 @@ class S5Config(StrategyConfig):
     entry_window_start: int = 45
     entry_window_end: int = 180
     allowed_hours: list[int] | None = None
+    allowed_assets: list[str] | None = None
+    allowed_durations_minutes: list[int] | None = None
     price_range_low: float = 0.45
     price_range_high: float = 0.60
     approach_lookback: int = 8

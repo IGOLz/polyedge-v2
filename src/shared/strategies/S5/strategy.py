@@ -12,6 +12,30 @@ class S5Strategy(BaseStrategy):
 
     config: S5Config
 
+    def market_is_eligible(self, market: dict) -> bool:
+        if not super().market_is_eligible(market):
+            return False
+
+        cfg = self.config
+        asset = str(market.get("asset", "")).lower()
+        duration_minutes = int(market.get("duration_minutes", 0) or 0)
+        hour = market.get("hour")
+
+        if cfg.allowed_assets is not None:
+            allowed_assets = {value.lower() for value in cfg.allowed_assets}
+            if asset not in allowed_assets:
+                return False
+
+        if cfg.allowed_durations_minutes is not None:
+            if duration_minutes not in cfg.allowed_durations_minutes:
+                return False
+
+        if cfg.allowed_hours is not None and hour is not None:
+            if hour not in cfg.allowed_hours:
+                return False
+
+        return True
+
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
         prices = snapshot.prices
         cfg = self.config
@@ -19,7 +43,19 @@ class S5Strategy(BaseStrategy):
         if sec < cfg.entry_window_start or sec > cfg.entry_window_end:
             return None
 
+        asset = str(snapshot.metadata.get("asset", "")).lower()
+        duration_minutes = int(snapshot.metadata.get("duration_minutes", 0) or 0)
         current_hour = snapshot.metadata.get("hour")
+
+        if cfg.allowed_assets is not None:
+            allowed_assets = {value.lower() for value in cfg.allowed_assets}
+            if asset not in allowed_assets:
+                return None
+
+        if cfg.allowed_durations_minutes is not None:
+            if duration_minutes not in cfg.allowed_durations_minutes:
+                return None
+
         if cfg.allowed_hours is not None:
             if not cfg.allowed_hours:
                 return None

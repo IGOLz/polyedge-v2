@@ -16,6 +16,7 @@ from trading import config
 from trading import db
 from trading.balance import get_usdc_balance
 from trading.executor import execute_trade, get_execution_metrics, get_variance_metrics
+from trading.live_profile import live_profile_summary, market_in_live_scope
 from trading.redeemer import redemption_loop
 from trading.report import generate_live_reports
 from trading.strategy_adapter import evaluate_strategies
@@ -174,6 +175,7 @@ async def run() -> None:
         raise SystemExit(1)
 
     log.info("USDC balance: $%.2f", balance)
+    log.info("Live strategy profile: %s", live_profile_summary())
 
     try:
         await db.update_pending_outcomes(clob)
@@ -187,6 +189,7 @@ async def run() -> None:
     await db.log_event("bot_start", "Bot started", {
         "bet_size": config.BET_SIZE_USD, "daily_loss_limit": config.DAILY_LOSS_LIMIT,
         "balance": balance, "dry_run": config.DRY_RUN,
+        "live_profile": live_profile_summary(),
     })
 
     asyncio.create_task(outcome_tracker_loop(clob))
@@ -202,7 +205,12 @@ async def run() -> None:
     while True:
         try:
             live_config = await db.get_live_config()
-            active_markets = await db.get_active_markets()
+            all_active_markets = await db.get_active_markets()
+            active_markets = [
+                market
+                for market in all_active_markets
+                if market_in_live_scope(market.market_type, market.started_at)
+            ]
 
             for market in active_markets:
                 ticks = await db.get_market_ticks(market.market_id, market.started_at)

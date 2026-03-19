@@ -31,10 +31,11 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from shared.strategies import MarketSnapshot, Signal, discover_strategies, get_strategy
+from shared.strategies import MarketSnapshot, Signal
 from trading.balance import get_usdc_balance
 from trading.constants import BET_SIZING
 from trading.db import MarketInfo, Tick, already_traded_this_market
+from trading.live_profile import get_live_strategies
 from trading.strategies import calculate_dynamic_bet_size, calculate_shares
 from trading.utils import debug_log, log
 
@@ -203,18 +204,9 @@ async def evaluate_strategies(
         return []
 
     signals: list[Signal] = []
-    strategy_classes = discover_strategies()
+    strategies = get_live_strategies()
 
-    for strategy_id, strategy_cls in strategy_classes.items():
-        try:
-            strategy = get_strategy(strategy_id)
-        except Exception as exc:
-            debug_log.info(
-                "[ADAPTER] Failed to instantiate strategy %s: %s",
-                strategy_id,
-                exc,
-            )
-            continue
+    for strategy in strategies:
 
         # Already-traded guard (async DB check)
         try:
@@ -242,7 +234,7 @@ async def evaluate_strategies(
         except Exception as exc:
             debug_log.info(
                 "[ADAPTER] Strategy %s raised during evaluate: %s",
-                strategy_id,
+                strategy.config.strategy_id,
                 exc,
             )
             continue
@@ -269,7 +261,7 @@ async def evaluate_strategies(
         debug_log.info(
             "[ADAPTER] No signals for %s (%d strategies evaluated)",
             market.market_id[:16],
-            len(strategy_classes),
+            len(strategies),
         )
 
     return signals
