@@ -19,6 +19,7 @@ class PrecomputedDataset:
     payload: Any
     eligible_markets: int
     skipped_markets_missing_features: int
+    slippage: float = 0.0
 
 
 class StrategyKernel(Protocol):

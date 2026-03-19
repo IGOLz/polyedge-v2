@@ -14,6 +14,7 @@ SIGNIFICANCE_LEVEL = 0.15
 # Default bet size for backtests
 DEFAULT_BET_SIZE = 10
 DEFAULT_FEE_RATE = 0.02
+DEFAULT_ENTRY_SLIPPAGE = 0.01
 
 
 def to_python(val):

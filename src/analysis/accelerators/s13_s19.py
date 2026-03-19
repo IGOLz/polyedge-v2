@@ -97,6 +97,7 @@ def _evaluate_s13_combo(
     ret5, ret10, ret30, m5, m10, m30, vol10, vol30,
     avail_ret5, avail_ret10, avail_ret30, avail_m5, avail_m10, avail_m30, avail_v10, avail_v30,
     combo,
+    entry_slippage,
 ):
     feature_window = int(combo[0])
     entry_window_start = int(combo[1])
@@ -164,7 +165,7 @@ def _evaluate_s13_combo(
                 break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
         exit_fees[trade_count] = exit_fee
@@ -181,6 +182,7 @@ def _evaluate_s14_combo(
     ret5, ret10, ret30, m5, m10, m30, mm5, mm10, mm30,
     avail_ret5, avail_ret10, avail_ret30, avail_m5, avail_m10, avail_m30, avail_mm5, avail_mm10, avail_mm30,
     combo,
+    entry_slippage,
 ):
     feature_window = int(combo[0]); entry_window_start = int(combo[1]); entry_window_end = int(combo[2])
     min_market_delta_abs = combo[3]; max_underlying_return_abs = combo[4]; extreme_price_low = combo[5]; extreme_price_high = combo[6]
@@ -216,7 +218,7 @@ def _evaluate_s14_combo(
                 direction_up = True; adjusted_entry = max(0.01, min(0.99, up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -225,6 +227,7 @@ def _evaluate_s14_combo(
 def _evaluate_s15_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
     nearest_tol1, ret5, ret10, ret30, trade_count_matrix, avail_ret5, avail_ret10, avail_ret30, avail_trade_count, combo,
+    entry_slippage,
 ):
     setup_window_end = int(combo[0]); breakout_scan_start = int(combo[1]); breakout_scan_end = int(combo[2]); breakout_buffer = combo[3]
     confirmation_points = int(combo[4]); feature_window = int(combo[5]); min_underlying_return = combo[6]; min_trade_count = combo[7]; stop_loss = combo[8]; take_profit = combo[9]
@@ -284,7 +287,7 @@ def _evaluate_s15_combo(
                     direction_up = False; adjusted_entry = max(0.01, min(0.99, 1.0 - up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -293,6 +296,7 @@ def _evaluate_s15_combo(
 def _evaluate_s16_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
     nearest_tol1, ret5, ret10, ret30, vol10, vol30, avail_ret5, avail_ret10, avail_ret30, avail_v10, avail_v30, combo,
+    entry_slippage,
 ):
     short_window = int(combo[0]); long_window = int(combo[1]); entry_window_start = int(combo[2]); entry_window_end = int(combo[3])
     min_short_return = combo[4]; min_long_return_opposite = combo[5]; min_price_distance_from_mid = combo[6]; max_underlying_vol = combo[7]; stop_loss = combo[8]; take_profit = combo[9]
@@ -326,7 +330,7 @@ def _evaluate_s16_combo(
                 direction_up = False; adjusted_entry = max(0.01, min(0.99, 1.0 - up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -335,6 +339,7 @@ def _evaluate_s16_combo(
 def _evaluate_s17_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
     nearest_tol1, market_delta_open, underlying_return_open, market_delta_5, avail_md_open, avail_ur_open, avail_md5, combo,
+    entry_slippage,
 ):
     entry_window_start = int(combo[0]); entry_window_end = int(combo[1]); underlying_beta = combo[2]; residual_threshold = combo[3]
     min_underlying_move_abs = combo[4]; reversal_confirmation_abs = combo[5]; extreme_price_low = combo[6]; extreme_price_high = combo[7]; stop_loss = combo[8]; take_profit = combo[9]
@@ -364,7 +369,7 @@ def _evaluate_s17_combo(
                 direction_up = True; adjusted_entry = max(0.01, min(0.99, up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -373,6 +378,7 @@ def _evaluate_s17_combo(
 def _evaluate_s18_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
     nearest_tol1, ret5, ret10, ret30, vol30, trade_count_matrix, market_delta_5, avail_ret5, avail_ret10, avail_ret30, avail_vol30, avail_trade_count, avail_md5, combo,
+    entry_slippage,
 ):
     entry_window_start = int(combo[0]); entry_window_end = int(combo[1]); min_return_30s = combo[2]; min_return_10s = combo[3]; min_return_5s = combo[4]
     acceleration_ratio = combo[5]; max_underlying_vol = combo[6]; min_trade_count = combo[7]; max_price_distance_from_mid = combo[8]; stop_loss = combo[9]; take_profit = combo[10]
@@ -400,7 +406,7 @@ def _evaluate_s18_combo(
                 direction_up = False; adjusted_entry = max(0.01, min(0.99, 1.0 - up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -410,6 +416,7 @@ def _evaluate_s19_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
     nearest_tol1, ret5, ret10, ret30, md5, md10, md30, volume, taker_buy, trade_count_matrix,
     avail_ret5, avail_ret10, avail_ret30, avail_md5, avail_md10, avail_md30, avail_volume, avail_taker_buy, avail_trade_count, combo,
+    entry_slippage,
 ):
     entry_window_start = int(combo[0]); entry_window_end = int(combo[1]); feature_window = int(combo[2]); min_underlying_return = combo[3]; min_market_delta = combo[4]; max_market_delta = combo[5]; min_trade_count = combo[6]; min_volume = combo[7]; buy_imbalance_threshold = combo[8]; max_price_distance_from_mid = combo[9]; stop_loss = combo[10]; take_profit = combo[11]
     if feature_window == 5:
@@ -443,7 +450,7 @@ def _evaluate_s19_combo(
                 direction_up = False; adjusted_entry = max(0.01, min(0.99, 1.0 - up_price)); entry_second = sec; found = True; break
         if not found:
             continue
-        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit)
+        pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
         pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
     return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
 
@@ -468,7 +475,7 @@ class _BaseFeatureKernel:
         strategy_params = {key: value for key, value in param_dict.items() if key in config_fields}
         exit_params = {key: value for key, value in param_dict.items() if key not in config_fields}
         strategy = self.strategy_cls(dataclasses.replace(base_config, **strategy_params))
-        trades, _ = run_strategy(config_id, strategy, dataset.markets, stop_loss=exit_params.get("stop_loss"), take_profit=exit_params.get("take_profit"), log_summary=False)
+        trades, _ = run_strategy(config_id, strategy, dataset.markets, slippage=dataset.slippage, stop_loss=exit_params.get("stop_loss"), take_profit=exit_params.get("take_profit"), log_summary=False)
         return trades
 
 
@@ -488,7 +495,7 @@ class S13Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s13_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["underlying_realized_vol_10s"], p.matrices["underlying_realized_vol_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["underlying_realized_vol_10s"], p.availability["underlying_realized_vol_30s"], combo_array)
+            result = _evaluate_s13_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["underlying_realized_vol_10s"], p.matrices["underlying_realized_vol_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["underlying_realized_vol_10s"], p.availability["underlying_realized_vol_30s"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -501,7 +508,7 @@ class S14Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s14_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["direction_mismatch_5s"], p.matrices["direction_mismatch_10s"], p.matrices["direction_mismatch_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["direction_mismatch_5s"], p.availability["direction_mismatch_10s"], p.availability["direction_mismatch_30s"], combo_array)
+            result = _evaluate_s14_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["direction_mismatch_5s"], p.matrices["direction_mismatch_10s"], p.matrices["direction_mismatch_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["direction_mismatch_5s"], p.availability["direction_mismatch_10s"], p.availability["direction_mismatch_30s"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -513,7 +520,7 @@ class S15Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s15_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_trade_count"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_trade_count"], combo_array)
+            result = _evaluate_s15_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_trade_count"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_trade_count"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -525,7 +532,7 @@ class S16Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s16_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_realized_vol_10s"], p.matrices["underlying_realized_vol_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_realized_vol_10s"], p.availability["underlying_realized_vol_30s"], combo_array)
+            result = _evaluate_s16_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_realized_vol_10s"], p.matrices["underlying_realized_vol_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_realized_vol_10s"], p.availability["underlying_realized_vol_30s"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -537,7 +544,7 @@ class S17Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s17_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["market_up_delta_from_market_open"], p.matrices["underlying_return_from_market_open"], p.matrices["market_up_delta_5s"], p.availability["market_up_delta_from_market_open"], p.availability["underlying_return_from_market_open"], p.availability["market_up_delta_5s"], combo_array)
+            result = _evaluate_s17_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["market_up_delta_from_market_open"], p.matrices["underlying_return_from_market_open"], p.matrices["market_up_delta_5s"], p.availability["market_up_delta_from_market_open"], p.availability["underlying_return_from_market_open"], p.availability["market_up_delta_5s"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -549,7 +556,7 @@ class S18Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s18_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_realized_vol_30s"], p.matrices["underlying_trade_count"], p.matrices["market_up_delta_5s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_realized_vol_30s"], p.availability["underlying_trade_count"], p.availability["market_up_delta_5s"], combo_array)
+            result = _evaluate_s18_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_realized_vol_30s"], p.matrices["underlying_trade_count"], p.matrices["market_up_delta_5s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_realized_vol_30s"], p.availability["underlying_trade_count"], p.availability["market_up_delta_5s"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
@@ -561,6 +568,6 @@ class S19Accelerator(_BaseFeatureKernel):
         p: FeaturePayload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s19_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["underlying_volume"], p.matrices["underlying_taker_buy_base_volume"], p.matrices["underlying_trade_count"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["underlying_volume"], p.availability["underlying_taker_buy_base_volume"], p.availability["underlying_trade_count"], combo_array)
+            result = _evaluate_s19_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["underlying_volume"], p.matrices["underlying_taker_buy_base_volume"], p.matrices["underlying_trade_count"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["underlying_volume"], p.availability["underlying_taker_buy_base_volume"], p.availability["underlying_trade_count"], combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r

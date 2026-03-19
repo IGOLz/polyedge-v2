@@ -61,13 +61,27 @@ def ticks_to_snapshot(market: MarketInfo, ticks: list[Tick]) -> MarketSnapshot:
         if 0 <= second <= current_second:
             prices[second] = tick.up_price  # last-write-wins for same second
 
+    parts = market.market_type.split("_")
+    asset = parts[0] if parts else ""
+    duration_minutes = 0
+    if len(parts) >= 2 and parts[1].endswith("m"):
+        try:
+            duration_minutes = int(parts[1].replace("m", ""))
+        except ValueError:
+            duration_minutes = 0
+
     return MarketSnapshot(
         market_id=market.market_id,
         market_type=market.market_type,
         prices=prices,
         total_seconds=total_seconds,
         elapsed_seconds=current_second,
-        metadata={"started_at": market.started_at},
+        metadata={
+            "asset": asset,
+            "hour": market.started_at.hour,
+            "started_at": market.started_at,
+            "duration_minutes": duration_minutes,
+        },
     )
 
 
@@ -133,7 +147,8 @@ def _populate_execution_fields(
             "actual_cost": round(actual_cost, 2),
             "price_min": 0.01,
             "price_max": 0.99,
-            "stop_loss_price": None,
+            "stop_loss_price": signal.signal_data.get("stop_loss_price"),
+            "take_profit_price": signal.signal_data.get("take_profit_price"),
             "profitability_thesis": profitability_thesis,
             "balance_at_signal": round(balance, 2),
             "current_balance": round(balance, 2),

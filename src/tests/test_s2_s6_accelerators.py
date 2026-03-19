@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run_parity(strategy_id: str, markets: list[dict], tmp_path, grid_patch) -> None:
+def _run_parity(strategy_id: str, markets: list[dict], tmp_path) -> None:
     generic_df = optimize.optimize_strategy(
         strategy_id=strategy_id,
         markets=markets,
@@ -30,6 +30,7 @@ def _run_parity(strategy_id: str, markets: list[dict], tmp_path, grid_patch) -> 
         workers=1,
         progress_interval=100,
         engine="generic",
+        slippage=0.0,
     )
     accelerated_df = optimize.optimize_strategy(
         strategy_id=strategy_id,
@@ -38,6 +39,7 @@ def _run_parity(strategy_id: str, markets: list[dict], tmp_path, grid_patch) -> 
         workers=1,
         progress_interval=100,
         engine="accelerated",
+        slippage=0.0,
     )
 
     assert generic_df is not None
@@ -120,7 +122,7 @@ def test_s2_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
             "feature_series": {},
         },
     ]
-    _run_parity("S2", markets, tmp_path, s2_config.get_param_grid)
+    _run_parity("S2", markets, tmp_path)
 
 
 def test_s3_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
@@ -129,6 +131,10 @@ def test_s3_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
         "spike_lookback": [3],
         "reversion_pct": [0.10],
         "min_reversion_sec": [2],
+        "entry_window_start": [1],
+        "entry_window_end": [6],
+        "min_seconds_since_extremum": [1],
+        "min_distance_from_mid": [0.02],
         "stop_loss": [0.20],
         "take_profit": [0.80],
     })
@@ -160,7 +166,7 @@ def test_s3_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
             "feature_series": {},
         },
     ]
-    _run_parity("S3", markets, tmp_path, s3_config.get_param_grid)
+    _run_parity("S3", markets, tmp_path)
 
 
 def test_s4_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
@@ -203,7 +209,7 @@ def test_s4_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
             "feature_series": {},
         },
     ]
-    _run_parity("S4", markets, tmp_path, s4_config.get_param_grid)
+    _run_parity("S4", markets, tmp_path)
 
 
 def test_s5_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
@@ -215,6 +221,9 @@ def test_s5_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
         "price_range_high": [0.60],
         "approach_lookback": [2],
         "cross_buffer": [0.01],
+        "confirmation_lookback": [2],
+        "confirmation_min_move": [0.03],
+        "min_cross_move": [0.02],
         "stop_loss": [0.20],
         "take_profit": [0.80],
     })
@@ -246,7 +255,7 @@ def test_s5_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
             "feature_series": {},
         },
     ]
-    _run_parity("S5", markets, tmp_path, s5_config.get_param_grid)
+    _run_parity("S5", markets, tmp_path)
 
 
 def test_s6_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
@@ -292,4 +301,4 @@ def test_s6_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
             "prior_market_type_streak_length": 2,
         },
     ]
-    _run_parity("S6", markets, tmp_path, s6_config.get_param_grid)
+    _run_parity("S6", markets, tmp_path)

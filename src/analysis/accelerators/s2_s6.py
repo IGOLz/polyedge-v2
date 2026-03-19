@@ -63,6 +63,7 @@ def _evaluate_s2_combo(
     nearest_prices: np.ndarray,
     tolerances: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     eval_window_start = int(combo[0])
     eval_window_end = int(combo[1])
@@ -145,7 +146,7 @@ def _evaluate_s2_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -167,13 +168,18 @@ def _evaluate_s3_combo(
     fee_active: np.ndarray,
     nearest_prices: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     spike_threshold = combo[0]
     spike_lookback = int(combo[1])
     reversion_pct = combo[2]
     min_reversion_sec = int(combo[3])
-    stop_loss = combo[4]
-    take_profit = combo[5]
+    entry_window_start = int(combo[4])
+    entry_window_end = int(combo[5])
+    min_seconds_since_extremum = int(combo[6])
+    min_distance_from_mid = combo[7]
+    stop_loss = combo[8]
+    take_profit = combo[9]
 
     market_count = prices.shape[0]
     pnls = np.empty(market_count, dtype=np.float64)
@@ -190,9 +196,15 @@ def _evaluate_s3_combo(
         entry_second = -1
         market_total_seconds = int(total_seconds[market_idx])
 
-        for sec in range(1, market_total_seconds):
+        last_entry_second = min(entry_window_end, market_total_seconds - 1)
+        if last_entry_second < entry_window_start:
+            continue
+
+        for sec in range(max(1, entry_window_start), last_entry_second + 1):
             current_price = nearest_prices[market_idx, sec]
             if np.isnan(current_price):
+                continue
+            if abs(current_price - 0.50) < min_distance_from_mid:
                 continue
 
             window_start = sec - (spike_lookback + min_reversion_sec)
@@ -223,14 +235,24 @@ def _evaluate_s3_combo(
             best_reversion = -1.0
             chosen_direction = 0
 
-            if peak_price >= spike_threshold and peak_sec >= 0 and 0 < sec - peak_sec <= min_reversion_sec:
+            elapsed_since_peak = sec - peak_sec
+            if (
+                peak_price >= spike_threshold
+                and peak_sec >= 0
+                and min_seconds_since_extremum <= elapsed_since_peak <= min_reversion_sec
+            ):
                 reversion_amount = (peak_price - current_price) / peak_price if peak_price > 0.0 else 0.0
                 if reversion_amount >= reversion_pct and current_price < peak_price and current_price > 0.50:
                     best_reversion = reversion_amount
                     chosen_direction = 0
 
             lower_threshold = 1.0 - spike_threshold
-            if trough_price <= lower_threshold and trough_sec >= 0 and 0 < sec - trough_sec <= min_reversion_sec:
+            elapsed_since_trough = sec - trough_sec
+            if (
+                trough_price <= lower_threshold
+                and trough_sec >= 0
+                and min_seconds_since_extremum <= elapsed_since_trough <= min_reversion_sec
+            ):
                 denom = 1.0 - trough_price
                 reversion_amount = (current_price - trough_price) / denom if denom > 0.0 else 0.0
                 if reversion_amount >= reversion_pct and current_price > trough_price and current_price < 0.50:
@@ -252,7 +274,7 @@ def _evaluate_s3_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -274,6 +296,7 @@ def _evaluate_s4_combo(
     fee_active: np.ndarray,
     nearest_prices: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     lookback_window = int(combo[0])
     vol_threshold = combo[1]
@@ -360,7 +383,7 @@ def _evaluate_s4_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, sec, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, sec, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -384,6 +407,7 @@ def _evaluate_s5_combo(
     nearest_prices: np.ndarray,
     allowed_hour_masks: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     entry_window_start = int(combo[0])
     entry_window_end = int(combo[1])
@@ -392,8 +416,11 @@ def _evaluate_s5_combo(
     price_range_high = combo[4]
     approach_lookback = int(combo[5])
     cross_buffer = combo[6]
-    stop_loss = combo[7]
-    take_profit = combo[8]
+    confirmation_lookback = int(combo[7])
+    confirmation_min_move = combo[8]
+    min_cross_move = combo[9]
+    stop_loss = combo[10]
+    take_profit = combo[11]
 
     market_count = prices.shape[0]
     pnls = np.empty(market_count, dtype=np.float64)
@@ -428,14 +455,28 @@ def _evaluate_s5_combo(
                 continue
             if price < price_range_low or price > price_range_high:
                 continue
+            recent_move = trailing_net_move_from_raw(prices, market_idx, sec, confirmation_lookback)
+            if np.isnan(recent_move):
+                continue
+            cross_move = price - prev_price
 
-            if prev_price <= 0.50 - cross_buffer and price >= 0.50 + cross_buffer:
+            if (
+                prev_price <= 0.50 - cross_buffer
+                and price >= 0.50 + cross_buffer
+                and cross_move >= min_cross_move
+                and recent_move >= confirmation_min_move
+            ):
                 direction_up = True
                 adjusted_entry = max(0.01, min(0.99, price))
                 entry_second = sec
                 found = True
                 break
-            if prev_price >= 0.50 + cross_buffer and price <= 0.50 - cross_buffer:
+            if (
+                prev_price >= 0.50 + cross_buffer
+                and price <= 0.50 - cross_buffer
+                and cross_move <= -min_cross_move
+                and recent_move <= -confirmation_min_move
+            ):
                 direction_up = False
                 adjusted_entry = max(0.01, min(0.99, 1.0 - price))
                 entry_second = sec
@@ -447,7 +488,7 @@ def _evaluate_s5_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -471,6 +512,7 @@ def _evaluate_s6_combo(
     streak_lengths: np.ndarray,
     nearest_prices: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     streak_length_required = int(combo[0])
     streak_direction_filter = int(combo[1])
@@ -524,7 +566,7 @@ def _evaluate_s6_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -570,6 +612,7 @@ class _BaseWindowKernel:
             config_id,
             strategy,
             dataset.markets,
+            slippage=dataset.slippage,
             stop_loss=exit_params.get("stop_loss"),
             take_profit=exit_params.get("take_profit"),
             log_summary=False,
@@ -602,6 +645,7 @@ class S2Accelerator(_BaseWindowKernel):
                 payload.nearest_prices,
                 self.tolerance_values,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -636,6 +680,7 @@ class S3Accelerator(_BaseWindowKernel):
                 payload.common.fee_active,
                 nearest,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -670,6 +715,7 @@ class S4Accelerator(_BaseWindowKernel):
                 payload.common.fee_active,
                 nearest,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -689,7 +735,9 @@ class S5Accelerator(_BaseWindowKernel):
         common = build_common_payload(markets)
         nearest_prices = precompute_nearest_prices_multi(common.prices, common.total_seconds, self.tolerance_values)
         encoded_hour_options = np.zeros((len(param_grid["allowed_hours"]), 24), dtype=np.bool_)
+        self._hour_option_lookup = {}
         for idx, value in enumerate(param_grid["allowed_hours"]):
+            self._hour_option_lookup[self._hour_key(value)] = idx
             if value is None:
                 encoded_hour_options[idx, :] = True
             else:
@@ -698,16 +746,13 @@ class S5Accelerator(_BaseWindowKernel):
         payload = S5Payload(common=common, nearest_prices=nearest_prices[0], encoded_hour_options=encoded_hour_options)
         return PrecomputedDataset(strategy_id=strategy_id, markets=markets, payload=payload, eligible_markets=len(markets), skipped_markets_missing_features=0)
 
+    @staticmethod
+    def _hour_key(allowed_hours: list[int] | None) -> tuple[int, ...] | None:
+        return None if allowed_hours is None else tuple(int(hour) for hour in allowed_hours)
+
     def encode_combo(self, combo: tuple[object, ...]) -> np.ndarray:
         allowed_hours = combo[2]
-        if allowed_hours is None:
-            hours_code = 0
-        elif allowed_hours == [8, 9, 10, 11, 12, 13]:
-            hours_code = 1
-        elif allowed_hours == [13, 14, 15, 16, 17, 18]:
-            hours_code = 2
-        else:
-            hours_code = 3
+        hours_code = self._hour_option_lookup[self._hour_key(allowed_hours)]
         values = list(combo)
         values[2] = float(hours_code)
         return np.array(values, dtype=np.float64)
@@ -729,6 +774,7 @@ class S5Accelerator(_BaseWindowKernel):
                 payload.nearest_prices,
                 payload.encoded_hour_options,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -774,6 +820,7 @@ class S6Accelerator(_BaseWindowKernel):
                 payload.common.streak_lengths,
                 nearest,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets

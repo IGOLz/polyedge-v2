@@ -31,6 +31,7 @@ def _assert_parity(strategy_id: str, markets: list[dict], tmp_path) -> None:
         workers=1,
         progress_interval=100,
         engine="generic",
+        slippage=0.0,
     )
     accelerated_df = optimize.optimize_strategy(
         strategy_id=strategy_id,
@@ -39,6 +40,7 @@ def _assert_parity(strategy_id: str, markets: list[dict], tmp_path) -> None:
         workers=1,
         progress_interval=100,
         engine="accelerated",
+        slippage=0.0,
     )
 
     assert generic_df is not None and accelerated_df is not None

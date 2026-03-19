@@ -25,8 +25,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def _assert_parity(strategy_id: str, markets: list[dict], tmp_path) -> None:
-    generic_df = optimize.optimize_strategy(strategy_id, markets, str(tmp_path / f"{strategy_id.lower()}_generic"), workers=1, progress_interval=100, engine="generic")
-    accelerated_df = optimize.optimize_strategy(strategy_id, markets, str(tmp_path / f"{strategy_id.lower()}_accelerated"), workers=1, progress_interval=100, engine="accelerated")
+    generic_df = optimize.optimize_strategy(strategy_id, markets, str(tmp_path / f"{strategy_id.lower()}_generic"), workers=1, progress_interval=100, engine="generic", slippage=0.0)
+    accelerated_df = optimize.optimize_strategy(strategy_id, markets, str(tmp_path / f"{strategy_id.lower()}_accelerated"), workers=1, progress_interval=100, engine="accelerated", slippage=0.0)
     assert generic_df is not None and accelerated_df is not None
     assert len(generic_df) == len(accelerated_df) == 1
     assert accelerated_df.iloc[0]["config_id"] == generic_df.iloc[0]["config_id"]

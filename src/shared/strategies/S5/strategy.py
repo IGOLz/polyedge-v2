@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from shared.strategies.S5.config import S5Config
 from shared.strategies.base import BaseStrategy, MarketSnapshot, Signal
-from shared.strategies.helpers import current_second, get_price
+from shared.strategies.helpers import current_second, get_price, trailing_net_move
 
 
 class S5Strategy(BaseStrategy):
@@ -34,7 +34,18 @@ class S5Strategy(BaseStrategy):
         if not (cfg.price_range_low <= price <= cfg.price_range_high):
             return None
 
-        if prev_price <= 0.50 - cfg.cross_buffer and price >= 0.50 + cfg.cross_buffer:
+        recent_move = trailing_net_move(prices, sec, cfg.confirmation_lookback)
+        if recent_move is None:
+            return None
+
+        cross_move = price - prev_price
+
+        if (
+            prev_price <= 0.50 - cfg.cross_buffer
+            and price >= 0.50 + cfg.cross_buffer
+            and cross_move >= cfg.min_cross_move
+            and recent_move >= cfg.confirmation_min_move
+        ):
             return Signal(
                 direction="Up",
                 strategy_name=cfg.strategy_name,
@@ -44,10 +55,19 @@ class S5Strategy(BaseStrategy):
                     "observed_up_price": price,
                     "previous_up_price": prev_price,
                     "hour": current_hour,
+                    "recent_move": recent_move,
+                    "cross_move": cross_move,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 
-        if prev_price >= 0.50 + cfg.cross_buffer and price <= 0.50 - cfg.cross_buffer:
+        if (
+            prev_price >= 0.50 + cfg.cross_buffer
+            and price <= 0.50 - cfg.cross_buffer
+            and cross_move <= -cfg.min_cross_move
+            and recent_move <= -cfg.confirmation_min_move
+        ):
             return Signal(
                 direction="Down",
                 strategy_name=cfg.strategy_name,
@@ -57,6 +77,10 @@ class S5Strategy(BaseStrategy):
                     "observed_up_price": price,
                     "previous_up_price": prev_price,
                     "hour": current_hour,
+                    "recent_move": recent_move,
+                    "cross_move": cross_move,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 

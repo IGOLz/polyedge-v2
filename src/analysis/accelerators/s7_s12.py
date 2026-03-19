@@ -243,6 +243,7 @@ def _evaluate_s7_combo(
     s2_tolerances: np.ndarray,
     s4_nearest: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     min_agreement = int(combo[0])
     calibration_enabled = int(combo[1]) == 1
@@ -330,7 +331,7 @@ def _evaluate_s7_combo(
 
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -352,6 +353,7 @@ def _evaluate_s8_combo(
     fee_active: np.ndarray,
     nearest_tol1: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     setup_window_end = int(combo[0])
     breakout_scan_start = int(combo[1])
@@ -457,7 +459,7 @@ def _evaluate_s8_combo(
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -508,6 +510,7 @@ def _evaluate_s9_combo(
     fee_active: np.ndarray,
     nearest_tol1: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     compression_window = int(combo[0])
     compression_max_std = combo[1]
@@ -612,7 +615,7 @@ def _evaluate_s9_combo(
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -632,6 +635,7 @@ def _evaluate_s10_combo(
     duration_minutes: np.ndarray,
     fee_active: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     impulse_start = int(combo[0])
     impulse_end = int(combo[1])
@@ -765,7 +769,7 @@ def _evaluate_s10_combo(
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -786,6 +790,7 @@ def _evaluate_s11_combo(
     fee_active: np.ndarray,
     nearest_tol1: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     precondition_window = int(combo[0])
     extreme_deviation = combo[1]
@@ -870,7 +875,7 @@ def _evaluate_s11_combo(
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -890,6 +895,7 @@ def _evaluate_s12_combo(
     duration_minutes: np.ndarray,
     fee_active: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     late_phase_start_pct = combo[0]
     lookback_seconds = int(combo[1])
@@ -961,7 +967,7 @@ def _evaluate_s12_combo(
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(
             prices, total_seconds, final_outcomes, fee_active,
-            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit,
+            market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage,
         )
         pnls[trade_count] = pnl
         entry_fees[trade_count] = entry_fee
@@ -1000,6 +1006,7 @@ class _BaseKernel:
             config_id,
             strategy,
             dataset.markets,
+            slippage=dataset.slippage,
             stop_loss=exit_params.get("stop_loss"),
             take_profit=exit_params.get("take_profit"),
             log_summary=False,
@@ -1062,6 +1069,7 @@ class S7Accelerator(_BaseKernel):
                 payload.s2_tolerances,
                 payload.s4_nearest,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1088,7 +1096,7 @@ class S8Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s8_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                nearest, combo_array,
+                nearest, combo_array, dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1115,7 +1123,7 @@ class S9Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s9_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                nearest, combo_array,
+                nearest, combo_array, dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1140,7 +1148,7 @@ class S10Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s10_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                combo_array,
+                combo_array, dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1167,7 +1175,7 @@ class S11Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s11_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                nearest, combo_array,
+                nearest, combo_array, dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1192,7 +1200,7 @@ class S12Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s12_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                combo_array,
+                combo_array, dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets

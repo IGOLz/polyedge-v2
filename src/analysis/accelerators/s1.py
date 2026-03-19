@@ -151,6 +151,7 @@ def _evaluate_s1_combo(
     duration_minutes: np.ndarray,
     fee_active: np.ndarray,
     combo: np.ndarray,
+    entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     entry_window_start = int(combo[0])
     entry_window_end = int(combo[1])
@@ -214,6 +215,8 @@ def _evaluate_s1_combo(
 
         if not found:
             continue
+
+        adjusted_entry = max(0.01, min(0.99, adjusted_entry + entry_slippage))
 
         entry_fee = 0.0
         exit_fee = 0.0
@@ -356,6 +359,7 @@ class S1Accelerator:
                 payload.duration_minutes,
                 payload.fee_active,
                 combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(
                 pnls=pnls,
@@ -390,6 +394,7 @@ class S1Accelerator:
             config_id,
             strategy,
             dataset.markets,
+            slippage=dataset.slippage,
             stop_loss=exit_params.get("stop_loss"),
             take_profit=exit_params.get("take_profit"),
             log_summary=False,

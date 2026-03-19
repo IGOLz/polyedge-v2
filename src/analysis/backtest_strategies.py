@@ -24,6 +24,7 @@ from analysis.backtest.engine import (
     make_trade,
     save_module_results,
 )
+from analysis.constants import DEFAULT_ENTRY_SLIPPAGE
 from shared.strategies import (
     MarketSnapshot,
     StrategyReport,
@@ -66,7 +67,7 @@ def run_strategy(
     strategy_id: str,
     strategy,
     markets: list[dict],
-    slippage: float = 0.0,
+    slippage: float = DEFAULT_ENTRY_SLIPPAGE,
     base_rate: float | None = None,
     *,
     stop_loss: float | None = None,
@@ -221,10 +222,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--slippage",
         type=float,
-        default=0.0,
+        default=DEFAULT_ENTRY_SLIPPAGE,
         help=(
-            "Slippage penalty in price units (default: 0.0). "
-            "Models execution lag."
+            "Slippage penalty in price units "
+            f"(default: {DEFAULT_ENTRY_SLIPPAGE:.2f}). "
+            "Models execution lag and adverse fills."
         ),
     )
     parser.add_argument(

@@ -18,11 +18,13 @@ class S3Strategy(BaseStrategy):
         prices = snapshot.prices
         cfg = self.config
         sec = current_second(snapshot)
-        if sec <= 0:
+        if sec < cfg.entry_window_start or sec > cfg.entry_window_end:
             return None
 
         current_price = get_price(prices, sec, tolerance=2)
         if current_price is None:
+            return None
+        if abs(current_price - 0.50) < cfg.min_distance_from_mid:
             return None
 
         window_start = max(0, sec - (cfg.spike_lookback + cfg.min_reversion_sec))
@@ -35,12 +37,20 @@ class S3Strategy(BaseStrategy):
 
         candidates: list[tuple[str, float, int, float]] = []
 
-        if peak_price >= cfg.spike_threshold and 0 < sec - peak_sec <= cfg.min_reversion_sec:
+        elapsed_since_peak = sec - peak_sec
+        if (
+            peak_price >= cfg.spike_threshold
+            and cfg.min_seconds_since_extremum <= elapsed_since_peak <= cfg.min_reversion_sec
+        ):
             reversion_amount = (peak_price - current_price) / peak_price if peak_price > 0 else 0.0
             if reversion_amount >= cfg.reversion_pct and current_price < peak_price and current_price > 0.50:
                 candidates.append(("Down", reversion_amount, peak_sec, peak_price))
 
-        if trough_price <= (1.0 - cfg.spike_threshold) and 0 < sec - trough_sec <= cfg.min_reversion_sec:
+        elapsed_since_trough = sec - trough_sec
+        if (
+            trough_price <= (1.0 - cfg.spike_threshold)
+            and cfg.min_seconds_since_extremum <= elapsed_since_trough <= cfg.min_reversion_sec
+        ):
             denom = 1.0 - trough_price
             reversion_amount = (current_price - trough_price) / denom if denom > 0 else 0.0
             if reversion_amount >= cfg.reversion_pct and current_price > trough_price and current_price < 0.50:
@@ -65,5 +75,7 @@ class S3Strategy(BaseStrategy):
                 "extremum_second": extremum_sec,
                 "extremum_price": extremum_price,
                 "reversion_amount": reversion_amount,
+                "stop_loss_price": cfg.live_stop_loss_price,
+                "take_profit_price": cfg.live_take_profit_price,
             },
         )

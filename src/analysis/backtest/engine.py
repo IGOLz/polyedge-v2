@@ -377,24 +377,42 @@ def _empty_metrics(config_id):
 
 
 def add_ranking_score(df):
-    """Add composite ranking score to results DataFrame."""
+    """Add composite ranking score to results DataFrame.
+
+    The score intentionally rewards edge quality and robustness while
+    penalizing tiny-sample lucky runs through explicit trade-count and
+    drawdown components.
+    """
     if df.empty:
         df["ranking_score"] = []
         return df
 
     df = df.copy()
-    for col in ["total_pnl", "sharpe_ratio", "expected_value", "win_rate_pct"]:
+    for col in [
+        "total_pnl",
+        "sharpe_ratio",
+        "expected_value",
+        "win_rate_pct",
+        "total_bets",
+    ]:
         if df[col].std() > 0:
             df[f"{col}_pctile"] = df[col].rank(pct=True) * 100
         else:
             df[f"{col}_pctile"] = 50.0
 
+    if df["max_drawdown"].std() > 0:
+        df["max_drawdown_pctile"] = (-df["max_drawdown"]).rank(pct=True) * 100
+    else:
+        df["max_drawdown_pctile"] = 50.0
+
     df["ranking_score"] = (
-        df["total_pnl_pctile"] * 0.30 +
-        df["expected_value_pctile"] * 0.25 +
-        df["sharpe_ratio_pctile"] * 0.20 +
-        df["consistency_score"] * 0.15 +
-        df["win_rate_pct_pctile"] * 0.10
+        df["total_pnl_pctile"] * 0.23 +
+        df["expected_value_pctile"] * 0.20 +
+        df["sharpe_ratio_pctile"] * 0.15 +
+        df["win_rate_pct_pctile"] * 0.07 +
+        df["total_bets_pctile"] * 0.15 +
+        df["max_drawdown_pctile"] * 0.10 +
+        df["consistency_score"] * 0.10
     ).round(2)
 
     df.drop(columns=[col for col in df.columns if col.endswith("_pctile")], inplace=True)

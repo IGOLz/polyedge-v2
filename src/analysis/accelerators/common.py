@@ -149,7 +149,9 @@ def resolve_trade_pnl(
     direction_up: bool,
     stop_loss: float,
     take_profit: float,
+    entry_slippage: float = 0.0,
 ) -> tuple[float, float, float]:
+    adjusted_entry = max(0.01, min(0.99, adjusted_entry + entry_slippage))
     entry_fee = 0.0
     exit_fee = 0.0
     net_shares = 1.0

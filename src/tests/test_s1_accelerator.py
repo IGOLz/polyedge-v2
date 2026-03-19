@@ -129,6 +129,7 @@ def test_accelerated_optimizer_matches_generic_for_s1(tmp_path, synthetic_market
         workers=1,
         progress_interval=100,
         engine="generic",
+        slippage=0.0,
     )
     accelerated_df = optimize.optimize_strategy(
         strategy_id="S1",
@@ -137,6 +138,7 @@ def test_accelerated_optimizer_matches_generic_for_s1(tmp_path, synthetic_market
         workers=1,
         progress_interval=100,
         engine="accelerated",
+        slippage=0.0,
     )
 
     assert generic_df is not None

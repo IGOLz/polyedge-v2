@@ -11,6 +11,7 @@ import math
 import multiprocessing
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from collections.abc import Iterator
 
@@ -20,6 +21,7 @@ import pandas as pd
 from analysis.accelerators import get_strategy_kernel, has_strategy_kernel
 from analysis.backtest.engine import add_ranking_score, save_module_results
 from analysis.backtest_strategies import run_strategy
+from analysis.constants import DEFAULT_ENTRY_SLIPPAGE
 from shared.strategies.registry import discover_strategies
 
 
@@ -76,6 +78,27 @@ def _print_grid_summary(strategy_id: str, grid: dict[str, list], config_fields: 
     return total_combos
 
 
+def _format_elapsed(seconds: float) -> str:
+    total_seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def _print_progress_update(completed: int, total: int, start_time: float) -> None:
+    elapsed = max(0.001, time.monotonic() - start_time)
+    rate = completed / elapsed
+    remaining = max(0, total - completed)
+    eta_seconds = remaining / rate if rate > 0 else 0.0
+    print(
+        "  "
+        f"Completed {completed}/{total} combinations "
+        f"| elapsed {_format_elapsed(elapsed)} "
+        f"| rate {rate:.2f}/s "
+        f"| eta {_format_elapsed(eta_seconds)}"
+    )
+
+
 def _init_generic_worker(
     strategy_id: str,
     strategy_cls,
@@ -83,6 +106,7 @@ def _init_generic_worker(
     config_fields: set[str],
     markets: list[dict],
     param_names: list[str],
+    slippage: float,
 ) -> None:
     global _GENERIC_WORKER_CONTEXT
     _GENERIC_WORKER_CONTEXT = {
@@ -92,6 +116,7 @@ def _init_generic_worker(
         "config_fields": config_fields,
         "markets": markets,
         "param_names": param_names,
+        "slippage": slippage,
     }
 
 
@@ -102,6 +127,7 @@ def _evaluate_generic_combo(combo: tuple[object, ...]) -> dict:
     config_fields = _GENERIC_WORKER_CONTEXT["config_fields"]
     markets = _GENERIC_WORKER_CONTEXT["markets"]
     param_names = _GENERIC_WORKER_CONTEXT["param_names"]
+    slippage = _GENERIC_WORKER_CONTEXT["slippage"]
 
     param_dict = dict(zip(param_names, combo))
     strategy_params = {k: v for k, v in param_dict.items() if k in config_fields}
@@ -115,6 +141,7 @@ def _evaluate_generic_combo(combo: tuple[object, ...]) -> dict:
         config_label,
         strategy,
         markets,
+        slippage=slippage,
         stop_loss=exit_params.get("stop_loss"),
         take_profit=exit_params.get("take_profit"),
         log_summary=False,
@@ -134,10 +161,13 @@ def _iter_generic_metrics(
     workers: int,
     total_combos: int,
     progress_interval: int,
+    slippage: float,
 ) -> list[dict]:
     all_metrics: list[dict] = []
+    start_time = time.monotonic()
 
     if workers <= 1:
+        print("  Running generic optimization in a single process.")
         _init_generic_worker(
             strategy_id,
             strategy_cls,
@@ -145,16 +175,39 @@ def _iter_generic_metrics(
             config_fields,
             markets,
             param_names,
+            slippage,
         )
         for completed, combo in enumerate(itertools.product(*param_values), 1):
             all_metrics.append(_evaluate_generic_combo(combo))
-            if completed % progress_interval == 0 or completed == total_combos:
-                print(f"  Completed {completed}/{total_combos} combinations")
+            if (
+                completed == 1
+                or completed % progress_interval == 0
+                or completed == total_combos
+            ):
+                _print_progress_update(completed, total_combos, start_time)
         return all_metrics
 
     mp_context = multiprocessing.get_context("fork") if os.name != "nt" else None
-    chunksize = max(1, min(100, total_combos // max(workers * 20, 1) or 1))
-    combo_iter = itertools.product(*param_values)
+    combo_iter = iter(itertools.product(*param_values))
+    max_in_flight = max(workers * 4, 1)
+
+    print(f"  Launching {workers} generic worker processes...")
+    if os.name == "nt":
+        print(
+            "  Windows generic mode copies market data into fresh worker processes. "
+            "The first completion can take a while."
+        )
+
+    def _submit_initial_work(executor, futures: dict[concurrent.futures.Future, None]) -> int:
+        submitted = 0
+        while len(futures) < max_in_flight:
+            try:
+                combo = next(combo_iter)
+            except StopIteration:
+                break
+            futures[executor.submit(_evaluate_generic_combo, combo)] = None
+            submitted += 1
+        return submitted
 
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,
@@ -167,15 +220,38 @@ def _iter_generic_metrics(
             config_fields,
             markets,
             param_names,
+            slippage,
         ),
     ) as executor:
-        for completed, metrics in enumerate(
-            executor.map(_evaluate_generic_combo, combo_iter, chunksize=chunksize),
-            1,
-        ):
-            all_metrics.append(metrics)
-            if completed % progress_interval == 0 or completed == total_combos:
-                print(f"  Completed {completed}/{total_combos} combinations")
+        futures: dict[concurrent.futures.Future, None] = {}
+        submitted = _submit_initial_work(executor, futures)
+        print(f"  Submitted {submitted}/{total_combos} combinations to worker queue")
+        print("  Waiting for first completed combination...")
+
+        completed = 0
+        while futures:
+            done, _ = concurrent.futures.wait(
+                futures,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                futures.pop(future)
+                all_metrics.append(future.result())
+                completed += 1
+
+                if (
+                    completed == 1
+                    or completed % progress_interval == 0
+                    or completed == total_combos
+                ):
+                    _print_progress_update(completed, total_combos, start_time)
+
+                while len(futures) < max_in_flight:
+                    try:
+                        combo = next(combo_iter)
+                    except StopIteration:
+                        break
+                    futures[executor.submit(_evaluate_generic_combo, combo)] = None
 
     return all_metrics
 
@@ -310,6 +386,155 @@ def _build_strategy_run_output_dir(base_output_dir: str, strategy_id: str) -> st
     return candidate
 
 
+def _materialize_config_result(
+    strategy_id: str,
+    strategy_cls,
+    base_config,
+    config_fields: set[str],
+    param_names: list[str],
+    row: pd.Series,
+    markets: list[dict],
+    slippage: float,
+) -> tuple[list, dict]:
+    param_dict = {name: row[name] for name in param_names}
+    strategy_params = {key: value for key, value in param_dict.items() if key in config_fields}
+    exit_params = {key: value for key, value in param_dict.items() if key not in config_fields}
+    strategy = strategy_cls(dataclasses.replace(base_config, **strategy_params))
+    return run_strategy(
+        str(row["config_id"]),
+        strategy,
+        markets,
+        slippage=slippage,
+        stop_loss=exit_params.get("stop_loss"),
+        take_profit=exit_params.get("take_profit"),
+        log_summary=False,
+    )
+
+
+def _write_validation_report(
+    strategy_id: str,
+    strategy_cls,
+    base_config,
+    config_fields: set[str],
+    param_names: list[str],
+    markets: list[dict],
+    df: pd.DataFrame,
+    output_dir: str,
+    slippage: float,
+    top_n: int = 3,
+) -> None:
+    if df.empty or not markets:
+        return
+
+    market_day = {
+        market["market_id"]: market["started_at"].date().isoformat()
+        for market in markets
+        if market.get("started_at") is not None
+    }
+    sorted_markets = sorted(
+        markets,
+        key=lambda market: market.get("started_at") or datetime.min.replace(tzinfo=timezone.utc),
+    )
+    fold_count = min(4, len(sorted_markets))
+    folds = [list(fold) for fold in np.array_split(np.array(sorted_markets, dtype=object), fold_count) if len(fold) > 0]
+
+    report_path = os.path.join(output_dir, f"optimize_{strategy_id}_Validation.md")
+    lines = [
+        f"# optimize_{strategy_id} Validation",
+        "",
+        f"- Default slippage used: {slippage:.2f}",
+        f"- Validation configs analyzed: {min(top_n, len(df))}",
+        f"- Chronological folds: {len(folds)}",
+        "",
+    ]
+
+    for rank, (_, row) in enumerate(df.head(top_n).iterrows(), 1):
+        trades, metrics = _materialize_config_result(
+            strategy_id,
+            strategy_cls,
+            base_config,
+            config_fields,
+            param_names,
+            row,
+            markets,
+            slippage,
+        )
+        lines.append(f"## Rank {rank}: {row['config_id']}")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("|--------|-------|")
+        for key in ("total_bets", "win_rate_pct", "total_pnl", "profit_factor", "sharpe_ratio", "max_drawdown"):
+            lines.append(f"| {key} | {metrics.get(key, 0)} |")
+        lines.append("")
+
+        asset_totals: dict[str, float] = {}
+        duration_totals: dict[int, float] = {}
+        day_totals: dict[str, float] = {}
+        for trade in trades:
+            asset_totals[trade.asset] = asset_totals.get(trade.asset, 0.0) + trade.pnl
+            duration_totals[trade.duration_minutes] = duration_totals.get(trade.duration_minutes, 0.0) + trade.pnl
+            trade_day = market_day.get(trade.market_id)
+            if trade_day is not None:
+                day_totals[trade_day] = day_totals.get(trade_day, 0.0) + trade.pnl
+
+        if asset_totals:
+            lines.append("### Asset Breakdown")
+            lines.append("")
+            lines.append("| Asset | Total PnL |")
+            lines.append("|-------|-----------|")
+            for asset, pnl in sorted(asset_totals.items()):
+                lines.append(f"| {asset.upper()} | {pnl:.4f} |")
+            lines.append("")
+
+        if duration_totals:
+            lines.append("### Duration Breakdown")
+            lines.append("")
+            lines.append("| Duration | Total PnL |")
+            lines.append("|----------|-----------|")
+            for duration, pnl in sorted(duration_totals.items()):
+                lines.append(f"| {duration}m | {pnl:.4f} |")
+            lines.append("")
+
+        if day_totals:
+            profitable_days = sum(1 for pnl in day_totals.values() if pnl > 0)
+            worst_day = min(day_totals.items(), key=lambda item: item[1])
+            best_day = max(day_totals.items(), key=lambda item: item[1])
+            lines.append("### Daily Robustness")
+            lines.append("")
+            lines.append(f"- Profitable days: {profitable_days}/{len(day_totals)}")
+            lines.append(f"- Best day: {best_day[0]} ({best_day[1]:+.4f})")
+            lines.append(f"- Worst day: {worst_day[0]} ({worst_day[1]:+.4f})")
+            lines.append("")
+
+        if folds:
+            lines.append("### Chronological Folds")
+            lines.append("")
+            lines.append("| Fold | Markets | Bets | Win Rate % | Total PnL | Profit Factor |")
+            lines.append("|------|---------|------------|------------|-----------|---------------|")
+            for fold_idx, fold_markets in enumerate(folds, 1):
+                _, fold_metrics = _materialize_config_result(
+                    strategy_id,
+                    strategy_cls,
+                    base_config,
+                    config_fields,
+                    param_names,
+                    row,
+                    fold_markets,
+                    slippage,
+                )
+                lines.append(
+                    "| "
+                    f"{fold_idx} | {len(fold_markets)} | {fold_metrics.get('total_bets', 0)} | "
+                    f"{fold_metrics.get('win_rate_pct', 0):.2f} | {fold_metrics.get('total_pnl', 0):.4f} | "
+                    f"{fold_metrics.get('profit_factor', 0):.4f} |"
+                )
+            lines.append("")
+
+    with open(report_path, "w") as handle:
+        handle.write("\n".join(lines) + "\n")
+    print(f"  Saved {report_path}")
+
+
 def optimize_strategy(
     strategy_id: str,
     markets: list[dict] | None,
@@ -318,6 +543,7 @@ def optimize_strategy(
     workers: int = 1,
     progress_interval: int = 100,
     engine: str = "auto",
+    slippage: float = DEFAULT_ENTRY_SLIPPAGE,
 ) -> pd.DataFrame | None:
     registry, config_module, grid, param_names, param_values = _load_strategy_grid(strategy_id)
     base_config = config_module.get_default_config()
@@ -351,6 +577,7 @@ def optimize_strategy(
     print(f"Engine: {resolved_engine}")
     print(f"Using {workers} worker process(es)")
     print(f"Progress log interval: every {progress_interval} combinations")
+    print(f"Entry slippage: {slippage:.2f}")
 
     if resolved_engine == "generic":
         all_metrics = _iter_generic_metrics(
@@ -364,6 +591,7 @@ def optimize_strategy(
             workers=workers,
             total_combos=total_combos,
             progress_interval=progress_interval,
+            slippage=slippage,
         )
         df = pd.DataFrame(all_metrics)
         df = add_ranking_score(df)
@@ -371,6 +599,7 @@ def optimize_strategy(
     else:
         assert kernel is not None
         dataset = kernel.prepare(strategy_id=strategy_id, markets=markets, param_grid=grid)
+        dataset.slippage = slippage
         all_metrics = _iter_accelerated_metrics(
             strategy_id=strategy_id,
             dataset=dataset,
@@ -391,6 +620,17 @@ def optimize_strategy(
 
     module_name = f"optimize_{strategy_id}"
     save_module_results(df, {}, module_name, resolved_output_dir)
+    _write_validation_report(
+        strategy_id=strategy_id,
+        strategy_cls=registry[strategy_id],
+        base_config=base_config,
+        config_fields=config_fields,
+        param_names=param_names,
+        markets=markets,
+        df=df,
+        output_dir=resolved_output_dir,
+        slippage=slippage,
+    )
     print(f"\nResults saved to {resolved_output_dir}/")
     return df
 
@@ -424,10 +664,25 @@ def main(argv: list[str] | None = None) -> None:
         help="Worker processes for parallel evaluation (default: CPU count - 1).",
     )
     parser.add_argument(
+        "--progress-interval",
+        type=int,
+        default=25,
+        help="Print progress after this many completed combinations (default: 25).",
+    )
+    parser.add_argument(
         "--engine",
         choices=("auto", "generic", "accelerated"),
         default="auto",
         help="Optimization engine selection (default: auto).",
+    )
+    parser.add_argument(
+        "--slippage",
+        type=float,
+        default=DEFAULT_ENTRY_SLIPPAGE,
+        help=(
+            "Entry slippage penalty in price units "
+            f"(default: {DEFAULT_ENTRY_SLIPPAGE:.2f})."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -453,8 +708,9 @@ def main(argv: list[str] | None = None) -> None:
         output_dir=args.output_dir,
         dry_run=args.dry_run,
         workers=max(1, args.workers),
-        progress_interval=100,
+        progress_interval=max(1, args.progress_interval),
         engine=args.engine,
+        slippage=args.slippage,
     )
 
 
