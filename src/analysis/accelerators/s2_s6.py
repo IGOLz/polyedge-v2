@@ -169,7 +169,7 @@ def _evaluate_s3_combo(
     nearest_prices: np.ndarray,
     combo: np.ndarray,
     entry_slippage: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     spike_threshold = combo[0]
     spike_lookback = int(combo[1])
     reversion_pct = combo[2]
@@ -187,6 +187,7 @@ def _evaluate_s3_combo(
     exit_fees = np.empty(market_count, dtype=np.float64)
     trade_asset_codes = np.empty(market_count, dtype=np.int64)
     trade_durations = np.empty(market_count, dtype=np.int64)
+    trade_market_indices = np.empty(market_count, dtype=np.int64)
     trade_count = 0
 
     for market_idx in range(market_count):
@@ -281,9 +282,17 @@ def _evaluate_s3_combo(
         exit_fees[trade_count] = exit_fee
         trade_asset_codes[trade_count] = asset_codes[market_idx]
         trade_durations[trade_count] = duration_minutes[market_idx]
+        trade_market_indices[trade_count] = market_idx
         trade_count += 1
 
-    return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count]
+    return (
+        pnls[:trade_count],
+        entry_fees[:trade_count],
+        exit_fees[:trade_count],
+        trade_asset_codes[:trade_count],
+        trade_durations[:trade_count],
+        trade_market_indices[:trade_count],
+    )
 
 
 @njit(cache=True)
@@ -408,7 +417,7 @@ def _evaluate_s5_combo(
     allowed_hour_masks: np.ndarray,
     combo: np.ndarray,
     entry_slippage: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     entry_window_start = int(combo[0])
     entry_window_end = int(combo[1])
     allowed_hours_idx = int(combo[2])
@@ -428,6 +437,7 @@ def _evaluate_s5_combo(
     exit_fees = np.empty(market_count, dtype=np.float64)
     trade_asset_codes = np.empty(market_count, dtype=np.int64)
     trade_durations = np.empty(market_count, dtype=np.int64)
+    trade_market_indices = np.empty(market_count, dtype=np.int64)
     trade_count = 0
 
     for market_idx in range(market_count):
@@ -495,9 +505,17 @@ def _evaluate_s5_combo(
         exit_fees[trade_count] = exit_fee
         trade_asset_codes[trade_count] = asset_codes[market_idx]
         trade_durations[trade_count] = duration_minutes[market_idx]
+        trade_market_indices[trade_count] = market_idx
         trade_count += 1
 
-    return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count]
+    return (
+        pnls[:trade_count],
+        entry_fees[:trade_count],
+        exit_fees[:trade_count],
+        trade_asset_codes[:trade_count],
+        trade_durations[:trade_count],
+        trade_market_indices[:trade_count],
+    )
 
 
 @njit(cache=True)
@@ -671,7 +689,7 @@ class S3Accelerator(_BaseWindowKernel):
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values))
             config_id = config_id_builder(dataset.strategy_id, param_dict)
-            pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s3_combo(
+            pnls, entry_fees, exit_fees, asset_codes, durations, _ = _evaluate_s3_combo(
                 payload.common.prices,
                 payload.common.total_seconds,
                 payload.common.final_outcomes,
@@ -763,7 +781,7 @@ class S5Accelerator(_BaseWindowKernel):
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values))
             config_id = config_id_builder(dataset.strategy_id, param_dict)
-            pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s5_combo(
+            pnls, entry_fees, exit_fees, asset_codes, durations, _ = _evaluate_s5_combo(
                 payload.common.prices,
                 payload.common.total_seconds,
                 payload.common.final_outcomes,
