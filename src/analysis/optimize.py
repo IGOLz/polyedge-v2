@@ -12,13 +12,13 @@ import multiprocessing
 import os
 import sys
 from datetime import datetime, timezone
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 
 import numpy as np
 import pandas as pd
 
 from analysis.accelerators import get_strategy_kernel, has_strategy_kernel
-from analysis.backtest.engine import Trade, add_ranking_score, save_module_results
+from analysis.backtest.engine import add_ranking_score, save_module_results
 from analysis.backtest_strategies import run_strategy
 from shared.strategies.registry import discover_strategies
 
@@ -275,54 +275,6 @@ def _iter_accelerated_metrics(
     return all_metrics
 
 
-def _rerun_top_configs_for_trades(
-    df: pd.DataFrame,
-    strategy_id: str,
-    strategy_cls,
-    base_config,
-    config_fields: set[str],
-    markets: list[dict],
-    param_names: list[str],
-    top_n: int = 10,
-) -> dict[str, list[Trade]]:
-    trades_by_config: dict[str, list[Trade]] = {}
-
-    for _, row in df.head(top_n).iterrows():
-        param_dict = {name: row[name] for name in param_names if name in row.index}
-        strategy_params = {k: v for k, v in param_dict.items() if k in config_fields}
-        exit_params = {k: v for k, v in param_dict.items() if k not in config_fields}
-        config_label = _build_config_label(strategy_id, param_dict)
-        custom_config = dataclasses.replace(base_config, **strategy_params)
-        strategy = strategy_cls(custom_config)
-        trades, _ = run_strategy(
-            config_label,
-            strategy,
-            markets,
-            stop_loss=exit_params.get("stop_loss"),
-            take_profit=exit_params.get("take_profit"),
-            log_summary=False,
-        )
-        trades_by_config[config_label] = trades
-
-    return trades_by_config
-
-
-def _materialize_top_trades_accelerated(
-    df: pd.DataFrame,
-    strategy_id: str,
-    kernel,
-    dataset,
-    param_names: list[str],
-    top_n: int = 10,
-) -> dict[str, list[Trade]]:
-    trades_by_config: dict[str, list[Trade]] = {}
-    for _, row in df.head(top_n).iterrows():
-        param_dict = {name: row[name] for name in param_names if name in row.index}
-        config_label = _build_config_label(strategy_id, param_dict)
-        trades_by_config[config_label] = kernel.materialize_trades(dataset, param_dict, config_label)
-    return trades_by_config
-
-
 def _print_top_results(strategy_id: str, total_combos: int, df: pd.DataFrame) -> None:
     print(f"\n{'=' * 60}")
     print(f"Top Results for {strategy_id} ({total_combos} combinations)")
@@ -342,8 +294,8 @@ def _print_top_results(strategy_id: str, total_combos: int, df: pd.DataFrame) ->
         )
 
 
-def _build_s1_run_output_dir(base_output_dir: str, strategy_id: str) -> str:
-    """Create a unique per-run directory for S1 optimization outputs."""
+def _build_strategy_run_output_dir(base_output_dir: str, strategy_id: str) -> str:
+    """Create a unique per-run directory for a strategy's optimization outputs."""
     strategy_root = os.path.join(base_output_dir, strategy_id)
     os.makedirs(strategy_root, exist_ok=True)
 
@@ -400,12 +352,10 @@ def optimize_strategy(
     print(f"Using {workers} worker process(es)")
     print(f"Progress log interval: every {progress_interval} combinations")
 
-    strategy_cls = registry[strategy_id]
-
     if resolved_engine == "generic":
         all_metrics = _iter_generic_metrics(
             strategy_id=strategy_id,
-            strategy_cls=strategy_cls,
+            strategy_cls=registry[strategy_id],
             base_config=base_config,
             config_fields=config_fields,
             markets=markets,
@@ -418,17 +368,6 @@ def optimize_strategy(
         df = pd.DataFrame(all_metrics)
         df = add_ranking_score(df)
         df = df.sort_values("ranking_score", ascending=False).reset_index(drop=True)
-        print("\nRe-running top 10 configurations to capture sample trades...")
-        trades_by_config = _rerun_top_configs_for_trades(
-            df=df,
-            strategy_id=strategy_id,
-            strategy_cls=strategy_cls,
-            base_config=base_config,
-            config_fields=config_fields,
-            markets=markets,
-            param_names=param_names,
-            top_n=10,
-        )
     else:
         assert kernel is not None
         dataset = kernel.prepare(strategy_id=strategy_id, markets=markets, param_grid=grid)
@@ -445,24 +384,13 @@ def optimize_strategy(
         df = pd.DataFrame(all_metrics)
         df = add_ranking_score(df)
         df = df.sort_values("ranking_score", ascending=False).reset_index(drop=True)
-        print("\nRe-running top 10 configurations to capture sample trades...")
-        trades_by_config = _materialize_top_trades_accelerated(
-            df=df,
-            strategy_id=strategy_id,
-            kernel=kernel,
-            dataset=dataset,
-            param_names=param_names,
-            top_n=10,
-        )
 
     _print_top_results(strategy_id, total_combos, df)
 
-    resolved_output_dir = output_dir
-    if strategy_id == "S1":
-        resolved_output_dir = _build_s1_run_output_dir(output_dir, strategy_id)
+    resolved_output_dir = _build_strategy_run_output_dir(output_dir, strategy_id)
 
     module_name = f"optimize_{strategy_id}"
-    save_module_results(df, trades_by_config, module_name, resolved_output_dir)
+    save_module_results(df, {}, module_name, resolved_output_dir)
     print(f"\nResults saved to {resolved_output_dir}/")
     return df
 
