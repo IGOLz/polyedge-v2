@@ -413,6 +413,10 @@ async def _execute_hybrid(
     ]
 
     for stage_name, offset, poll_timeout, order_type in stages:
+        if time.time() - start_time >= EXECUTION_CONFIG['max_total_execution_seconds']:
+            log.info("[EXEC] Total execution budget exhausted before %s", _STAGE_LABELS.get(stage_name, stage_name))
+            break
+
         price = round(ideal_price + offset, 2)
         if price <= 0 or price >= 1:
             continue
@@ -431,6 +435,10 @@ async def _execute_hybrid(
         fok_attempt = 0
 
         while True:
+            if time.time() - start_time >= EXECUTION_CONFIG['max_total_execution_seconds']:
+                log.info("[EXEC] %s — stopping: total execution budget exhausted", label)
+                break
+
             fok_attempt += 1
 
             try:
@@ -554,11 +562,17 @@ async def _execute_hybrid(
                     return result  # fatal, exit entirely
                 # Non-fatal — for FOK, retry if within deadline; for GTC, move to next stage
                 elif "couldn't be fully filled" in exc_msg or "fully filled or killed" in exc_msg:
-                    if order_type == OrderType.FOK and time.time() < fok_deadline:
+                    if order_type == OrderType.FOK and time.time() < fok_deadline and fok_attempt < EXECUTION_CONFIG['fok_max_attempts']:
+                        current_best = _get_best_price(clob, token_id, "BUY")
+                        if current_best is not None and current_best > price:
+                            log.info("[EXEC] %s — FOK exception, price moved ($%.4f > $%.2f), stopping retries",
+                                     label, current_best, price)
+                            break
                         log.info("[EXEC] %s — FOK exception (attempt %d), retrying...", label, fok_attempt)
                         await asyncio.sleep(EXECUTION_CONFIG['fok_retry_interval'])
                         continue  # retry
-                    log.info("[EXEC] %s — no fill (FOK exception)", label)
+                    log.info("[EXEC] %s — no fill (FOK exception after %d attempt%s)",
+                             label, fok_attempt, "" if fok_attempt == 1 else "s")
                     break  # exit retry loop
                 else:
                     log.warning("[EXEC] %s — error: %s, continuing", label, exc)

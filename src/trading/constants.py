@@ -98,7 +98,11 @@ EXECUTION_CONFIG = {
     # Stage 3: FOK at ideal + offset (wider tolerance for low-liquidity)
     'stage_3_offset': 0.05,
 
-    # FOK retry: if FOK fails but price hasn't moved, keep retrying
-    'fok_retry_max_seconds': 15.0,
+    # FOK retry: keep this short so stale signals do not chase illiquid books
+    'fok_retry_max_seconds': 3.0,
     'fok_retry_interval': 0.5,
+    'fok_max_attempts': 4,
+
+    # Hard cap on total execution time across all stages
+    'max_total_execution_seconds': 8.0,
 }
