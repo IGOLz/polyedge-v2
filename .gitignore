@@ -13,6 +13,13 @@ venv/
 logs/
 *.log
 
+# Generated strategy results
+src/results/**/*.csv
+
+# Raw imported market data
+data/**/*.csv
+data/**/*.zip
+
 # IDE
 .vscode/
 .idea/
