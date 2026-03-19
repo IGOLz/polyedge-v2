@@ -1,0 +1,571 @@
+TOP 10 CONFIGURATIONS - optimize_S1
+====================================================================================================
+
+Rank 1:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.41_price_high_threshold=0.57_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6295
+  wins: 1391
+  losses: 4904
+  win_rate_pct: 22.1
+  total_pnl: 8.4989
+  avg_bet_pnl: 0.00135
+  profit_factor: 1.0186
+  expected_value: 0.001321
+  total_entry_fees: 28.0265
+  total_exit_fees: 16.9402
+  total_fees: 44.9667
+  sharpe_ratio: 0.0067
+  sortino_ratio: 0.0236
+  max_drawdown: 12.7446
+  std_dev_pnl: 0.200526
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 98.79
+  q1_pnl: -1.3716
+  q2_pnl: 0.8092
+  q3_pnl: 0.9491
+  q4_pnl: 8.1122
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.41
+  price_high_threshold: 0.57
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.79
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 2:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.41_price_high_threshold=0.55_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6295
+  wins: 1391
+  losses: 4904
+  win_rate_pct: 22.1
+  total_pnl: 8.4989
+  avg_bet_pnl: 0.00135
+  profit_factor: 1.0186
+  expected_value: 0.001321
+  total_entry_fees: 28.0265
+  total_exit_fees: 16.9402
+  total_fees: 44.9667
+  sharpe_ratio: 0.0067
+  sortino_ratio: 0.0236
+  max_drawdown: 12.7446
+  std_dev_pnl: 0.200526
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 98.79
+  q1_pnl: -1.3716
+  q2_pnl: 0.8092
+  q3_pnl: 0.9491
+  q4_pnl: 8.1122
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.41
+  price_high_threshold: 0.55
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.79
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 3:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.4_price_high_threshold=0.57_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6115
+  wins: 1328
+  losses: 4787
+  win_rate_pct: 21.72
+  total_pnl: 8.7958
+  avg_bet_pnl: 0.001438
+  profit_factor: 1.0205
+  expected_value: 0.001394
+  total_entry_fees: 26.6902
+  total_exit_fees: 16.3558
+  total_fees: 43.046
+  sharpe_ratio: 0.0073
+  sortino_ratio: 0.0256
+  max_drawdown: 12.4708
+  std_dev_pnl: 0.197469
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 98.96
+  q1_pnl: -3.551
+  q2_pnl: -1.34
+  q3_pnl: 2.5882
+  q4_pnl: 11.0986
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.4
+  price_high_threshold: 0.57
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.34
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 4:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.4_price_high_threshold=0.55_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6115
+  wins: 1328
+  losses: 4787
+  win_rate_pct: 21.72
+  total_pnl: 8.7958
+  avg_bet_pnl: 0.001438
+  profit_factor: 1.0205
+  expected_value: 0.001394
+  total_entry_fees: 26.6902
+  total_exit_fees: 16.3558
+  total_fees: 43.046
+  sharpe_ratio: 0.0073
+  sortino_ratio: 0.0256
+  max_drawdown: 12.4708
+  std_dev_pnl: 0.197469
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 98.96
+  q1_pnl: -3.551
+  q2_pnl: -1.34
+  q3_pnl: 2.5882
+  q4_pnl: 11.0986
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.4
+  price_high_threshold: 0.55
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.34
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 5:
+  config_id: S1_entry_window_start=20_entry_window_end=105_price_low_threshold=0.41_price_high_threshold=0.57_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6831
+  wins: 1490
+  losses: 5341
+  win_rate_pct: 21.81
+  total_pnl: 7.7663
+  avg_bet_pnl: 0.001137
+  profit_factor: 1.0159
+  expected_value: 0.001057
+  total_entry_fees: 30.0502
+  total_exit_fees: 18.2426
+  total_fees: 48.2928
+  sharpe_ratio: 0.0057
+  sortino_ratio: 0.0197
+  max_drawdown: 12.4172
+  std_dev_pnl: 0.198708
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.15
+  q1_pnl: -4.0063
+  q2_pnl: 5.677
+  q3_pnl: 0.5188
+  q4_pnl: 5.5769
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 105
+  price_low_threshold: 0.41
+  price_high_threshold: 0.57
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.29
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 6:
+  config_id: S1_entry_window_start=20_entry_window_end=105_price_low_threshold=0.41_price_high_threshold=0.55_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6831
+  wins: 1490
+  losses: 5341
+  win_rate_pct: 21.81
+  total_pnl: 7.7663
+  avg_bet_pnl: 0.001137
+  profit_factor: 1.0159
+  expected_value: 0.001057
+  total_entry_fees: 30.0502
+  total_exit_fees: 18.2426
+  total_fees: 48.2928
+  sharpe_ratio: 0.0057
+  sortino_ratio: 0.0197
+  max_drawdown: 12.4172
+  std_dev_pnl: 0.198708
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.15
+  q1_pnl: -4.0063
+  q2_pnl: 5.677
+  q3_pnl: 0.5188
+  q4_pnl: 5.5769
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 105
+  price_low_threshold: 0.41
+  price_high_threshold: 0.55
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 97.29
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 7:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.39_price_high_threshold=0.57_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 5930
+  wins: 1269
+  losses: 4661
+  win_rate_pct: 21.4
+  total_pnl: 9.498
+  avg_bet_pnl: 0.001602
+  profit_factor: 1.0235
+  expected_value: 0.001558
+  total_entry_fees: 25.3635
+  total_exit_fees: 15.7552
+  total_fees: 41.1187
+  sharpe_ratio: 0.0082
+  sortino_ratio: 0.0287
+  max_drawdown: 13.9871
+  std_dev_pnl: 0.194829
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.11
+  q1_pnl: -3.4484
+  q2_pnl: -1.9026
+  q3_pnl: 3.0066
+  q4_pnl: 11.8424
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.39
+  price_high_threshold: 0.57
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 96.95
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 8:
+  config_id: S1_entry_window_start=20_entry_window_end=90_price_low_threshold=0.39_price_high_threshold=0.55_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 5930
+  wins: 1269
+  losses: 4661
+  win_rate_pct: 21.4
+  total_pnl: 9.498
+  avg_bet_pnl: 0.001602
+  profit_factor: 1.0235
+  expected_value: 0.001558
+  total_entry_fees: 25.3635
+  total_exit_fees: 15.7552
+  total_fees: 41.1187
+  sharpe_ratio: 0.0082
+  sortino_ratio: 0.0287
+  max_drawdown: 13.9871
+  std_dev_pnl: 0.194829
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.11
+  q1_pnl: -3.4484
+  q2_pnl: -1.9026
+  q3_pnl: 3.0066
+  q4_pnl: 11.8424
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 90
+  price_low_threshold: 0.39
+  price_high_threshold: 0.55
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 96.95
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.420 res=Up   pnl=-0.1469
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 9:
+  config_id: S1_entry_window_start=20_entry_window_end=105_price_low_threshold=0.41_price_high_threshold=0.59_min_deviation=0.07_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6640
+  wins: 1416
+  losses: 5224
+  win_rate_pct: 21.33
+  total_pnl: 10.0554
+  avg_bet_pnl: 0.001514
+  profit_factor: 1.022
+  expected_value: 0.001435
+  total_entry_fees: 28.4886
+  total_exit_fees: 17.5657
+  total_fees: 46.0543
+  sharpe_ratio: 0.0077
+  sortino_ratio: 0.0269
+  max_drawdown: 11.4574
+  std_dev_pnl: 0.195531
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.04
+  q1_pnl: -2.5288
+  q2_pnl: 7.3589
+  q3_pnl: -0.6402
+  q4_pnl: 5.8655
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 105
+  price_low_threshold: 0.41
+  price_high_threshold: 0.59
+  min_deviation: 0.07
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 96.83
+
+  Sample trades:
+    0xe272da5cd6c35b.. s= 60 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x63ea28131cc717.. s= 26 dir=Down entry=0.400 res=Up   pnl=-0.1269
+    0xc54b84803f582c.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1369
+    0x2195502c81df74.. s= 26 dir=Down entry=0.410 res=Up   pnl=-0.1466
+    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.290 res=Down pnl=+0.5475
+    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.0461
+    0x4223fc294904ef.. s= 90 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xea278df5a03213.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0052
+    0x88579b6c361419.. s= 62 dir=Down entry=0.310 res=Up   pnl=-0.0360
+    0x70007a7743b990.. s= 59 dir=Down entry=0.390 res=Up   pnl=-0.1167
+    0xedf76061043bd6.. s= 59 dir=Down entry=0.340 res=Up   pnl=-0.0663
+    0xf09e370d8e665c.. s= 22 dir=Up   entry=0.380 res=Up   pnl=+0.4038
+    0x0b8b4277c3c3db.. s= 55 dir=Down entry=0.250 res=Up   pnl=-0.0044
+    0x1affe31d067c92.. s= 59 dir=Down entry=0.270 res=Up   pnl=-0.0149
+    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.400 res=Down pnl=+0.3834
+    0x8c3d5feb1d6dec.. s= 77 dir=Up   entry=0.200 res=Down pnl=-0.0026
+    0x65fef1f866af5a.. s= 74 dir=Up   entry=0.370 res=Down pnl=-0.0966
+    0xac9df2d2f92059.. s= 74 dir=Down entry=0.290 res=Up   pnl=-0.0449
+    0x3efb366af03476.. s= 77 dir=Down entry=0.380 res=Up   pnl=-0.1067
+
+Rank 10:
+  config_id: S1_entry_window_start=20_entry_window_end=105_price_low_threshold=0.41_price_high_threshold=0.57_min_deviation=0.08_rebound_lookback=12_rebound_min_move=0.012_stop_loss=0.28_take_profit=0.8
+  total_bets: 6640
+  wins: 1416
+  losses: 5224
+  win_rate_pct: 21.33
+  total_pnl: 10.0554
+  avg_bet_pnl: 0.001514
+  profit_factor: 1.022
+  expected_value: 0.001435
+  total_entry_fees: 28.4886
+  total_exit_fees: 17.5657
+  total_fees: 46.0543
+  sharpe_ratio: 0.0077
+  sortino_ratio: 0.0269
+  max_drawdown: 11.4574
+  std_dev_pnl: 0.195531
+  pct_profitable_assets: 50.0
+  pct_profitable_durations: 50.0
+  consistency_score: 99.04
+  q1_pnl: -2.5288
+  q2_pnl: 7.3589
+  q3_pnl: -0.6402
+  q4_pnl: 5.8655
+  eligible_markets: 8665
+  skipped_markets_missing_features: 0
+  entry_window_start: 20
+  entry_window_end: 105
+  price_low_threshold: 0.41
+  price_high_threshold: 0.57
+  min_deviation: 0.08
+  rebound_lookback: 12
+  rebound_min_move: 0.012
+  stop_loss: 0.28
+  take_profit: 0.8
+  ranking_score: 96.83
+
