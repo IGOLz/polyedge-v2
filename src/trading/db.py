@@ -339,7 +339,8 @@ async def get_open_stop_loss_orders() -> list:
     pool = get_pool()
     async with pool.acquire() as conn:
         return await conn.fetch("""
-            SELECT id, market_id, stop_loss_order_id, token_id, direction, entry_price
+            SELECT id, market_id, market_type, strategy_name, stop_loss_order_id,
+                   token_id, direction, entry_price, shares, bet_size_usd, stop_loss_price
             FROM bot_trades
             WHERE stop_loss_order_id IS NOT NULL AND stop_loss_triggered=FALSE
               AND final_outcome IS NULL AND status='filled'

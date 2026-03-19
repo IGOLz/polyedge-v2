@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 import sys
 from datetime import datetime, timezone
 
@@ -64,6 +65,19 @@ def _fmt_market(mt: str) -> str:
     return f"{parts[0].upper()} {parts[1]}" if len(parts) == 2 else mt
 
 
+def _extract_exit_fill(order: dict | None, fallback_price: float, fallback_shares: float) -> tuple[float, int]:
+    fill_price = fallback_price
+    fill_shares = max(0, math.floor(fallback_shares))
+    if isinstance(order, dict):
+        raw_price = order.get("average_price") or order.get("price")
+        raw_shares = order.get("size_matched") or order.get("matched_size") or order.get("filled")
+        if raw_price is not None:
+            fill_price = float(raw_price)
+        if raw_shares is not None:
+            fill_shares = max(0, math.floor(float(raw_shares)))
+    return fill_price, fill_shares
+
+
 async def outcome_tracker_loop(clob) -> None:
     log.info("Outcome tracker started (every 5 min)")
     while True:
@@ -109,7 +123,43 @@ async def stop_loss_monitor_loop(clob) -> None:
                         loop.run_in_executor(None, lambda oid=order_id: clob.get_order(oid)), timeout=10.0)
                     status = order.get('status', '') if isinstance(order, dict) else ''
                     if status in ('FILLED', 'MATCHED'):
-                        log.info("[STOP-LOSS] Triggered for trade %d", trade['id'])
+                        exit_price, exit_shares = _extract_exit_fill(
+                            order,
+                            float(trade["stop_loss_price"] or 0.0),
+                            float(trade["shares"] or 0.0),
+                        )
+                        market_label = _fmt_market(trade["market_type"])
+                        entry_price = float(trade["entry_price"])
+                        gross_exit = exit_price * exit_shares
+                        est_pnl = (exit_price - entry_price) * exit_shares
+                        log.info(
+                            "[EXIT] Stop-loss filled — %s %s on %s | %d shares @ %.4f ($%.2f) | est pnl: %+.2f | order=%s",
+                            trade["strategy_name"],
+                            trade["direction"],
+                            market_label,
+                            exit_shares,
+                            exit_price,
+                            gross_exit,
+                            est_pnl,
+                            order_id[:16],
+                        )
+                        await db.log_event(
+                            "trade_stop_loss",
+                            f"Stop-loss exit — {trade['strategy_name']} {trade['direction']} on {trade['market_type']} | "
+                            f"{exit_shares} shares @ {exit_price:.4f} | est pnl {est_pnl:+.2f}",
+                            {
+                                "trade_id": trade["id"],
+                                "market_id": trade["market_id"],
+                                "strategy_name": trade["strategy_name"],
+                                "direction": trade["direction"],
+                                "entry_price": entry_price,
+                                "exit_price": round(exit_price, 4),
+                                "exit_shares": exit_shares,
+                                "gross_exit_value": round(gross_exit, 2),
+                                "estimated_pnl": round(est_pnl, 2),
+                                "stop_loss_order_id": order_id,
+                            },
+                        )
                         await db.mark_stop_loss_triggered(trade['id'])
                 except Exception as e:
                     log.warning("[STOP-LOSS] Check failed: %s", e)
