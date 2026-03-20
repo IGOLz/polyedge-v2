@@ -5,11 +5,12 @@
 #   - core:        Data collector — runs 24/7, NEVER restarted on code updates
 #   - analysis:    Strategy research — run on-demand, restarts are safe
 #   - trading:     Live trading bot — can be restarted independently
+#   - dashboard:   Next.js dashboard for monitoring + light control actions
 #
 # Update workflow (on LXC):
 #   1. git pull
-#   2. docker compose build analysis trading   # ONLY rebuild analysis + trading
-#   3. docker compose up -d analysis trading   # ONLY restart analysis + trading
+#   2. docker compose build analysis trading dashboard
+#   3. docker compose up -d analysis trading dashboard
 #   # Core keeps running untouched!
 #
 # To update core (rare, planned downtime):
@@ -131,6 +132,34 @@ services:
       - polyedge
     labels:
       polyedge.role: "trading"
+      polyedge.update: "safe"
+
+  # ── Dashboard: Next.js UI for analytics + limited DB controls ─────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: polyedge-dashboard
+    platform: linux/amd64
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    ports:
+      - "${DASHBOARD_PORT:-3000}:3000"
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "dashboard"
       polyedge.update: "safe"
 
 volumes:
