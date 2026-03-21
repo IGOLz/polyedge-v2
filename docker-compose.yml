@@ -46,15 +46,12 @@ services:
       dockerfile: docker/Dockerfile.core
     container_name: polyedge-core
     platform: linux/amd64
-    depends_on:
-      timescaledb:
-        condition: service_healthy
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: timescaledb
-      POSTGRES_PORT: 5432
+      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       CORE_DEBUG_MODE: "false"
       BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.com:9443}
       BINANCE_REST_BASE_URL: ${BINANCE_REST_BASE_URL:-https://api.binance.com}
