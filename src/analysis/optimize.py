@@ -330,6 +330,27 @@ def _iter_accelerated_metrics(
                 break
         return all_metrics
 
+    if os.name == "nt":
+        # The accelerated dataset can be large enough to make Windows spawn/pickle
+        # fail before work starts. Threads keep the shared dataset in-process.
+        print(
+            "  Windows accelerated mode uses worker threads to avoid "
+            "spawn/pickle failures with large precomputed datasets."
+        )
+        _init_accel_worker(strategy_id, dataset, param_names)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            batches = _iter_combo_batches(kernel, param_values, batch_size)
+            for batch_metrics in executor.map(_evaluate_accel_batch, batches):
+                all_metrics.extend(batch_metrics)
+                processed += len(batch_metrics)
+                if (
+                    processed % progress_interval == 0
+                    or processed >= total_combos
+                    or processed > total_combos - progress_interval
+                ):
+                    print(f"  Completed {min(processed, total_combos)}/{total_combos} combinations")
+        return all_metrics
+
     mp_context = multiprocessing.get_context("fork") if os.name != "nt" else None
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=workers,

@@ -262,6 +262,7 @@ def _evaluate_s14_combo(
     market_count = prices.shape[0]
     pnls = np.empty(market_count, dtype=np.float64); entry_fees = np.empty(market_count, dtype=np.float64); exit_fees = np.empty(market_count, dtype=np.float64)
     trade_asset_codes = np.empty(market_count, dtype=np.int64); trade_durations = np.empty(market_count, dtype=np.int64)
+    trade_market_indices = np.empty(market_count, dtype=np.int64)
     trade_count = 0; eligible_markets = 0
     for market_idx in range(market_count):
         if not (avail_a[market_idx] and avail_b[market_idx] and ((not require_direction_mismatch) or avail_m[market_idx])):
@@ -285,8 +286,8 @@ def _evaluate_s14_combo(
         if not found:
             continue
         pnl, entry_fee, exit_fee = resolve_trade_pnl(prices, total_seconds, final_outcomes, fee_active, market_idx, entry_second, adjusted_entry, direction_up, stop_loss, take_profit, entry_slippage)
-        pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_count += 1
-    return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
+        pnls[trade_count] = pnl; entry_fees[trade_count] = entry_fee; exit_fees[trade_count] = exit_fee; trade_asset_codes[trade_count] = asset_codes[market_idx]; trade_durations[trade_count] = duration_minutes[market_idx]; trade_market_indices[trade_count] = market_idx; trade_count += 1
+    return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], trade_market_indices[:trade_count], eligible_markets
 
 
 @njit(cache=True)

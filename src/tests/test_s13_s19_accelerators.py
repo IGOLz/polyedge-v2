@@ -110,6 +110,42 @@ def test_s15_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at)
     _assert_parity("S15", [m], tmp_path)
 
 
+def test_s15_accelerated_optimizer_uses_threads_on_windows(tmp_path, monkeypatch, base_started_at):
+    monkeypatch.setattr(s15_config, "get_param_grid", lambda: {
+        "setup_window_end": [2], "breakout_scan_start": [3], "breakout_scan_end": [6], "breakout_buffer": [0.01],
+        "confirmation_points": [1], "feature_window": [5], "min_underlying_return": [0.001], "min_trade_count": [5.0],
+        "stop_loss": [0.20], "take_profit": [0.80],
+    })
+    m = _base_market(base_started_at, "s15_windows")
+    m["final_outcome"] = "Up"
+    m["prices"] = np.array([0.48, 0.49, 0.50, 0.54, 0.57, 0.60, 0.64, 0.68], dtype=float)
+    m["feature_series"] = {
+        "underlying_return_5s": np.array([0.002] * 8, dtype=float),
+        "underlying_trade_count": np.array([10.0] * 8, dtype=float),
+    }
+
+    monkeypatch.setattr(optimize.os, "name", "nt")
+
+    def _fail_process_pool(*args, **kwargs):
+        raise AssertionError("ProcessPoolExecutor should not be used for accelerated Windows runs")
+
+    monkeypatch.setattr(optimize.concurrent.futures, "ProcessPoolExecutor", _fail_process_pool)
+
+    accelerated_df = optimize.optimize_strategy(
+        strategy_id="S15",
+        markets=[m],
+        output_dir=str(tmp_path / "s15_windows_accelerated"),
+        workers=2,
+        progress_interval=100,
+        engine="accelerated",
+        slippage=0.0,
+    )
+
+    assert accelerated_df is not None
+    assert len(accelerated_df) == 1
+    assert accelerated_df.iloc[0]["config_id"].startswith("S15_")
+
+
 def test_s16_accelerator_matches_generic(tmp_path, monkeypatch, base_started_at):
     monkeypatch.setattr(s16_config, "get_param_grid", lambda: {
         "short_window": [5], "long_window": [10], "entry_window_start": [1], "entry_window_end": [6],
