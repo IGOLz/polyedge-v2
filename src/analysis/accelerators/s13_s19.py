@@ -182,6 +182,7 @@ def _evaluate_s13_combo(
     exit_fees = np.empty(market_count, dtype=np.float64)
     trade_asset_codes = np.empty(market_count, dtype=np.int64)
     trade_durations = np.empty(market_count, dtype=np.int64)
+    trade_market_indices = np.empty(market_count, dtype=np.int64)
     trade_count = 0
     eligible_markets = 0
 
@@ -227,8 +228,17 @@ def _evaluate_s13_combo(
         exit_fees[trade_count] = exit_fee
         trade_asset_codes[trade_count] = asset_codes[market_idx]
         trade_durations[trade_count] = duration_minutes[market_idx]
+        trade_market_indices[trade_count] = market_idx
         trade_count += 1
-    return pnls[:trade_count], entry_fees[:trade_count], exit_fees[:trade_count], trade_asset_codes[:trade_count], trade_durations[:trade_count], eligible_markets
+    return (
+        pnls[:trade_count],
+        entry_fees[:trade_count],
+        exit_fees[:trade_count],
+        trade_asset_codes[:trade_count],
+        trade_durations[:trade_count],
+        trade_market_indices[:trade_count],
+        eligible_markets,
+    )
 
 
 @njit(cache=True)
@@ -543,7 +553,10 @@ class _BaseFeatureKernel:
 
 
 def _metrics_with_eligible(result, config_id, dataset, param_dict):
-    pnls, entry_fees, exit_fees, asset_codes, durations, eligible_markets = result
+    if len(result) == 7:
+        pnls, entry_fees, exit_fees, asset_codes, durations, _, eligible_markets = result
+    else:
+        pnls, entry_fees, exit_fees, asset_codes, durations, eligible_markets = result
     metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
     metrics["eligible_markets"] = int(eligible_markets)
     metrics["skipped_markets_missing_features"] = int(len(dataset.markets) - eligible_markets)

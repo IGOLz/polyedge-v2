@@ -243,6 +243,10 @@ async def run() -> None:
     })
 
     asyncio.create_task(outcome_tracker_loop(clob))
+    if not config.DRY_RUN:
+        asyncio.create_task(redemption_loop())
+    else:
+        log.info("[DRY RUN] Redemption loop disabled")
     asyncio.create_task(stop_loss_monitor_loop(clob))
     asyncio.create_task(hourly_summary_loop())
     asyncio.create_task(strategy_report_loop())

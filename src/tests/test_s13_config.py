@@ -15,6 +15,7 @@ def test_s13_default_matches_candidate():
     candidate = get_candidate_config()
 
     assert cfg == candidate
+    assert cfg.allowed_durations_minutes == [5]
     assert cfg.feature_window == 5
     assert cfg.entry_window_start == 20
     assert cfg.entry_window_end == 240
@@ -99,3 +100,31 @@ def test_s13_backtest_uses_signal_stop_and_take_profit():
     assert metrics["total_exit_fees"] > 0.0
     assert metrics["stop_loss"] == 0.25
     assert metrics["take_profit"] == 0.80
+
+
+def test_s13_skips_non_candidate_duration():
+    prices = np.full(31, np.nan, dtype=float)
+    prices[20] = 0.55
+
+    snapshot = MarketSnapshot(
+        market_id="s13_15m_market",
+        market_type="eth_15m",
+        prices=prices,
+        total_seconds=900,
+        elapsed_seconds=20,
+        feature_series={
+            "underlying_return_5s": np.full(len(prices), 0.002, dtype=float),
+            "market_up_delta_5s": np.full(len(prices), 0.02, dtype=float),
+            "underlying_realized_vol_10s": np.full(len(prices), 0.005, dtype=float),
+        },
+        metadata={
+            "asset": "eth",
+            "duration_minutes": 15,
+            "hour": 20,
+            "started_at": datetime(2026, 3, 21, 20, 0, tzinfo=timezone.utc),
+        },
+    )
+
+    signal = S13Strategy(get_default_config()).evaluate(snapshot)
+
+    assert signal is None

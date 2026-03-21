@@ -17,6 +17,10 @@ API_SECRET = TRADING_AUTH.get("polymarket_api_secret", "")
 API_PASSPHRASE = TRADING_AUTH.get("polymarket_api_passphrase", "")
 PROXY_WALLET = TRADING_AUTH.get("proxy_wallet", "")
 EOA_ADDRESS = TRADING_AUTH.get("eoa_address", "")
+RELAYER_API_KEY = os.getenv("RELAYER_API_KEY", "").strip()
+RELAYER_API_KEY_ADDRESS = os.getenv("RELAYER_API_KEY_ADDRESS", EOA_ADDRESS).strip() or EOA_ADDRESS
+RELAYER_BASE_URL = os.getenv("RELAYER_BASE_URL", "https://relayer-v2.polymarket.com").strip().rstrip("/")
+REDEEM_ONCHAIN_FALLBACK = os.getenv("REDEEM_ONCHAIN_FALLBACK", "true").strip().lower() == "true"
 
 CLOB_BASE_URL = "https://clob.polymarket.com"
 

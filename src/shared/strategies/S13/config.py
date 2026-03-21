@@ -7,6 +7,8 @@ from shared.strategies.base import StrategyConfig
 class S13Config(StrategyConfig):
     """Configuration for S13 underlying lag follow."""
 
+    allowed_assets: list[str] | None = None
+    allowed_durations_minutes: list[int] | None = None
     feature_window: int = 5
     entry_window_start: int = 20
     entry_window_end: int = 240
@@ -23,6 +25,7 @@ def get_candidate_config() -> S13Config:
     return S13Config(
         strategy_id="S13",
         strategy_name="S13_underlying_lag_follow",
+        allowed_durations_minutes=[5],
     )
 
 

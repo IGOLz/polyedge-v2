@@ -16,6 +16,24 @@ class S13Strategy(BaseStrategy):
 
     config: S13Config
 
+    def market_is_eligible(self, market: dict) -> bool:
+        if not super().market_is_eligible(market):
+            return False
+
+        allowed_assets = self.config.allowed_assets
+        if allowed_assets is not None:
+            asset = str(market.get("asset", "")).lower()
+            if asset not in {value.lower() for value in allowed_assets}:
+                return False
+
+        allowed_durations = self.config.allowed_durations_minutes
+        if allowed_durations is not None:
+            duration_minutes = int(market.get("duration_minutes", 0) or 0)
+            if duration_minutes not in allowed_durations:
+                return False
+
+        return True
+
     def required_feature_columns(self) -> tuple[str, ...]:
         vol_window = 10 if self.config.feature_window == 5 else 30
         return (
@@ -29,6 +47,16 @@ class S13Strategy(BaseStrategy):
         sec = current_second(snapshot)
         if sec < cfg.entry_window_start or sec > cfg.entry_window_end:
             return None
+
+        if cfg.allowed_assets is not None:
+            asset = str(snapshot.metadata.get("asset", "")).lower()
+            if asset not in {value.lower() for value in cfg.allowed_assets}:
+                return None
+
+        if cfg.allowed_durations_minutes is not None:
+            duration_minutes = int(snapshot.metadata.get("duration_minutes", 0) or 0)
+            if duration_minutes not in cfg.allowed_durations_minutes:
+                return None
 
         up_price = get_price(snapshot.prices, sec, tolerance=1)
         underlying_return = get_window_feature_value(snapshot, "underlying_return", cfg.feature_window, sec)

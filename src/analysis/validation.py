@@ -24,6 +24,7 @@ import pandas as pd
 from analysis.accelerators import get_strategy_kernel
 from analysis.accelerators.base import PrecomputedDataset, compute_metrics_from_arrays
 from analysis.accelerators.s2_s6 import _evaluate_s3_combo, _evaluate_s5_combo
+from analysis.accelerators.s13_s19 import _evaluate_s13_combo
 from analysis.backtest.engine import compute_metrics, make_trade
 from analysis.backtest_strategies import market_to_snapshot, run_strategy
 from shared.strategies.helpers import get_price
@@ -284,7 +285,7 @@ def compare_candidate_to_defaults(candidate: StrategyCandidate) -> list[dict[str
 
 
 def _accelerated_supported(strategy_id: str) -> bool:
-    return strategy_id in {"S3", "S5"}
+    return strategy_id in {"S3", "S5", "S13"}
 
 
 def prepare_accelerated_context(
@@ -317,6 +318,26 @@ def prepare_accelerated_context(
 
 def _build_combo_tuple(param_names: list[str], param_dict: dict[str, Any]) -> tuple[Any, ...]:
     return tuple(param_dict[name] for name in param_names)
+
+
+def _eligible_market_ids_for_s13(
+    markets: list[dict],
+    context: AcceleratedContext,
+    feature_window: int,
+) -> set[str]:
+    payload = context.dataset.payload
+    if feature_window == 5:
+        mask = payload.avail_ret5 & payload.avail_m5 & payload.avail_v10
+    elif feature_window == 10:
+        mask = payload.avail_ret10 & payload.avail_m10 & payload.avail_v30
+    else:
+        mask = payload.avail_ret30 & payload.avail_m30 & payload.avail_v30
+
+    return {
+        market["market_id"]
+        for market, is_eligible in zip(markets, mask, strict=False)
+        if bool(is_eligible)
+    }
 
 
 def _run_candidate_accelerated(
@@ -369,6 +390,43 @@ def _run_candidate_accelerated(
             encoded,
             dataset.slippage,
         )
+    elif candidate.strategy_id == "S13":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s13_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.ret5,
+            payload.ret10,
+            payload.ret30,
+            payload.m5,
+            payload.m10,
+            payload.m30,
+            payload.vol10,
+            payload.vol30,
+            payload.avail_ret5,
+            payload.avail_ret10,
+            payload.avail_ret30,
+            payload.avail_m5,
+            payload.avail_m10,
+            payload.avail_m30,
+            payload.avail_v10,
+            payload.avail_v30,
+            encoded,
+            dataset.slippage,
+        )
     else:
         return None
 
@@ -380,8 +438,6 @@ def _run_candidate_accelerated(
         durations,
         config_id=candidate.label,
     )
-    metrics["eligible_markets"] = dataset.eligible_markets
-    metrics["skipped_markets_missing_features"] = dataset.skipped_markets_missing_features
 
     execution_stats = {
         "signals_seen": int(metrics.get("total_bets", 0)),
@@ -391,12 +447,26 @@ def _run_candidate_accelerated(
         "missed_missing_price": 0,
     }
 
-    eligible_market_ids = {market["market_id"] for market in markets}
+    if candidate.strategy_id == "S13":
+        feature_window = int(candidate.param_dict["feature_window"])
+        eligible_market_ids = _eligible_market_ids_for_s13(
+            markets,
+            active_context,
+            feature_window,
+        )
+        skipped_markets = len(markets) - int(eligible_markets_count)
+    else:
+        eligible_market_ids = {market["market_id"] for market in markets}
+        skipped_markets = dataset.skipped_markets_missing_features
+
+    metrics["eligible_markets"] = len(eligible_market_ids)
+    metrics["skipped_markets_missing_features"] = skipped_markets
+
     return CandidateRun(
         trades=[],
         metrics=metrics,
         eligible_market_ids=eligible_market_ids,
-        skipped_markets_missing_features=dataset.skipped_markets_missing_features,
+        skipped_markets_missing_features=skipped_markets,
         execution_stats=execution_stats,
         pnls=pnls,
         entry_fees=entry_fees,
