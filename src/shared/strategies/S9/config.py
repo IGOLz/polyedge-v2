@@ -9,14 +9,19 @@ from shared.strategies.base import StrategyConfig
 class S9Config(StrategyConfig):
     """Configuration for S9 compression breakout continuation."""
 
-    compression_window: int = 45
-    compression_max_std: float = 0.015
-    compression_max_range: float = 0.04
-    trigger_scan_start: int = 50
-    trigger_scan_end: int = 150
+    allowed_hours: list[int] | None = None
+    allowed_assets: list[str] | None = None
+    allowed_durations_minutes: list[int] | None = None
+    compression_window: int = 20
+    compression_max_std: float = 0.008
+    compression_max_range: float = 0.03
+    trigger_scan_start: int = 30
+    trigger_scan_end: int = 180
     breakout_distance: float = 0.03
-    momentum_lookback: int = 10
-    efficiency_min: float = 0.65
+    momentum_lookback: int = 15
+    efficiency_min: float = 0.55
+    live_stop_loss_price: float = 0.40
+    live_take_profit_price: float = 0.70
 
 
 def get_default_config() -> S9Config:

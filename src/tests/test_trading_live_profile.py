@@ -5,7 +5,14 @@ from datetime import datetime, timezone
 import numpy as np
 
 from shared.strategies.base import MarketSnapshot
-from trading.live_profile import build_live_s5_config, get_live_strategies, market_in_live_scope
+from trading.live_profile import (
+    LIVE_STRATEGY_ENABLED,
+    build_live_s5_config,
+    build_live_s9_config,
+    get_live_strategies,
+    live_profile_summary,
+    market_in_live_scope,
+)
 
 
 def _make_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) -> MarketSnapshot:
@@ -23,6 +30,32 @@ def _make_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) -> M
         prices=prices,
         total_seconds=300,
         elapsed_seconds=50,
+        metadata={
+            "asset": asset,
+            "duration_minutes": duration_minutes,
+            "hour": hour,
+            "started_at": datetime(2026, 3, 19, hour, 0, tzinfo=timezone.utc),
+        },
+    )
+
+
+def _make_s9_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) -> MarketSnapshot:
+    prices = np.array([
+        0.50, 0.501, 0.499, 0.500, 0.501,
+        0.500, 0.499, 0.500, 0.501, 0.500,
+        0.499, 0.500, 0.500, 0.501, 0.500,
+        0.499, 0.500, 0.501, 0.500, 0.500,
+        0.505, 0.510, 0.515, 0.520, 0.525,
+        0.530, 0.535, 0.540, 0.545, 0.550,
+        0.555,
+    ], dtype=float)
+
+    return MarketSnapshot(
+        market_id=f"{asset}_{duration_minutes}m_market",
+        market_type=f"{asset}_{duration_minutes}m",
+        prices=prices,
+        total_seconds=300,
+        elapsed_seconds=30,
         metadata={
             "asset": asset,
             "duration_minutes": duration_minutes,
@@ -52,6 +85,24 @@ def test_live_s5_profile_matches_validated_candidate():
     assert cfg.live_take_profit_price == 0.70
 
 
+def test_live_s9_profile_matches_validated_candidate():
+    cfg = build_live_s9_config()
+
+    assert cfg.strategy_id == "S9"
+    assert cfg.allowed_assets == ["btc", "eth", "sol", "xrp"]
+    assert cfg.allowed_durations_minutes == [5]
+    assert cfg.compression_window == 20
+    assert cfg.compression_max_std == 0.008
+    assert cfg.compression_max_range == 0.03
+    assert cfg.trigger_scan_start == 30
+    assert cfg.trigger_scan_end == 180
+    assert cfg.breakout_distance == 0.03
+    assert cfg.momentum_lookback == 15
+    assert cfg.efficiency_min == 0.55
+    assert cfg.live_stop_loss_price == 0.40
+    assert cfg.live_take_profit_price == 0.70
+
+
 def test_live_market_scope_filters_to_eth_sol_5m_and_hours():
     started_at = datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)
 
@@ -75,3 +126,39 @@ def test_live_strategy_emits_signal_only_for_allowed_scope():
     assert strategy.evaluate(blocked_asset) is None
     assert strategy.evaluate(blocked_duration) is None
     assert strategy.evaluate(blocked_hour) is None
+
+
+def test_live_profile_can_enable_multiple_strategies(monkeypatch):
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
+    get_live_strategies.cache_clear()
+
+    try:
+        strategies = get_live_strategies()
+        summary = live_profile_summary()
+
+        assert [strategy.config.strategy_id for strategy in strategies] == ["S5", "S9"]
+        assert "S5" in summary
+        assert "S9" in summary
+        assert market_in_live_scope("btc_5m", datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)) is True
+        assert market_in_live_scope("eth_15m", datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)) is False
+    finally:
+        get_live_strategies.cache_clear()
+
+
+def test_live_s9_strategy_emits_signal_only_for_allowed_scope(monkeypatch):
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
+    get_live_strategies.cache_clear()
+
+    try:
+        strategy = get_live_strategies()[0]
+        allowed = _make_s9_trigger_snapshot(asset="btc", duration_minutes=5, hour=20)
+        blocked_asset = _make_s9_trigger_snapshot(asset="doge", duration_minutes=5, hour=20)
+        blocked_duration = _make_s9_trigger_snapshot(asset="btc", duration_minutes=15, hour=20)
+
+        assert strategy.evaluate(allowed) is not None
+        assert strategy.evaluate(blocked_asset) is None
+        assert strategy.evaluate(blocked_duration) is None
+    finally:
+        get_live_strategies.cache_clear()

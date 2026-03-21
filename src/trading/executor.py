@@ -15,7 +15,7 @@ from trading import db
 from trading.balance import get_usdc_balance
 from trading.constants import EXECUTION_CONFIG
 from trading.strategies import Signal
-from trading.utils import log
+from trading.utils import log, strategy_log_tag
 
 # ── Daily net-loss tracking (resets at midnight UTC) ─────────────────────
 _daily_net_loss: float = 0.0
@@ -609,7 +609,7 @@ async def execute_trade(
         float(signal.signal_data.get('bet_cost', config.BET_SIZE_USD)), 2
     )
     bet_size = max(bet_size, 1.00)
-    tag = 'M3' if 'M3' in signal.strategy_name else 'M4'
+    tag = strategy_log_tag(signal.strategy_name)
     log.info(
         "[BET] %s on %s — $%.2f (%d shares @ $%.4f) [LOCKED]",
         signal.strategy_name, market.market_type,
