@@ -2,52 +2,54 @@ TOP 10 CONFIGURATIONS - shared_strategies
 ====================================================================================================
 
 Rank 1:
-  config_id: S1
-  total_bets: 5877
-  wins: 1951
-  losses: 3926
-  win_rate_pct: 33.2
-  total_pnl: -90.8967
-  avg_bet_pnl: -0.015467
-  profit_factor: 0.9305
-  expected_value: -0.015467
-  total_entry_fees: 26.1316
-  total_exit_fees: 0.0
-  total_fees: 26.1316
-  sharpe_ratio: -0.0338
-  sortino_ratio: -0.186
-  max_drawdown: 96.0412
-  std_dev_pnl: 0.457642
-  pct_profitable_assets: 0.0
-  pct_profitable_durations: 0.0
-  consistency_score: 98.76
-  q1_pnl: -36.9106
-  q2_pnl: 25.7151
-  q3_pnl: -48.0812
-  q4_pnl: -31.6199
-  eligible_markets: 6389
+  config_id: S10
+  total_bets: 379
+  wins: 218
+  losses: 161
+  win_rate_pct: 57.52
+  total_pnl: 6.6598
+  avg_bet_pnl: 0.017572
+  profit_factor: 1.2601
+  expected_value: 0.017572
+  total_entry_fees: 2.8247
+  total_exit_fees: 1.7894
+  total_fees: 4.6141
+  sharpe_ratio: 0.098
+  sortino_ratio: 0.1564
+  max_drawdown: 3.0194
+  std_dev_pnl: 0.179385
+  pct_profitable_assets: 100.0
+  pct_profitable_durations: 100.0
+  consistency_score: 98.7
+  q1_pnl: 1.0283
+  q2_pnl: 1.6372
+  q3_pnl: 2.4986
+  q4_pnl: 1.4957
+  eligible_markets: 11424
   skipped_markets_missing_features: 0
-  ranking_score: 57.31
+  stop_loss: 0.4
+  take_profit: 0.8
+  ranking_score: 54.87
 
   Sample trades:
-    0xe272da5cd6c35b.. s= 58 dir=Down entry=0.430 res=Up   pnl=-0.4300
-    0x63ea28131cc717.. s= 30 dir=Down entry=0.430 res=Up   pnl=-0.4300
-    0xc54b84803f582c.. s= 37 dir=Down entry=0.410 res=Up   pnl=-0.4100
-    0x2195502c81df74.. s= 51 dir=Down entry=0.400 res=Up   pnl=-0.4000
-    0xf4fcbdc6900ac1.. s= 88 dir=Down entry=0.300 res=Down pnl=+0.6890
-    0x18d0bc3ba198d2.. s= 86 dir=Down entry=0.330 res=Up   pnl=-0.3300
-    0x4223fc294904ef.. s= 86 dir=Down entry=0.320 res=Up   pnl=-0.3200
-    0xb35a3173dc02a5.. s= 62 dir=Down entry=0.350 res=Up   pnl=-0.3500
-    0x0b8b4277c3c3db.. s= 51 dir=Down entry=0.270 res=Up   pnl=-0.2700
-    0xf09e370d8e665c.. s= 55 dir=Down entry=0.410 res=Up   pnl=-0.4100
-    0xea278df5a03213.. s= 53 dir=Down entry=0.300 res=Up   pnl=-0.3000
-    0x1affe31d067c92.. s= 55 dir=Down entry=0.280 res=Up   pnl=-0.2800
-    0xbf7c7b9da85bb0.. s= 61 dir=Up   entry=0.430 res=Up   pnl=+0.5549
-    0x65fef1f866af5a.. s= 73 dir=Up   entry=0.360 res=Down pnl=-0.3600
-    0xa1d2ed1a8c1f5f.. s= 36 dir=Down entry=0.410 res=Down pnl=+0.5754
-    0xdb83eecbefd3e6.. s= 71 dir=Up   entry=0.250 res=Down pnl=-0.2500
-    0x8c3d5feb1d6dec.. s= 78 dir=Up   entry=0.210 res=Down pnl=-0.2100
-    0x61add7aa9a818c.. s= 74 dir=Down entry=0.420 res=Up   pnl=-0.4200
-    0x084ee48cace65c.. s= 37 dir=Down entry=0.390 res=Up   pnl=-0.3900
-    0xac9df2d2f92059.. s= 72 dir=Down entry=0.260 res=Up   pnl=-0.2600
+    0x1affe31d067c92.. s= 46 dir=Up   entry=0.740 res=Up   pnl=+0.0475
+    0x0b5af55b05a9dc.. s= 49 dir=Up   entry=0.470 res=Up   pnl=-0.0819
+    0x6f6d853bf960a7.. s= 47 dir=Up   entry=0.560 res=Up   pnl=+0.2229
+    0x0b8679cfa4653c.. s= 58 dir=Up   entry=0.530 res=Up   pnl=+0.3441
+    0x9d45e6905b6623.. s= 66 dir=Up   entry=0.800 res=Up   pnl=-0.0102
+    0x1bc3a836cc8ac5.. s= 47 dir=Up   entry=0.570 res=Up   pnl=+0.2129
+    0xdaf472cc4dcbbf.. s= 56 dir=Up   entry=0.480 res=Up   pnl=-0.0920
+    0xb256bc8825545d.. s= 49 dir=Down entry=0.600 res=Up   pnl=+0.1937
+    0x137468765bd6a8.. s= 56 dir=Down entry=0.600 res=Down pnl=+0.1937
+    0xc7adccf7b34d8e.. s= 53 dir=Down entry=0.480 res=Down pnl=+0.3839
+    0x19bc562b7542a4.. s= 57 dir=Down entry=0.650 res=Up   pnl=+0.1346
+    0x6aaef7bd85418e.. s= 53 dir=Up   entry=0.550 res=Down pnl=-0.1906
+    0x75d220652c830f.. s= 46 dir=Down entry=0.600 res=Up   pnl=-0.2114
+    0xe46f84bedb65e5.. s= 57 dir=Down entry=0.590 res=Up   pnl=-0.2399
+    0x9f21712794c422.. s= 49 dir=Down entry=0.420 res=Up   pnl=-0.0605
+    0xbf2de6a2d050e7.. s= 55 dir=Up   entry=0.450 res=Down pnl=-0.1002
+    0xee44f612ec809d.. s= 66 dir=Down entry=0.640 res=Down pnl=+0.1545
+    0xb2bf0d6b9ace99.. s= 63 dir=Down entry=0.680 res=Down pnl=+0.1158
+    0x0181b58d10b166.. s= 48 dir=Down entry=0.580 res=Down pnl=-0.1916
+    0x45f0434a9a246b.. s= 49 dir=Down entry=0.620 res=Down pnl=+0.1639
 

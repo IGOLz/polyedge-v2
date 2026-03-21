@@ -62,14 +62,36 @@ class FeaturePayload:
     availability: dict[str, np.ndarray]
 
 
-def _build_feature_payload(markets: list[dict]) -> FeaturePayload:
+@dataclass
+class S13Payload:
+    common: object
+    nearest_tol1: np.ndarray
+    ret5: np.ndarray
+    ret10: np.ndarray
+    ret30: np.ndarray
+    m5: np.ndarray
+    m10: np.ndarray
+    m30: np.ndarray
+    vol10: np.ndarray
+    vol30: np.ndarray
+    avail_ret5: np.ndarray
+    avail_ret10: np.ndarray
+    avail_ret30: np.ndarray
+    avail_m5: np.ndarray
+    avail_m10: np.ndarray
+    avail_m30: np.ndarray
+    avail_v10: np.ndarray
+    avail_v30: np.ndarray
+
+
+def _build_feature_payload(markets: list[dict], columns: tuple[str, ...] = FEATURE_COLUMNS) -> FeaturePayload:
     common = build_common_payload(markets)
     nearest_tol1 = precompute_nearest_prices_multi(common.prices, common.total_seconds, np.array([1], dtype=np.int64))[0]
 
     matrices: dict[str, np.ndarray] = {}
     availability: dict[str, np.ndarray] = {}
     max_seconds = common.prices.shape[1]
-    for column in FEATURE_COLUMNS:
+    for column in columns:
         matrix = np.full((len(markets), max_seconds), np.nan, dtype=np.float64)
         available = np.zeros(len(markets), dtype=np.bool_)
         for idx, market in enumerate(markets):
@@ -83,6 +105,40 @@ def _build_feature_payload(markets: list[dict]) -> FeaturePayload:
         availability[column] = available
 
     return FeaturePayload(common=common, nearest_tol1=nearest_tol1, matrices=matrices, availability=availability)
+
+
+def _build_s13_payload(markets: list[dict]) -> S13Payload:
+    columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "market_up_delta_5s",
+        "market_up_delta_10s",
+        "market_up_delta_30s",
+        "underlying_realized_vol_10s",
+        "underlying_realized_vol_30s",
+    )
+    payload = _build_feature_payload(markets, columns)
+    return S13Payload(
+        common=payload.common,
+        nearest_tol1=payload.nearest_tol1,
+        ret5=payload.matrices["underlying_return_5s"],
+        ret10=payload.matrices["underlying_return_10s"],
+        ret30=payload.matrices["underlying_return_30s"],
+        m5=payload.matrices["market_up_delta_5s"],
+        m10=payload.matrices["market_up_delta_10s"],
+        m30=payload.matrices["market_up_delta_30s"],
+        vol10=payload.matrices["underlying_realized_vol_10s"],
+        vol30=payload.matrices["underlying_realized_vol_30s"],
+        avail_ret5=payload.availability["underlying_return_5s"],
+        avail_ret10=payload.availability["underlying_return_10s"],
+        avail_ret30=payload.availability["underlying_return_30s"],
+        avail_m5=payload.availability["market_up_delta_5s"],
+        avail_m10=payload.availability["market_up_delta_10s"],
+        avail_m30=payload.availability["market_up_delta_30s"],
+        avail_v10=payload.availability["underlying_realized_vol_10s"],
+        avail_v30=payload.availability["underlying_realized_vol_30s"],
+    )
 
 
 @njit(cache=True)
@@ -459,6 +515,7 @@ class _BaseFeatureKernel:
     strategy_id = ""
     strategy_cls = None
     get_default_config = None
+    feature_columns = FEATURE_COLUMNS
 
     def is_available(self) -> bool:
         return NUMBA_AVAILABLE
@@ -467,7 +524,13 @@ class _BaseFeatureKernel:
         return NUMBA_IMPORT_ERROR or "Numba is not installed."
 
     def prepare(self, strategy_id: str, markets: list[dict], param_grid: dict[str, list]) -> PrecomputedDataset:
-        return PrecomputedDataset(strategy_id=strategy_id, markets=markets, payload=_build_feature_payload(markets), eligible_markets=len(markets), skipped_markets_missing_features=0)
+        return PrecomputedDataset(
+            strategy_id=strategy_id,
+            markets=markets,
+            payload=_build_feature_payload(markets, self.feature_columns),
+            eligible_markets=len(markets),
+            skipped_markets_missing_features=0,
+        )
 
     def materialize_trades(self, dataset: PrecomputedDataset, param_dict: dict[str, object], config_id: str) -> list[Trade]:
         base_config = self.get_default_config()
@@ -490,18 +553,64 @@ def _metrics_with_eligible(result, config_id, dataset, param_dict):
 
 class S13Accelerator(_BaseFeatureKernel):
     strategy_id = "S13"; strategy_cls = S13Strategy; get_default_config = staticmethod(get_s13_default_config)
+    def prepare(self, strategy_id: str, markets: list[dict], param_grid: dict[str, list]) -> PrecomputedDataset:
+        return PrecomputedDataset(
+            strategy_id=strategy_id,
+            markets=markets,
+            payload=_build_s13_payload(markets),
+            eligible_markets=len(markets),
+            skipped_markets_missing_features=0,
+        )
+
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
-        p: FeaturePayload = dataset.payload; r = []
+        p: S13Payload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s13_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["market_up_delta_5s"], p.matrices["market_up_delta_10s"], p.matrices["market_up_delta_30s"], p.matrices["underlying_realized_vol_10s"], p.matrices["underlying_realized_vol_30s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["market_up_delta_5s"], p.availability["market_up_delta_10s"], p.availability["market_up_delta_30s"], p.availability["underlying_realized_vol_10s"], p.availability["underlying_realized_vol_30s"], combo_array, dataset.slippage)
+            result = _evaluate_s13_combo(
+                p.common.prices,
+                p.common.total_seconds,
+                p.common.final_outcomes,
+                p.common.asset_codes,
+                p.common.duration_minutes,
+                p.common.fee_active,
+                p.nearest_tol1,
+                p.ret5,
+                p.ret10,
+                p.ret30,
+                p.m5,
+                p.m10,
+                p.m30,
+                p.vol10,
+                p.vol30,
+                p.avail_ret5,
+                p.avail_ret10,
+                p.avail_ret30,
+                p.avail_m5,
+                p.avail_m10,
+                p.avail_m30,
+                p.avail_v10,
+                p.avail_v30,
+                combo_array,
+                dataset.slippage,
+            )
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 
 
 class S14Accelerator(_BaseFeatureKernel):
     strategy_id = "S14"; strategy_cls = S14Strategy; get_default_config = staticmethod(get_s14_default_config)
+    feature_columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "market_up_delta_5s",
+        "market_up_delta_10s",
+        "market_up_delta_30s",
+        "direction_mismatch_5s",
+        "direction_mismatch_10s",
+        "direction_mismatch_30s",
+    )
     def encode_combo(self, combo):
         values = list(combo); values[7] = 1.0 if combo[7] else 0.0; return np.array(values, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
@@ -515,6 +624,12 @@ class S14Accelerator(_BaseFeatureKernel):
 
 class S15Accelerator(_BaseFeatureKernel):
     strategy_id = "S15"; strategy_cls = S15Strategy; get_default_config = staticmethod(get_s15_default_config)
+    feature_columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "underlying_trade_count",
+    )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
         p: FeaturePayload = dataset.payload; r = []
@@ -527,6 +642,13 @@ class S15Accelerator(_BaseFeatureKernel):
 
 class S16Accelerator(_BaseFeatureKernel):
     strategy_id = "S16"; strategy_cls = S16Strategy; get_default_config = staticmethod(get_s16_default_config)
+    feature_columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "underlying_realized_vol_10s",
+        "underlying_realized_vol_30s",
+    )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
         p: FeaturePayload = dataset.payload; r = []
@@ -539,6 +661,11 @@ class S16Accelerator(_BaseFeatureKernel):
 
 class S17Accelerator(_BaseFeatureKernel):
     strategy_id = "S17"; strategy_cls = S17Strategy; get_default_config = staticmethod(get_s17_default_config)
+    feature_columns = (
+        "market_up_delta_from_market_open",
+        "underlying_return_from_market_open",
+        "market_up_delta_5s",
+    )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
         p: FeaturePayload = dataset.payload; r = []
@@ -551,6 +678,14 @@ class S17Accelerator(_BaseFeatureKernel):
 
 class S18Accelerator(_BaseFeatureKernel):
     strategy_id = "S18"; strategy_cls = S18Strategy; get_default_config = staticmethod(get_s18_default_config)
+    feature_columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "underlying_realized_vol_30s",
+        "underlying_trade_count",
+        "market_up_delta_5s",
+    )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
         p: FeaturePayload = dataset.payload; r = []
@@ -563,6 +698,17 @@ class S18Accelerator(_BaseFeatureKernel):
 
 class S19Accelerator(_BaseFeatureKernel):
     strategy_id = "S19"; strategy_cls = S19Strategy; get_default_config = staticmethod(get_s19_default_config)
+    feature_columns = (
+        "underlying_return_5s",
+        "underlying_return_10s",
+        "underlying_return_30s",
+        "market_up_delta_5s",
+        "market_up_delta_10s",
+        "market_up_delta_30s",
+        "underlying_volume",
+        "underlying_taker_buy_base_volume",
+        "underlying_trade_count",
+    )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
         p: FeaturePayload = dataset.payload; r = []

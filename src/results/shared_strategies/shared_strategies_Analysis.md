@@ -4,48 +4,50 @@
 
 - Configurations tested: 1
 - With trades: 1
-- Profitable: 0
-- Unprofitable: 1
+- Profitable: 1
+- Unprofitable: 0
 
 ## Best Configuration (by ranking score)
 
 | Metric | Value |
 |--------|-------|
-| config_id | S1 |
-| total_bets | 5877 |
-| wins | 1951 |
-| losses | 3926 |
-| win_rate_pct | 33.2 |
-| total_pnl | -90.8967 |
-| avg_bet_pnl | -0.015467 |
-| profit_factor | 0.9305 |
-| expected_value | -0.015467 |
-| total_entry_fees | 26.1316 |
-| total_exit_fees | 0.0 |
-| total_fees | 26.1316 |
-| sharpe_ratio | -0.0338 |
-| sortino_ratio | -0.186 |
-| max_drawdown | 96.0412 |
-| std_dev_pnl | 0.457642 |
-| pct_profitable_assets | 0.0 |
-| pct_profitable_durations | 0.0 |
-| consistency_score | 98.76 |
-| q1_pnl | -36.9106 |
-| q2_pnl | 25.7151 |
-| q3_pnl | -48.0812 |
-| q4_pnl | -31.6199 |
-| eligible_markets | 6389 |
+| config_id | S10 |
+| total_bets | 379 |
+| wins | 218 |
+| losses | 161 |
+| win_rate_pct | 57.52 |
+| total_pnl | 6.6598 |
+| avg_bet_pnl | 0.017572 |
+| profit_factor | 1.2601 |
+| expected_value | 0.017572 |
+| total_entry_fees | 2.8247 |
+| total_exit_fees | 1.7894 |
+| total_fees | 4.6141 |
+| sharpe_ratio | 0.098 |
+| sortino_ratio | 0.1564 |
+| max_drawdown | 3.0194 |
+| std_dev_pnl | 0.179385 |
+| pct_profitable_assets | 100.0 |
+| pct_profitable_durations | 100.0 |
+| consistency_score | 98.7 |
+| q1_pnl | 1.0283 |
+| q2_pnl | 1.6372 |
+| q3_pnl | 2.4986 |
+| q4_pnl | 1.4957 |
+| eligible_markets | 11424 |
 | skipped_markets_missing_features | 0 |
-| ranking_score | 57.31 |
+| stop_loss | 0.4 |
+| take_profit | 0.8 |
+| ranking_score | 54.87 |
 
 ## Metrics Distribution (configs with trades)
 
 | Metric | Mean | Std | Min | Max |
 |--------|------|-----|-----|-----|
-| win_rate_pct | 33.2000 | nan | 33.2000 | 33.2000 |
-| total_pnl | -90.8967 | nan | -90.8967 | -90.8967 |
-| avg_bet_pnl | -0.0155 | nan | -0.0155 | -0.0155 |
-| sharpe_ratio | -0.0338 | nan | -0.0338 | -0.0338 |
-| profit_factor | 0.9305 | nan | 0.9305 | 0.9305 |
-| max_drawdown | 96.0412 | nan | 96.0412 | 96.0412 |
-| consistency_score | 98.7600 | nan | 98.7600 | 98.7600 |
+| win_rate_pct | 57.5200 | nan | 57.5200 | 57.5200 |
+| total_pnl | 6.6598 | nan | 6.6598 | 6.6598 |
+| avg_bet_pnl | 0.0176 | nan | 0.0176 | 0.0176 |
+| sharpe_ratio | 0.0980 | nan | 0.0980 | 0.0980 |
+| profit_factor | 1.2601 | nan | 1.2601 | 1.2601 |
+| max_drawdown | 3.0194 | nan | 3.0194 | 3.0194 |
+| consistency_score | 98.7000 | nan | 98.7000 | 98.7000 |

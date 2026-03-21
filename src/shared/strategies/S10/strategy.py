@@ -73,6 +73,8 @@ class S10Strategy(BaseStrategy):
                 "impulse_size": impulse_size,
                 "impulse_efficiency": impulse_efficiency,
                 "peak_second": peak_sec,
+                "stop_loss_price": cfg.live_stop_loss_price,
+                "take_profit_price": cfg.live_take_profit_price,
             },
         )
 
@@ -109,5 +111,7 @@ class S10Strategy(BaseStrategy):
                 "impulse_size": impulse_size,
                 "impulse_efficiency": impulse_efficiency,
                 "trough_second": trough_sec,
+                "stop_loss_price": cfg.live_stop_loss_price,
+                "take_profit_price": cfg.live_take_profit_price,
             },
         )

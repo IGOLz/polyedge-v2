@@ -5,6 +5,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
+from shared.strategies.S10.config import S10Config, get_candidate_config
+from shared.strategies.S10.strategy import S10Strategy
 from shared.strategies.S5.config import S5Config
 from shared.strategies.S5.strategy import S5Strategy
 from shared.strategies.base import BaseStrategy
@@ -44,10 +46,21 @@ def build_live_s5_config() -> S5Config:
     )
 
 
+def build_live_s10_config() -> S10Config:
+    """Return the live-tested S10 candidate with crypto market scope."""
+    candidate = get_candidate_config()
+    candidate.allowed_assets = ["btc", "eth", "sol", "xrp"]
+    candidate.allowed_durations_minutes = [5, 15]
+    return candidate
+
+
 @lru_cache(maxsize=1)
 def get_live_strategies() -> tuple[BaseStrategy, ...]:
     """Instantiate the live strategy set used by the trading bot."""
-    return (S5Strategy(build_live_s5_config()),)
+    return (
+        S5Strategy(build_live_s5_config()),
+        S10Strategy(build_live_s10_config()),
+    )
 
 
 def market_in_live_scope(market_type: str, started_at: Any | None = None) -> bool:
@@ -80,16 +93,34 @@ def market_in_live_scope(market_type: str, started_at: Any | None = None) -> boo
 
 def live_profile_summary() -> str:
     """Human-readable summary for logs/startup reporting."""
-    cfg = build_live_s5_config()
-    return (
-        f"{cfg.strategy_id} "
-        f"assets={cfg.allowed_assets} "
-        f"durations={cfg.allowed_durations_minutes} "
-        f"hours={cfg.allowed_hours} "
-        f"window={cfg.entry_window_start}-{cfg.entry_window_end} "
-        f"range={cfg.price_range_low}-{cfg.price_range_high} "
-        f"lookbacks={cfg.approach_lookback}/{cfg.confirmation_lookback} "
-        f"cross={cfg.cross_buffer}/{cfg.min_cross_move} "
-        f"confirmation_move={cfg.confirmation_min_move} "
-        f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
-    )
+    summaries: list[str] = []
+    for strategy in get_live_strategies():
+        cfg = strategy.config
+        if cfg.strategy_id == "S5":
+            summaries.append(
+                f"{cfg.strategy_id} "
+                f"assets={cfg.allowed_assets} "
+                f"durations={cfg.allowed_durations_minutes} "
+                f"hours={cfg.allowed_hours} "
+                f"window={cfg.entry_window_start}-{cfg.entry_window_end} "
+                f"range={cfg.price_range_low}-{cfg.price_range_high} "
+                f"lookbacks={cfg.approach_lookback}/{cfg.confirmation_lookback} "
+                f"cross={cfg.cross_buffer}/{cfg.min_cross_move} "
+                f"confirmation_move={cfg.confirmation_min_move} "
+                f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
+            )
+            continue
+
+        summaries.append(
+            f"{cfg.strategy_id} "
+            f"assets={getattr(cfg, 'allowed_assets', None)} "
+            f"durations={getattr(cfg, 'allowed_durations_minutes', None)} "
+            f"hours={getattr(cfg, 'allowed_hours', None)} "
+            f"impulse={cfg.impulse_start}-{cfg.impulse_end}@{cfg.impulse_threshold} "
+            f"retrace={cfg.retrace_window}/{cfg.retrace_min}-{cfg.retrace_max} "
+            f"reaccel={cfg.reacceleration_threshold} "
+            f"eff={cfg.impulse_efficiency_min} "
+            f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
+        )
+
+    return " | ".join(summaries)

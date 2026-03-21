@@ -99,6 +99,11 @@ def run_strategy(
             if second_entered != current_second:
                 continue
 
+            signal_stop_loss = signal.signal_data.get("stop_loss_price")
+            signal_take_profit = signal.signal_data.get("take_profit_price")
+            trade_stop_loss = stop_loss if stop_loss is not None else signal_stop_loss
+            trade_take_profit = take_profit if take_profit is not None else signal_take_profit
+
             trade = make_trade(
                 market,
                 second_entered,
@@ -106,8 +111,8 @@ def run_strategy(
                 signal.direction,
                 slippage=slippage,
                 base_rate=base_rate,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
+                stop_loss=trade_stop_loss,
+                take_profit=trade_take_profit,
             )
             trades.append(trade)
             break
@@ -116,10 +121,17 @@ def run_strategy(
     metrics["eligible_markets"] = len(eligible_markets)
     metrics["skipped_markets_missing_features"] = skipped_markets
 
-    if stop_loss is not None:
-        metrics["stop_loss"] = stop_loss
-    if take_profit is not None:
-        metrics["take_profit"] = take_profit
+    resolved_stop_loss = stop_loss
+    if resolved_stop_loss is None:
+        resolved_stop_loss = getattr(strategy.config, "live_stop_loss_price", None)
+    if resolved_stop_loss is not None:
+        metrics["stop_loss"] = resolved_stop_loss
+
+    resolved_take_profit = take_profit
+    if resolved_take_profit is None:
+        resolved_take_profit = getattr(strategy.config, "live_take_profit_price", None)
+    if resolved_take_profit is not None:
+        metrics["take_profit"] = resolved_take_profit
 
     if log_summary:
         print(
