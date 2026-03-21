@@ -35,6 +35,12 @@ src/
     ├── balance.py   # USDC balance checker
     ├── redeemer.py  # On-chain position redemption via Safe
     └── utils.py     # Colored logging for trading
+
+dashboard/           # Next.js dashboard (analytics + limited DB controls)
+├── app/             # App Router pages and API routes
+├── components/      # UI building blocks and charts
+├── lib/             # Database access + dashboard queries
+└── package.json     # Dashboard scripts and dependencies
 ```
 
 ## Docker Services
@@ -46,6 +52,7 @@ src/
 | `core-debug` | polyedge-core-debug | Dry-run validation, no DB writes | On-demand |
 | `analysis` | polyedge-analysis | Strategy backtests | On-demand |
 | `trading` | polyedge-trading | Live trading bot | Safe to restart |
+| `dashboard` | polyedge-dashboard | Next.js UI for monitoring + light control actions | Safe to restart |
 
 ## Update Workflow (on LXC)
 
@@ -80,7 +87,10 @@ docker compose up -d
 # 3. Run analysis (one-time)
 docker compose run --rm analysis
 
-# 4. Check status
+# 4. Open dashboard
+open http://localhost:3000
+
+# 5. Check status
 docker compose ps
 docker compose logs -f trading
 ```
@@ -88,6 +98,9 @@ docker compose logs -f trading
 ### Historical Binance 1s Workflow
 
 For the raw Binance 1-second import and feature-materialization workflow used by research backtests, see [src/docs/BINANCE_1S_IMPORT_WORKFLOW.md](src/docs/BINANCE_1S_IMPORT_WORKFLOW.md).
+
+Dashboard auth uses `DASHBOARD_PASSWORD` and `NEXTAUTH_SECRET` from `.env`.
+The dashboard connects to the same PostgreSQL database as the Python services.
 
 ### Trading Only With External Core/DB
 
@@ -111,6 +124,9 @@ docker compose logs -f trading
 This skips local `core`, `analysis`, and local `timescaledb`. The bot will use
 the external database instead.
 
+You can do the same for the dashboard by setting `POSTGRES_HOST` to the external
+database host before starting `dashboard`.
+
 ## Core Modes
 
 `core` is the production collector. It initializes the database, resumes unresolved markets from the database, and writes `market_ticks` and `market_outcomes`.
@@ -130,10 +146,10 @@ When you're ready to promote this repo to the main collector, stop `core-debug` 
 
 ## Key Design Decisions
 
-1. **Core isolation**: Core's Docker image is built separately and never rebuilt during routine updates. Only `analysis` and `trading` are rebuilt/restarted.
+1. **Core isolation**: Core's Docker image is built separately and never rebuilt during routine updates. Only `analysis`, `trading`, and `dashboard` are rebuilt/restarted.
 
-2. **Shared database**: All services connect to the same TimescaleDB instance. Core writes `market_ticks` and `market_outcomes`; analysis reads them; trading reads them and writes to `bot_trades`.
+2. **Shared database**: All services connect to the same TimescaleDB instance. Core writes `market_ticks` and `market_outcomes`; analysis reads them; trading reads them and writes to `bot_trades`; dashboard reads shared tables and exposes limited control flows.
 
-3. **Shared code**: The `shared/` module contains database, API, WebSocket, and config code that's used by all services — eliminating duplication across the old 3-repo setup.
+3. **Shared code**: The `shared/` module contains database, API, WebSocket, and config code that's used by all Python services. The dashboard now lives in the same repo so UI changes can track backend strategy changes together.
 
-4. **Independent deployability**: Each service has its own Dockerfile and requirements. Analysis and trading can be updated without affecting core's data collection.
+4. **Independent deployability**: Each service has its own Dockerfile/runtime. Analysis, trading, and dashboard can be updated without affecting core's data collection.

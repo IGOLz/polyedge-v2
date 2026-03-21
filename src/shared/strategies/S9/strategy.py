@@ -14,6 +14,30 @@ class S9Strategy(BaseStrategy):
 
     config: S9Config
 
+    def market_is_eligible(self, market: dict) -> bool:
+        if not super().market_is_eligible(market):
+            return False
+
+        cfg = self.config
+        asset = str(market.get("asset", "")).lower()
+        duration_minutes = int(market.get("duration_minutes", 0) or 0)
+        hour = market.get("hour")
+
+        if cfg.allowed_assets is not None:
+            allowed_assets = {value.lower() for value in cfg.allowed_assets}
+            if asset not in allowed_assets:
+                return False
+
+        if cfg.allowed_durations_minutes is not None:
+            if duration_minutes not in cfg.allowed_durations_minutes:
+                return False
+
+        if cfg.allowed_hours is not None and hour is not None:
+            if hour not in cfg.allowed_hours:
+                return False
+
+        return True
+
     def evaluate(self, snapshot: MarketSnapshot) -> Signal | None:
         prices = snapshot.prices
         cfg = self.config
@@ -22,6 +46,25 @@ class S9Strategy(BaseStrategy):
             return None
         if sec > cfg.trigger_scan_end:
             return None
+
+        asset = str(snapshot.metadata.get("asset", "")).lower()
+        duration_minutes = int(snapshot.metadata.get("duration_minutes", 0) or 0)
+        current_hour = snapshot.metadata.get("hour")
+
+        if cfg.allowed_assets is not None:
+            allowed_assets = {value.lower() for value in cfg.allowed_assets}
+            if asset not in allowed_assets:
+                return None
+
+        if cfg.allowed_durations_minutes is not None:
+            if duration_minutes not in cfg.allowed_durations_minutes:
+                return None
+
+        if cfg.allowed_hours is not None:
+            if not cfg.allowed_hours:
+                return None
+            if current_hour is not None and current_hour not in cfg.allowed_hours:
+                return None
 
         compression_points = valid_points(prices, 0, min(cfg.compression_window, sec - 1))
         if len(compression_points) < 8:
@@ -61,6 +104,8 @@ class S9Strategy(BaseStrategy):
                     "compression_std": compression_std,
                     "compression_range": compression_range,
                     "recent_efficiency": recent_efficiency,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 
@@ -75,6 +120,8 @@ class S9Strategy(BaseStrategy):
                     "compression_std": compression_std,
                     "compression_range": compression_range,
                     "recent_efficiency": recent_efficiency,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 

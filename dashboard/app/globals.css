@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  border-color: theme("colors.zinc.800/60");
+}
+
+body {
+  background-color: #050505;
+  color: #fafafa;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+/* Dot grid background with subtle primary glow */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(228, 246, 0, 0.03) 1px, transparent 0);
+  background-size: 28px 28px;
+}
+
+/* Top ambient glow */
+body::after {
+  content: "";
+  position: fixed;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 800px;
+  height: 500px;
+  z-index: -1;
+  background: radial-gradient(ellipse, rgba(228, 246, 0, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* Card entrance animation */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-card-in {
+  animation: card-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(228, 246, 0, 0.15);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(228, 246, 0, 0.3);
+}
+
+/* Selection color */
+::selection {
+  background: rgba(228, 246, 0, 0.2);
+  color: #fafafa;
+}
+
+/* Focus ring utility */
+.focus-ring {
+  @apply outline-none ring-2 ring-primary/30 ring-offset-2 ring-offset-zinc-950;
+}
+
+/* Safe area for bottom tab bar on mobile */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Add bottom padding on mobile so content isn't hidden behind tab bar */
+@media (max-width: 767px) {
+  main {
+    padding-bottom: 4.5rem;
+  }
+}

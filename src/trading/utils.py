@@ -51,3 +51,12 @@ def setup_debug_logging() -> logging.Logger:
 
 log = setup_logging()
 debug_log = setup_debug_logging()
+
+
+def strategy_log_tag(strategy_name: str) -> str:
+    """Return a short stable tag for a strategy name."""
+    if not strategy_name:
+        return "UNKNOWN"
+
+    prefix = strategy_name.split("_", 1)[0].strip()
+    return prefix or strategy_name

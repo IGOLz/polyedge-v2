@@ -21,7 +21,7 @@ from trading.live_profile import live_profile_summary, market_in_live_scope
 from trading.redeemer import redemption_loop
 from trading.report import generate_live_reports
 from trading.strategy_adapter import evaluate_strategies
-from trading.utils import log, debug_log
+from trading.utils import debug_log, log, strategy_log_tag
 
 
 def build_clob_client() -> ClobClient:
@@ -84,7 +84,7 @@ async def outcome_tracker_loop(clob) -> None:
         try:
             resolved = await db.update_pending_outcomes(clob)
             for t in resolved:
-                tag = "M3" if "M3" in t["strategy_name"] else "M4" if "M4" in t["strategy_name"] else t["strategy_name"]
+                tag = strategy_log_tag(t["strategy_name"])
                 market_label = _fmt_market(t["market_type"])
                 pnl = t["pnl"]
 
