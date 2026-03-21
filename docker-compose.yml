@@ -56,6 +56,11 @@ services:
       POSTGRES_HOST: timescaledb
       POSTGRES_PORT: 5432
       CORE_DEBUG_MODE: "false"
+      BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.com:9443}
+      BINANCE_REST_BASE_URL: ${BINANCE_REST_BASE_URL:-https://api.binance.com}
+      BINANCE_TRACKED_SYMBOLS: ${BINANCE_TRACKED_SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT}
+      BINANCE_BACKFILL_LOOKBACK_SECONDS: ${BINANCE_BACKFILL_LOOKBACK_SECONDS:-120}
+      BINANCE_STALE_DATA_THRESHOLD_SECONDS: ${BINANCE_STALE_DATA_THRESHOLD_SECONDS:-3}
     volumes:
       - ./logs/core:/app/logs
     restart: unless-stopped
@@ -76,6 +81,11 @@ services:
     profiles: ["debug"]
     environment:
       CORE_DEBUG_MODE: "true"
+      BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.com:9443}
+      BINANCE_REST_BASE_URL: ${BINANCE_REST_BASE_URL:-https://api.binance.com}
+      BINANCE_TRACKED_SYMBOLS: ${BINANCE_TRACKED_SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT}
+      BINANCE_BACKFILL_LOOKBACK_SECONDS: ${BINANCE_BACKFILL_LOOKBACK_SECONDS:-120}
+      BINANCE_STALE_DATA_THRESHOLD_SECONDS: ${BINANCE_STALE_DATA_THRESHOLD_SECONDS:-3}
     volumes:
       - ./logs/core:/app/logs
     restart: "no"

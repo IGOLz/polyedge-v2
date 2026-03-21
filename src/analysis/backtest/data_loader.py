@@ -9,41 +9,10 @@ import numpy as np
 from collections import defaultdict
 
 from shared.config import DB_CONFIG
-
-CRYPTO_FEATURE_COLUMNS = [
-    "market_up_price_market_open",
-    "market_up_delta_from_market_open",
-    "market_up_delta_5s",
-    "market_up_delta_10s",
-    "market_up_delta_30s",
-    "underlying_bar_open",
-    "underlying_bar_high",
-    "underlying_bar_low",
-    "underlying_close",
-    "underlying_volume",
-    "underlying_quote_volume",
-    "underlying_trade_count",
-    "underlying_taker_buy_base_volume",
-    "underlying_taker_buy_quote_volume",
-    "underlying_market_open_close",
-    "underlying_return_from_market_open",
-    "underlying_return_5s",
-    "underlying_return_10s",
-    "underlying_return_30s",
-    "underlying_realized_vol_10s",
-    "underlying_realized_vol_30s",
-    "direction_mismatch_market_open",
-    "direction_mismatch_5s",
-    "direction_mismatch_10s",
-    "direction_mismatch_30s",
-]
-
-BOOL_FEATURE_COLUMNS = {
-    "direction_mismatch_market_open",
-    "direction_mismatch_5s",
-    "direction_mismatch_10s",
-    "direction_mismatch_30s",
-}
+from shared.crypto_features import (
+    CRYPTO_FEATURE_COLUMNS,
+    build_feature_series_from_rows,
+)
 
 
 async def _load_from_db():
@@ -124,32 +93,6 @@ async def _load_from_db():
         await conn.close()
 
     return markets_raw, ticks_by_market, feature_rows_by_market
-
-
-def _build_feature_series(feature_rows, total_seconds):
-    if not feature_rows:
-        return {}
-
-    feature_series = {
-        column: np.full(total_seconds, np.nan)
-        for column in CRYPTO_FEATURE_COLUMNS
-    }
-
-    for row in feature_rows:
-        second = int(row["elapsed_second"])
-        if second < 0 or second >= total_seconds:
-            continue
-
-        for column in CRYPTO_FEATURE_COLUMNS:
-            value = row.get(column)
-            if value is None:
-                continue
-            if column in BOOL_FEATURE_COLUMNS:
-                feature_series[column][second] = 1.0 if value else 0.0
-            else:
-                feature_series[column][second] = float(value)
-
-    return feature_series
 
 
 def _annotate_streak_metadata(markets):
@@ -235,7 +178,7 @@ def load_all_data():
             'final_outcome': m['final_outcome'],
             'hour': started_at.hour,
             'prices': tick_array,
-            'feature_series': _build_feature_series(
+            'feature_series': build_feature_series_from_rows(
                 feature_rows_by_market.get(mid, []),
                 total_seconds,
             ),

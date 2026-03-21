@@ -99,6 +99,20 @@ docker compose logs -f trading
 
 For the raw Binance 1-second import and feature-materialization workflow used by research backtests, see [src/docs/BINANCE_1S_IMPORT_WORKFLOW.md](src/docs/BINANCE_1S_IMPORT_WORKFLOW.md).
 
+### Live Binance 1s Feed
+
+`core` now also collects live Binance 1-second bars for `BTCUSDT`, `ETHUSDT`,
+`SOLUSDT`, and `XRPUSDT`, stores them in `crypto_price_1s`, and backfills a
+short startup/reconnect window before resuming the websocket stream.
+
+`trading` does not call Binance directly. It reads raw bars from PostgreSQL and
+builds the live crypto `feature_series` it needs in-process, so feature-driven
+strategies such as `S13` and `S14` can run off the same DB-backed feed.
+
+The historical import and feature materialization scripts still matter for
+research and long-range backfills, but new live data no longer requires a
+manual Binance import.
+
 Dashboard auth uses `DASHBOARD_PASSWORD` and `NEXTAUTH_SECRET` from `.env`.
 The dashboard connects to the same PostgreSQL database as the Python services.
 
@@ -129,7 +143,7 @@ database host before starting `dashboard`.
 
 ## Core Modes
 
-`core` is the production collector. It initializes the database, resumes unresolved markets from the database, and writes `market_ticks` and `market_outcomes`.
+`core` is the production collector. It initializes the database, resumes unresolved markets from the database, writes `market_ticks` and `market_outcomes`, and continuously stores Binance 1-second bars in `crypto_price_1s`.
 
 `core-debug` is a dry-run validator. It still runs discovery, websocket subscriptions, in-memory tick progression, market end detection, heartbeat logging, and resolution polling, but it never reads from or writes to PostgreSQL.
 

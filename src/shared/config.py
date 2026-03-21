@@ -23,11 +23,26 @@ def _optional(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
 
+def _optional_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return int(value.strip())
+
+
 def _optional_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _optional_csv(name: str, default: list[str]) -> list[str]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    items = [item.strip() for item in value.split(",") if item.strip()]
+    return items or default
 
 
 # ── PostgreSQL ──────────────────────────────────────────────────────────
@@ -51,6 +66,23 @@ POLYMARKET_API = {
     "clob_rest_base": "https://clob.polymarket.com",
     "clob_ws_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
     "gamma_api_base": "https://gamma-api.polymarket.com",
+}
+
+# €€ Binance market data (used by core collection + live feature consumers) €€€€€€€
+
+BINANCE_CONFIG = {
+    "ws_base_url": _optional("BINANCE_WS_URL", "wss://stream.binance.com:9443"),
+    "rest_base_url": _optional("BINANCE_REST_BASE_URL", "https://api.binance.com"),
+    "tracked_symbols": _optional_csv(
+        "BINANCE_TRACKED_SYMBOLS",
+        ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"],
+    ),
+    "backfill_lookback_seconds": _optional_int(
+        "BINANCE_BACKFILL_LOOKBACK_SECONDS", 120
+    ),
+    "stale_data_threshold_seconds": _optional_int(
+        "BINANCE_STALE_DATA_THRESHOLD_SECONDS", 3
+    ),
 }
 
 # ── Timing constants (used by core + trading) ──────────────────────────

@@ -1,7 +1,9 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from core import main as core_main
+from shared.binance import CryptoPriceBar
 
 
 class CoreDebugModeTests(unittest.IsolatedAsyncioTestCase):
@@ -30,13 +32,44 @@ class CoreDebugModeTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(core_main.db, "insert_tick", AsyncMock()) as insert_mock:
             await core_main._insert_tick(
                 second=0,
-                tick_time=None,
+                tick_time=datetime(2026, 3, 21, 12, 0, 0, tzinfo=timezone.utc),
                 market_id="market-123456789",
+                market_type="BTC_5m",
                 up_price=0.51,
                 volume=None,
             )
 
         insert_mock.assert_not_awaited()
+
+    async def test_upsert_crypto_bars_skips_database_in_debug_mode(self):
+        core_main.CORE_DEBUG_MODE = True
+        app_state = core_main.AppState()
+        bar = CryptoPriceBar(
+            symbol="BTCUSDT",
+            asset="BTC",
+            quote_asset="USDT",
+            time=datetime(2026, 3, 21, 12, 0, 0, tzinfo=timezone.utc),
+            open=100000.0,
+            high=100010.0,
+            low=99990.0,
+            close=100005.0,
+            volume=1.0,
+            quote_volume=100005.0,
+            trade_count=42,
+            taker_buy_base_volume=0.4,
+            taker_buy_quote_volume=40002.0,
+            source="binance_live_ws",
+        )
+
+        with patch.object(
+            core_main.db,
+            "upsert_crypto_price_bars",
+            AsyncMock(),
+        ) as upsert_mock:
+            await core_main._upsert_crypto_bars(app_state, [bar])
+
+        upsert_mock.assert_not_awaited()
+        assert app_state.binance_symbols["BTCUSDT"].last_close == 100005.0
 
     async def test_recover_unresolved_markets_skips_database_in_debug_mode(self):
         core_main.CORE_DEBUG_MODE = True

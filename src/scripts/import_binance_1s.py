@@ -25,6 +25,7 @@ from typing import Iterable
 import asyncpg
 
 from shared.config import DB_CONFIG
+from shared import db as shared_db
 
 FILENAME_RE = re.compile(
     r"^(?P<symbol>[A-Z0-9]+)-1s-(?P<trading_day>\d{4}-\d{2}-\d{2})\.(?P<ext>csv|zip)$"
@@ -225,73 +226,6 @@ def build_records(
     return _iter(), counters
 
 
-async def create_tables(conn: asyncpg.Connection) -> None:
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS crypto_price_1s (
-            symbol              TEXT            NOT NULL,
-            asset               TEXT            NOT NULL,
-            quote_asset         TEXT            NOT NULL DEFAULT '',
-            time                TIMESTAMPTZ     NOT NULL,
-            open                DOUBLE PRECISION NOT NULL,
-            high                DOUBLE PRECISION NOT NULL,
-            low                 DOUBLE PRECISION NOT NULL,
-            close               DOUBLE PRECISION NOT NULL,
-            volume              DOUBLE PRECISION NOT NULL,
-            quote_volume        DOUBLE PRECISION NOT NULL,
-            trade_count         INTEGER         NOT NULL,
-            taker_buy_base_volume   DOUBLE PRECISION NOT NULL,
-            taker_buy_quote_volume  DOUBLE PRECISION NOT NULL,
-            source              TEXT            NOT NULL DEFAULT 'binance',
-            PRIMARY KEY (symbol, time)
-        );
-        """
-    )
-    await conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS crypto_price_1s_imports (
-            file_name        TEXT            PRIMARY KEY,
-            symbol           TEXT            NOT NULL,
-            asset            TEXT            NOT NULL,
-            quote_asset      TEXT            NOT NULL DEFAULT '',
-            trading_day      DATE            NOT NULL,
-            source_path      TEXT            NOT NULL,
-            rows_loaded      INTEGER         NOT NULL,
-            zero_trade_rows  INTEGER         NOT NULL,
-            imported_at      TIMESTAMPTZ     NOT NULL
-        );
-        """
-    )
-    await conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_crypto_price_1s_asset_time
-        ON crypto_price_1s (asset, time);
-        """
-    )
-
-    try:
-        await conn.execute(
-            """
-            SELECT create_hypertable('crypto_price_1s', 'time', if_not_exists => TRUE);
-            """
-        )
-        await conn.execute(
-            """
-            ALTER TABLE crypto_price_1s SET (
-                timescaledb.compress,
-                timescaledb.compress_segmentby = 'symbol'
-            );
-            """
-        )
-        await conn.execute(
-            """
-            SELECT add_compression_policy('crypto_price_1s', INTERVAL '7 days', if_not_exists => TRUE);
-            """
-        )
-    except Exception:
-        pass
-
-
 async def already_imported(conn: asyncpg.Connection, file_name: str) -> bool:
     row = await conn.fetchrow(
         "SELECT 1 FROM crypto_price_1s_imports WHERE file_name = $1;",
@@ -461,7 +395,7 @@ async def main_async(args: argparse.Namespace) -> None:
         database=DB_CONFIG["database"],
     )
     try:
-        await create_tables(conn)
+        await shared_db.create_crypto_tables(conn)
 
         imported_files = 0
         imported_rows = 0

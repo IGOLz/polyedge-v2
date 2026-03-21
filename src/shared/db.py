@@ -13,7 +13,7 @@ import asyncio
 import logging
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 
 import asyncpg
 
@@ -22,6 +22,23 @@ from shared.config import DB_CONFIG
 logger = logging.getLogger(__name__)
 
 _pool: Optional[asyncpg.Pool] = None
+
+_CRYPTO_BAR_FIELDS = (
+    "symbol",
+    "asset",
+    "quote_asset",
+    "time",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "quote_volume",
+    "trade_count",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
+    "source",
+)
 
 
 async def init_pool(min_size: int = 2, max_size: int = 10, retries: int = 30) -> asyncpg.Pool:
@@ -115,7 +132,85 @@ async def create_core_tables() -> None:
                 resolved        BOOLEAN         DEFAULT FALSE
             );
         """)
+        await _create_crypto_tables_on_conn(conn)
     logger.info("Core database tables ready.")
+
+
+async def create_crypto_tables(conn: asyncpg.Connection | None = None) -> None:
+    """Create the shared crypto 1-second bar tables."""
+    if conn is not None:
+        await _create_crypto_tables_on_conn(conn)
+        return
+
+    pool = get_pool()
+    async with pool.acquire() as pooled_conn:
+        await _create_crypto_tables_on_conn(pooled_conn)
+
+
+async def _create_crypto_tables_on_conn(conn: asyncpg.Connection) -> None:
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS crypto_price_1s (
+            symbol                  TEXT             NOT NULL,
+            asset                   TEXT             NOT NULL,
+            quote_asset             TEXT             NOT NULL DEFAULT '',
+            time                    TIMESTAMPTZ      NOT NULL,
+            open                    DOUBLE PRECISION NOT NULL,
+            high                    DOUBLE PRECISION NOT NULL,
+            low                     DOUBLE PRECISION NOT NULL,
+            close                   DOUBLE PRECISION NOT NULL,
+            volume                  DOUBLE PRECISION NOT NULL,
+            quote_volume            DOUBLE PRECISION NOT NULL,
+            trade_count             INTEGER          NOT NULL,
+            taker_buy_base_volume   DOUBLE PRECISION NOT NULL,
+            taker_buy_quote_volume  DOUBLE PRECISION NOT NULL,
+            source                  TEXT             NOT NULL DEFAULT 'binance',
+            PRIMARY KEY (symbol, time)
+        );
+        """
+    )
+    await conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS crypto_price_1s_imports (
+            file_name        TEXT            PRIMARY KEY,
+            symbol           TEXT            NOT NULL,
+            asset            TEXT            NOT NULL,
+            quote_asset      TEXT            NOT NULL DEFAULT '',
+            trading_day      DATE            NOT NULL,
+            source_path      TEXT            NOT NULL,
+            rows_loaded      INTEGER         NOT NULL,
+            zero_trade_rows  INTEGER         NOT NULL,
+            imported_at      TIMESTAMPTZ     NOT NULL
+        );
+        """
+    )
+    await conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_crypto_price_1s_asset_time
+        ON crypto_price_1s (asset, time);
+        """
+    )
+    try:
+        await conn.execute(
+            """
+            SELECT create_hypertable('crypto_price_1s', 'time', if_not_exists => TRUE);
+            """
+        )
+        await conn.execute(
+            """
+            ALTER TABLE crypto_price_1s SET (
+                timescaledb.compress,
+                timescaledb.compress_segmentby = 'symbol'
+            );
+            """
+        )
+        await conn.execute(
+            """
+            SELECT add_compression_policy('crypto_price_1s', INTERVAL '7 days', if_not_exists => TRUE);
+            """
+        )
+    except Exception:
+        pass
 
 
 # ── Shared tick/outcome queries ─────────────────────────────────────────
@@ -263,3 +358,136 @@ async def get_market_ticks(market_id: str, started_at: datetime, limit: int = 30
         }
         for r in rows
     ]
+
+
+async def upsert_crypto_price_bar(bar: dict[str, Any]) -> None:
+    """Insert or update a single 1-second crypto bar."""
+    await upsert_crypto_price_bars([bar])
+
+
+async def upsert_crypto_price_bars(bars: list[dict[str, Any]]) -> None:
+    """Insert or update multiple 1-second crypto bars."""
+    if not bars:
+        return
+
+    pool = get_pool()
+    records = [
+        tuple(bar[field] for field in _CRYPTO_BAR_FIELDS)
+        for bar in bars
+    ]
+
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """
+            INSERT INTO crypto_price_1s (
+                symbol,
+                asset,
+                quote_asset,
+                time,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                quote_volume,
+                trade_count,
+                taker_buy_base_volume,
+                taker_buy_quote_volume,
+                source
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8,
+                $9, $10, $11, $12, $13, $14
+            )
+            ON CONFLICT (symbol, time) DO UPDATE SET
+                asset = EXCLUDED.asset,
+                quote_asset = EXCLUDED.quote_asset,
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume,
+                quote_volume = EXCLUDED.quote_volume,
+                trade_count = EXCLUDED.trade_count,
+                taker_buy_base_volume = EXCLUDED.taker_buy_base_volume,
+                taker_buy_quote_volume = EXCLUDED.taker_buy_quote_volume,
+                source = EXCLUDED.source
+            """,
+            records,
+        )
+
+
+async def fetch_crypto_price_bars(
+    symbol: str,
+    start_time: datetime,
+    end_time: datetime,
+) -> list[dict[str, Any]]:
+    """Fetch chronologically ordered crypto bars for ``symbol`` in a time range."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                symbol,
+                asset,
+                quote_asset,
+                time,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                quote_volume,
+                trade_count,
+                taker_buy_base_volume,
+                taker_buy_quote_volume,
+                source
+            FROM crypto_price_1s
+            WHERE symbol = $1
+              AND time BETWEEN $2 AND $3
+            ORDER BY time ASC
+            """,
+            symbol.upper(),
+            start_time,
+            end_time,
+        )
+    return [dict(row) for row in rows]
+
+
+async def get_latest_crypto_bar(symbol: str) -> dict[str, Any] | None:
+    """Return the latest stored crypto bar for ``symbol``."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                symbol,
+                asset,
+                quote_asset,
+                time,
+                open,
+                high,
+                low,
+                close,
+                volume,
+                quote_volume,
+                trade_count,
+                taker_buy_base_volume,
+                taker_buy_quote_volume,
+                source
+            FROM crypto_price_1s
+            WHERE symbol = $1
+            ORDER BY time DESC
+            LIMIT 1
+            """,
+            symbol.upper(),
+        )
+    return dict(row) if row is not None else None
+
+
+async def get_latest_crypto_bar_time(symbol: str) -> Optional[datetime]:
+    """Return the latest stored crypto bar timestamp for ``symbol``."""
+    latest = await get_latest_crypto_bar(symbol)
+    if latest is None:
+        return None
+    return latest["time"]

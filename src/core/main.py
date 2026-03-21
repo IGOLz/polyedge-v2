@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import signal
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
+import websockets
+from websockets.exceptions import ConnectionClosed
 
 from shared import db
 from shared.api import (
@@ -16,7 +19,17 @@ from shared.api import (
     fetch_open_crypto_market_volumes,
     fetch_open_crypto_markets,
 )
-from shared.config import CORE_RUNTIME, TIMING
+from shared.binance import (
+    CryptoPriceBar,
+    build_combined_kline_stream_url,
+    current_bar_open_time,
+    fetch_rest_klines,
+    fill_missing_bars,
+    parse_ws_kline_message,
+    split_symbol,
+)
+from shared.config import BINANCE_CONFIG, CORE_RUNTIME, TIMING
+from shared.http import get_async_http_client
 from shared.logging import setup_logger
 from shared.models import MarketState
 from shared.ws import run_websocket_listener
@@ -29,6 +42,8 @@ VOLUME_POLL_INTERVAL = TIMING["volume_poll_interval"]
 HEARTBEAT_INTERVAL = TIMING["heartbeat_interval"]
 RESOLUTION_POLL_INTERVAL = TIMING["resolution_poll_interval"]
 CORE_DEBUG_MODE = CORE_RUNTIME["debug_mode"]
+BINANCE_TRACKED_SYMBOLS = [symbol.upper() for symbol in BINANCE_CONFIG["tracked_symbols"]]
+BINANCE_BACKFILL_LOOKBACK_SECONDS = BINANCE_CONFIG["backfill_lookback_seconds"]
 
 
 def _short(mid: str) -> str:
@@ -44,6 +59,16 @@ def _market_total_seconds(state: MarketState) -> int:
 
 
 @dataclass
+class BinanceSymbolState:
+    symbol: str
+    asset: str
+    quote_asset: str
+    last_bar_time: Optional[datetime] = None
+    last_close: Optional[float] = None
+    last_source: Optional[str] = None
+
+
+@dataclass
 class AppState:
     markets: dict[str, MarketState] = field(default_factory=dict)
     markets_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -53,6 +78,23 @@ class AppState:
     ws_connection_count: int = 0
     ws_message_count: int = 0
     ws_last_message_at: Optional[datetime] = None
+    binance_symbols: dict[str, BinanceSymbolState] = field(default_factory=lambda: _build_binance_symbol_states())
+    binance_ws_connected: bool = False
+    binance_connection_count: int = 0
+    binance_reconnect_count: int = 0
+    binance_message_count: int = 0
+    binance_last_message_at: Optional[datetime] = None
+
+
+def _build_binance_symbol_states() -> dict[str, BinanceSymbolState]:
+    return {
+        symbol: BinanceSymbolState(
+            symbol=symbol,
+            asset=split_symbol(symbol)[0],
+            quote_asset=split_symbol(symbol)[1],
+        )
+        for symbol in BINANCE_TRACKED_SYMBOLS
+    }
 
 
 async def _upsert_market_outcome(**kwargs) -> None:
@@ -88,6 +130,73 @@ async def _insert_tick(
         market_id=market_id,
         up_price=up_price,
         volume=volume,
+    )
+
+
+async def _upsert_crypto_bars(
+    app_state: AppState,
+    bars: list[CryptoPriceBar],
+) -> None:
+    if not bars:
+        return
+
+    if CORE_DEBUG_MODE:
+        logger.info(
+            "Debug mode: skipped %d crypto bar write(s) across %d symbol(s)",
+            len(bars),
+            len({bar.symbol for bar in bars}),
+        )
+    else:
+        await db.upsert_crypto_price_bars([bar.as_record() for bar in bars])
+
+    for bar in sorted(bars, key=lambda item: (item.symbol, item.time)):
+        state = app_state.binance_symbols.setdefault(
+            bar.symbol,
+            BinanceSymbolState(
+                symbol=bar.symbol,
+                asset=bar.asset,
+                quote_asset=bar.quote_asset,
+            ),
+        )
+        if state.last_bar_time is None or bar.time >= state.last_bar_time:
+            state.last_bar_time = bar.time
+            state.last_close = bar.close
+            state.last_source = bar.source
+
+
+async def _seed_binance_state_from_db(app_state: AppState) -> None:
+    if CORE_DEBUG_MODE:
+        return
+
+    for symbol in BINANCE_TRACKED_SYMBOLS:
+        latest = await db.get_latest_crypto_bar(symbol)
+        if latest is None:
+            continue
+        state = app_state.binance_symbols[symbol]
+        state.last_bar_time = latest["time"]
+        state.last_close = float(latest["close"])
+        state.last_source = latest["source"]
+
+
+def _format_binance_status(app_state: AppState, now: datetime) -> str:
+    latest_received_age = "n/a"
+    if app_state.binance_last_message_at is not None:
+        latest_received_age = str(
+            int((now - app_state.binance_last_message_at).total_seconds())
+        )
+
+    latest_written = ",".join(
+        f"{symbol}:{state.last_bar_time.strftime('%H:%M:%S') if state.last_bar_time else 'n/a'}"
+        for symbol, state in sorted(app_state.binance_symbols.items())
+    )
+    return (
+        f"symbols={','.join(BINANCE_TRACKED_SYMBOLS)} "
+        f"connected={app_state.binance_ws_connected} "
+        f"connections={app_state.binance_connection_count} "
+        f"reconnects={app_state.binance_reconnect_count} "
+        f"messages={app_state.binance_message_count} "
+        f"last_recv_age={latest_received_age}s "
+        f"latest_written={latest_written}"
     )
 
 
@@ -216,6 +325,171 @@ async def websocket_listener(app_state: AppState) -> None:
     )
 
 
+async def _backfill_binance_window(
+    app_state: AppState,
+    http_client: httpx.AsyncClient,
+) -> None:
+    if BINANCE_BACKFILL_LOOKBACK_SECONDS <= 0:
+        return
+
+    end_time = current_bar_open_time() - timedelta(seconds=1)
+    start_time = end_time - timedelta(seconds=BINANCE_BACKFILL_LOOKBACK_SECONDS - 1)
+    request_start = start_time - timedelta(seconds=1)
+
+    for symbol in BINANCE_TRACKED_SYMBOLS:
+        state = app_state.binance_symbols[symbol]
+        try:
+            backfill_bars = await fetch_rest_klines(
+                http_client,
+                symbol=symbol,
+                start_time=request_start,
+                end_time=end_time,
+            )
+        except Exception as exc:
+            logger.error("Binance backfill error for %s: %s", symbol, exc)
+            continue
+
+        filled = fill_missing_bars(
+            symbol,
+            backfill_bars,
+            start_time=start_time,
+            end_time=end_time,
+            seed_close=state.last_close,
+        )
+        if filled:
+            await _upsert_crypto_bars(app_state, filled)
+
+
+async def _write_synthetic_binance_bars(
+    app_state: AppState,
+    *,
+    upto_time: datetime | None = None,
+) -> None:
+    target_time = upto_time or current_bar_open_time()
+    synthetic_bars: list[CryptoPriceBar] = []
+
+    for symbol, state in app_state.binance_symbols.items():
+        if state.last_close is None:
+            continue
+
+        start_time = state.last_bar_time + timedelta(seconds=1) if state.last_bar_time else target_time
+        if start_time > target_time:
+            continue
+
+        synthetic_bars.extend(
+            fill_missing_bars(
+                symbol,
+                [],
+                start_time=start_time,
+                end_time=target_time,
+                seed_close=state.last_close,
+            )
+        )
+
+    if synthetic_bars:
+        await _upsert_crypto_bars(app_state, synthetic_bars)
+
+
+async def _ingest_closed_binance_bar(
+    app_state: AppState,
+    bar: CryptoPriceBar,
+) -> None:
+    state = app_state.binance_symbols[bar.symbol]
+    bars_to_write: list[CryptoPriceBar] = []
+
+    if state.last_bar_time is not None and state.last_close is not None:
+        gap_start = state.last_bar_time + timedelta(seconds=1)
+        gap_end = bar.time - timedelta(seconds=1)
+        if gap_start <= gap_end:
+            bars_to_write.extend(
+                fill_missing_bars(
+                    bar.symbol,
+                    [],
+                    start_time=gap_start,
+                    end_time=gap_end,
+                    seed_close=state.last_close,
+                )
+            )
+
+    bars_to_write.append(bar)
+    await _upsert_crypto_bars(app_state, bars_to_write)
+
+
+async def binance_collector_loop(
+    app_state: AppState,
+    http_client: httpx.AsyncClient,
+) -> None:
+    tracked_symbols = set(BINANCE_TRACKED_SYMBOLS)
+    reconnect_delay = 1.0
+
+    await _seed_binance_state_from_db(app_state)
+
+    while not app_state.shutdown_event.is_set():
+        try:
+            await _backfill_binance_window(app_state, http_client)
+            await _write_synthetic_binance_bars(app_state)
+        except Exception as exc:
+            logger.error("Binance sync preflight error: %s", exc)
+
+        if app_state.shutdown_event.is_set():
+            break
+
+        stream_url = build_combined_kline_stream_url(BINANCE_TRACKED_SYMBOLS)
+
+        try:
+            async with websockets.connect(stream_url, close_timeout=10) as ws:
+                app_state.binance_ws_connected = True
+                app_state.binance_connection_count += 1
+                if app_state.binance_connection_count > 1:
+                    app_state.binance_reconnect_count += 1
+                reconnect_delay = 1.0
+                logger.info(
+                    "Binance connected: subscribed to %s",
+                    ",".join(BINANCE_TRACKED_SYMBOLS),
+                )
+
+                while not app_state.shutdown_event.is_set():
+                    try:
+                        raw = await asyncio.wait_for(ws.recv(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        await _write_synthetic_binance_bars(app_state)
+                        continue
+
+                    if raw in {"PING", "PONG"} or not raw:
+                        continue
+
+                    try:
+                        message = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+                    bar = parse_ws_kline_message(
+                        message,
+                        tracked_symbols=tracked_symbols,
+                    )
+                    if bar is not None:
+                        app_state.binance_message_count += 1
+                        app_state.binance_last_message_at = datetime.now(timezone.utc)
+                        await _ingest_closed_binance_bar(app_state, bar)
+
+                    await _write_synthetic_binance_bars(app_state)
+        except ConnectionClosed as exc:
+            logger.warning(
+                "Binance websocket disconnected (code=%s) - reconnecting",
+                exc.code,
+            )
+        except Exception as exc:
+            logger.error("Binance websocket error: %s", exc)
+        finally:
+            app_state.binance_ws_connected = False
+
+        if app_state.shutdown_event.is_set():
+            break
+
+        await asyncio.sleep(reconnect_delay)
+        reconnect_delay = min(reconnect_delay * 2, 30.0)
+
+
 async def price_recorder_loop(app_state: AppState) -> None:
     heartbeat_counter = 0
 
@@ -304,13 +578,14 @@ async def price_recorder_loop(app_state: AppState) -> None:
             if app_state.ws_last_message_at is not None:
                 ws_age = int((now - app_state.ws_last_message_at).total_seconds())
             logger.info(
-                "Heartbeat - tracking %d market(s), live %d, ws_connected=%s, ws_connections=%d, ws_messages=%d, last_ws_update_age=%ss",
+                "Heartbeat - tracking %d market(s), live %d, ws_connected=%s, ws_connections=%d, ws_messages=%d, last_ws_update_age=%ss | binance %s",
                 tracked_count,
                 live_count,
                 app_state.ws_connected,
                 app_state.ws_connection_count,
                 app_state.ws_message_count,
                 "n/a" if ws_age is None else ws_age,
+                _format_binance_status(app_state, now),
             )
             heartbeat_counter = 0
 
@@ -475,7 +750,7 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     _install_signal_handlers(loop, app_state)
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient() as http_client, get_async_http_client() as binance_http_client:
         await recover_unresolved_markets(app_state, http_client)
 
         tasks = [
@@ -492,6 +767,10 @@ async def main() -> None:
             asyncio.create_task(
                 resolution_watcher_loop(app_state, http_client),
                 name="resolution-watcher",
+            ),
+            asyncio.create_task(
+                binance_collector_loop(app_state, binance_http_client),
+                name="binance-collector",
             ),
         ]
 
