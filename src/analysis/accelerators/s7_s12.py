@@ -49,6 +49,32 @@ class S7Payload:
     s4_nearest: np.ndarray
 
 
+@dataclass
+class S11Payload:
+    common: object
+    nearest_prices: np.ndarray
+    precondition_windows: np.ndarray
+    extreme_deviations: np.ndarray
+    hold_seconds_values: np.ndarray
+    hold_buffers: np.ndarray
+    raw_valid_prefix: np.ndarray
+    raw_down_prefix: np.ndarray
+    raw_up_prefix: np.ndarray
+    hold_up_prefix: np.ndarray
+    hold_down_prefix: np.ndarray
+
+
+@dataclass
+class S12Payload:
+    common: object
+    lookback_seconds_values: np.ndarray
+    valid_counts: np.ndarray
+    current_prices: np.ndarray
+    net_moves: np.ndarray
+    efficiencies: np.ndarray
+    flip_counts: np.ndarray
+
+
 @njit(cache=True)
 def _compute_s1_detection(
     prices: np.ndarray,
@@ -501,6 +527,152 @@ def _direction_flips(values: np.ndarray, count: int, noise_threshold: float = 0.
 
 
 @njit(cache=True)
+def _precompute_s11_prefix_counts(
+    prices: np.ndarray,
+    total_seconds: np.ndarray,
+    nearest_tol1: np.ndarray,
+    extreme_deviations: np.ndarray,
+    hold_buffers: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    market_count = prices.shape[0]
+    max_seconds = prices.shape[1]
+    raw_valid_prefix = np.zeros((market_count, max_seconds + 1), dtype=np.uint16)
+    raw_down_prefix = np.zeros(
+        (extreme_deviations.shape[0], market_count, max_seconds + 1),
+        dtype=np.uint16,
+    )
+    raw_up_prefix = np.zeros(
+        (extreme_deviations.shape[0], market_count, max_seconds + 1),
+        dtype=np.uint16,
+    )
+    hold_up_prefix = np.zeros(
+        (hold_buffers.shape[0], market_count, max_seconds + 1),
+        dtype=np.uint16,
+    )
+    hold_down_prefix = np.zeros(
+        (hold_buffers.shape[0], market_count, max_seconds + 1),
+        dtype=np.uint16,
+    )
+
+    for market_idx in range(market_count):
+        market_total_seconds = int(total_seconds[market_idx])
+        for sec in range(market_total_seconds):
+            raw_value = prices[market_idx, sec]
+            nearest_value = nearest_tol1[market_idx, sec]
+
+            raw_valid_prefix[market_idx, sec + 1] = raw_valid_prefix[market_idx, sec]
+            if not np.isnan(raw_value):
+                raw_valid_prefix[market_idx, sec + 1] += 1
+
+            for deviation_idx in range(extreme_deviations.shape[0]):
+                raw_down_prefix[deviation_idx, market_idx, sec + 1] = raw_down_prefix[
+                    deviation_idx, market_idx, sec
+                ]
+                raw_up_prefix[deviation_idx, market_idx, sec + 1] = raw_up_prefix[
+                    deviation_idx, market_idx, sec
+                ]
+                if np.isnan(raw_value):
+                    continue
+
+                deviation = extreme_deviations[deviation_idx]
+                if raw_value <= 0.50 - deviation:
+                    raw_down_prefix[deviation_idx, market_idx, sec + 1] += 1
+                if raw_value >= 0.50 + deviation:
+                    raw_up_prefix[deviation_idx, market_idx, sec + 1] += 1
+
+            for buffer_idx in range(hold_buffers.shape[0]):
+                hold_up_prefix[buffer_idx, market_idx, sec + 1] = hold_up_prefix[
+                    buffer_idx, market_idx, sec
+                ]
+                hold_down_prefix[buffer_idx, market_idx, sec + 1] = hold_down_prefix[
+                    buffer_idx, market_idx, sec
+                ]
+                if np.isnan(nearest_value):
+                    continue
+
+                hold_buffer = hold_buffers[buffer_idx]
+                if nearest_value >= 0.50 + hold_buffer:
+                    hold_up_prefix[buffer_idx, market_idx, sec + 1] += 1
+                if nearest_value <= 0.50 - hold_buffer:
+                    hold_down_prefix[buffer_idx, market_idx, sec + 1] += 1
+
+    return (
+        raw_valid_prefix,
+        raw_down_prefix,
+        raw_up_prefix,
+        hold_up_prefix,
+        hold_down_prefix,
+    )
+
+
+@njit(cache=True)
+def _precompute_s12_window_stats(
+    prices: np.ndarray,
+    total_seconds: np.ndarray,
+    lookback_seconds_values: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    lookback_count = lookback_seconds_values.shape[0]
+    market_count = prices.shape[0]
+    max_seconds = prices.shape[1]
+
+    valid_counts = np.zeros((lookback_count, market_count, max_seconds), dtype=np.uint16)
+    current_prices = np.full((lookback_count, market_count, max_seconds), np.nan, dtype=np.float64)
+    net_moves = np.full((lookback_count, market_count, max_seconds), np.nan, dtype=np.float64)
+    efficiencies = np.zeros((lookback_count, market_count, max_seconds), dtype=np.float64)
+    flip_counts = np.zeros((lookback_count, market_count, max_seconds), dtype=np.uint8)
+
+    for lookback_idx in range(lookback_count):
+        lookback_seconds = int(lookback_seconds_values[lookback_idx])
+        for market_idx in range(market_count):
+            market_total_seconds = int(total_seconds[market_idx])
+            for sec in range(market_total_seconds):
+                start_sec = sec - lookback_seconds
+                if start_sec < 0:
+                    start_sec = 0
+
+                first_value = np.nan
+                last_value = np.nan
+                valid_count = 0
+                path_length = 0.0
+                last_sign = 0
+                flips = 0
+                prev_value = np.nan
+
+                for pos in range(start_sec, sec + 1):
+                    value = prices[market_idx, pos]
+                    if np.isnan(value):
+                        continue
+                    if valid_count == 0:
+                        first_value = value
+                    else:
+                        delta = value - prev_value
+                        path_length += abs(delta)
+                        if abs(delta) > 0.002:
+                            sign = 1 if delta > 0 else -1
+                            if last_sign != 0 and sign != last_sign:
+                                flips += 1
+                            last_sign = sign
+                    prev_value = value
+                    last_value = value
+                    valid_count += 1
+
+                valid_counts[lookback_idx, market_idx, sec] = valid_count
+                if valid_count == 0:
+                    continue
+
+                current_prices[lookback_idx, market_idx, sec] = last_value
+                if valid_count >= 2:
+                    net_move = last_value - first_value
+                    net_moves[lookback_idx, market_idx, sec] = net_move
+                    efficiencies[lookback_idx, market_idx, sec] = (
+                        abs(net_move) / path_length if path_length > 1e-9 else 0.0
+                    )
+                flip_counts[lookback_idx, market_idx, sec] = flips
+
+    return valid_counts, current_prices, net_moves, efficiencies, flip_counts
+
+
+@njit(cache=True)
 def _evaluate_s9_combo(
     prices: np.ndarray,
     total_seconds: np.ndarray,
@@ -659,61 +831,76 @@ def _evaluate_s10_combo(
         market_total_seconds = int(total_seconds[market_idx])
         if market_total_seconds <= impulse_end:
             continue
+        count = 0
+        start_price = 0.0
+        end_price = 0.0
+        prev_price = 0.0
+        path_length = 0.0
+        peak_price = 0.0
+        peak_sec = -1
+        trough_price = 0.0
+        trough_sec = -1
+        for pos in range(impulse_start, impulse_end + 1):
+            value = prices[market_idx, pos]
+            if np.isnan(value):
+                continue
+            if count == 0:
+                start_price = value
+                peak_price = value
+                peak_sec = pos
+                trough_price = value
+                trough_sec = pos
+            else:
+                path_length += abs(value - prev_price)
+                if value > peak_price:
+                    peak_price = value
+                    peak_sec = pos
+                if value < trough_price:
+                    trough_price = value
+                    trough_sec = pos
+            prev_price = value
+            end_price = value
+            count += 1
+        if count < 6:
+            continue
+
+        net_move = end_price - start_price
+        if abs(net_move) < impulse_threshold:
+            continue
+        eff = abs(net_move) / path_length if path_length > 1e-9 else 0.0
+        if eff < impulse_efficiency_min:
+            continue
+
         found = False
         direction_up = True
         adjusted_entry = 0.0
         entry_second = -1
-        for sec in range(impulse_end + 1, market_total_seconds):
-            end_idx = impulse_end if impulse_end < sec else sec - 1
-            if end_idx < impulse_start:
+
+        if net_move > 0:
+            scan_start = peak_sec + 1
+            if scan_start >= market_total_seconds:
                 continue
-            impulse_vals = np.empty(end_idx - impulse_start + 1, dtype=np.float64)
-            impulse_secs = np.empty(end_idx - impulse_start + 1, dtype=np.int64)
-            count = 0
-            for pos in range(impulse_start, end_idx + 1):
-                value = prices[market_idx, pos]
-                if np.isnan(value):
-                    continue
-                impulse_vals[count] = value
-                impulse_secs[count] = pos
-                count += 1
-            if count < 6:
+            last_scan = peak_sec + retrace_window
+            if last_scan >= market_total_seconds:
+                last_scan = market_total_seconds - 1
+            impulse_size = peak_price - start_price
+            if impulse_size <= 0 or last_scan < scan_start:
                 continue
-            eff = _path_efficiency(impulse_vals, count)
-            if eff < impulse_efficiency_min:
-                continue
-            start_price = impulse_vals[0]
-            end_price = impulse_vals[count - 1]
-            net_move = end_price - start_price
-            if abs(net_move) < impulse_threshold:
-                continue
-            if net_move > 0:
-                peak_price = impulse_vals[0]
-                peak_sec = impulse_secs[0]
-                for idx in range(1, count):
-                    if impulse_vals[idx] > peak_price:
-                        peak_price = impulse_vals[idx]
-                        peak_sec = impulse_secs[idx]
-                if sec <= peak_sec or sec > peak_sec + retrace_window:
-                    continue
-                impulse_size = peak_price - start_price
-                if impulse_size <= 0:
-                    continue
-                pullback_vals = np.empty(sec - peak_sec, dtype=np.float64)
-                pull_count = 0
-                for pos in range(peak_sec + 1, sec + 1):
-                    value = prices[market_idx, pos]
-                    if np.isnan(value):
-                        continue
-                    pullback_vals[pull_count] = value
+
+            pull_count = 0
+            pullback_low = 0.0
+            current_price = 0.0
+            for sec in range(scan_start, last_scan + 1):
+                value = prices[market_idx, sec]
+                if not np.isnan(value):
+                    if pull_count == 0:
+                        pullback_low = value
+                    elif value < pullback_low:
+                        pullback_low = value
+                    current_price = value
                     pull_count += 1
                 if pull_count < 2:
                     continue
-                pullback_low = pullback_vals[0]
-                for idx in range(1, pull_count):
-                    if pullback_vals[idx] < pullback_low:
-                        pullback_low = pullback_vals[idx]
-                current_price = pullback_vals[pull_count - 1]
                 retrace_fraction = (peak_price - pullback_low) / impulse_size
                 if retrace_fraction < retrace_min or retrace_fraction > retrace_max:
                     continue
@@ -726,33 +913,31 @@ def _evaluate_s10_combo(
                 entry_second = sec
                 found = True
                 break
-            else:
-                trough_price = impulse_vals[0]
-                trough_sec = impulse_secs[0]
-                for idx in range(1, count):
-                    if impulse_vals[idx] < trough_price:
-                        trough_price = impulse_vals[idx]
-                        trough_sec = impulse_secs[idx]
-                if sec <= trough_sec or sec > trough_sec + retrace_window:
-                    continue
-                impulse_size = start_price - trough_price
-                if impulse_size <= 0:
-                    continue
-                pullback_vals = np.empty(sec - trough_sec, dtype=np.float64)
-                pull_count = 0
-                for pos in range(trough_sec + 1, sec + 1):
-                    value = prices[market_idx, pos]
-                    if np.isnan(value):
-                        continue
-                    pullback_vals[pull_count] = value
+        else:
+            scan_start = trough_sec + 1
+            if scan_start >= market_total_seconds:
+                continue
+            last_scan = trough_sec + retrace_window
+            if last_scan >= market_total_seconds:
+                last_scan = market_total_seconds - 1
+            impulse_size = start_price - trough_price
+            if impulse_size <= 0 or last_scan < scan_start:
+                continue
+
+            pull_count = 0
+            pullback_high = 0.0
+            current_price = 0.0
+            for sec in range(scan_start, last_scan + 1):
+                value = prices[market_idx, sec]
+                if not np.isnan(value):
+                    if pull_count == 0:
+                        pullback_high = value
+                    elif value > pullback_high:
+                        pullback_high = value
+                    current_price = value
                     pull_count += 1
                 if pull_count < 2:
                     continue
-                pullback_high = pullback_vals[0]
-                for idx in range(1, pull_count):
-                    if pullback_vals[idx] > pullback_high:
-                        pullback_high = pullback_vals[idx]
-                current_price = pullback_vals[pull_count - 1]
                 retrace_fraction = (pullback_high - trough_price) / impulse_size
                 if retrace_fraction < retrace_min or retrace_fraction > retrace_max:
                     continue
@@ -789,18 +974,26 @@ def _evaluate_s11_combo(
     duration_minutes: np.ndarray,
     fee_active: np.ndarray,
     nearest_tol1: np.ndarray,
+    precondition_windows: np.ndarray,
+    hold_seconds_values: np.ndarray,
+    raw_valid_prefix: np.ndarray,
+    raw_down_prefix: np.ndarray,
+    raw_up_prefix: np.ndarray,
+    hold_up_prefix: np.ndarray,
+    hold_down_prefix: np.ndarray,
     combo: np.ndarray,
     entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    precondition_window = int(combo[0])
-    extreme_deviation = combo[1]
+    precondition_window = int(precondition_windows[int(combo[0])])
+    extreme_idx = int(combo[1])
     reclaim_scan_start = int(combo[2])
     reclaim_scan_end = int(combo[3])
-    hold_seconds = int(combo[4])
+    hold_seconds = int(hold_seconds_values[int(combo[4])])
     hold_buffer = combo[5]
-    post_reclaim_move = combo[6]
-    stop_loss = combo[7]
-    take_profit = combo[8]
+    hold_buffer_idx = int(combo[6])
+    post_reclaim_move = combo[7]
+    stop_loss = combo[8]
+    take_profit = combo[9]
 
     market_count = prices.shape[0]
     pnls = np.empty(market_count, dtype=np.float64)
@@ -825,40 +1018,38 @@ def _evaluate_s11_combo(
             pre_start = hold_start - precondition_window
             if pre_start < 0:
                 pre_start = 0
-            had_downside_extreme = False
-            had_upside_extreme = False
-            valid_count = 0
-            for pos in range(pre_start, hold_start):
-                value = prices[market_idx, pos]
-                if np.isnan(value):
-                    continue
-                valid_count += 1
-                if value <= 0.50 - extreme_deviation:
-                    had_downside_extreme = True
-                if value >= 0.50 + extreme_deviation:
-                    had_upside_extreme = True
+            valid_count = (
+                raw_valid_prefix[market_idx, hold_start]
+                - raw_valid_prefix[market_idx, pre_start]
+            )
             if valid_count < 4:
                 continue
-            hold_prices = np.empty(hold_seconds, dtype=np.float64)
-            ok = True
-            hp_count = 0
-            for pos in range(hold_start, sec + 1):
-                value = nearest_tol1[market_idx, pos]
-                if np.isnan(value):
-                    ok = False
-                    break
-                hold_prices[hp_count] = value
-                hp_count += 1
-            if not ok:
+
+            had_downside_extreme = (
+                raw_down_prefix[extreme_idx, market_idx, hold_start]
+                - raw_down_prefix[extreme_idx, market_idx, pre_start]
+            ) > 0
+            had_upside_extreme = (
+                raw_up_prefix[extreme_idx, market_idx, hold_start]
+                - raw_up_prefix[extreme_idx, market_idx, pre_start]
+            ) > 0
+            if not had_downside_extreme and not had_upside_extreme:
                 continue
-            confirm_price = hold_prices[hp_count - 1]
-            all_up = True
-            all_down = True
-            for idx in range(hp_count):
-                if hold_prices[idx] < 0.50 + hold_buffer:
-                    all_up = False
-                if hold_prices[idx] > 0.50 - hold_buffer:
-                    all_down = False
+
+            confirm_price = nearest_tol1[market_idx, sec]
+            if np.isnan(confirm_price):
+                continue
+
+            hold_end = sec + 1
+            all_up = (
+                hold_up_prefix[hold_buffer_idx, market_idx, hold_end]
+                - hold_up_prefix[hold_buffer_idx, market_idx, hold_start]
+            ) == hold_seconds
+            all_down = (
+                hold_down_prefix[hold_buffer_idx, market_idx, hold_end]
+                - hold_down_prefix[hold_buffer_idx, market_idx, hold_start]
+            ) == hold_seconds
+
             if had_downside_extreme and all_up and confirm_price >= 0.50 + hold_buffer + post_reclaim_move:
                 direction_up = True
                 adjusted_entry = max(0.01, min(0.99, confirm_price))
@@ -894,11 +1085,18 @@ def _evaluate_s12_combo(
     asset_codes: np.ndarray,
     duration_minutes: np.ndarray,
     fee_active: np.ndarray,
+    lookback_seconds_values: np.ndarray,
+    valid_counts: np.ndarray,
+    current_prices: np.ndarray,
+    net_moves: np.ndarray,
+    efficiencies: np.ndarray,
+    flip_counts: np.ndarray,
     combo: np.ndarray,
     entry_slippage: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     late_phase_start_pct = combo[0]
-    lookback_seconds = int(combo[1])
+    lookback_idx = int(combo[1])
+    lookback_seconds = int(lookback_seconds_values[lookback_idx])
     net_move_threshold = combo[2]
     efficiency_min = combo[3]
     max_flip_count = int(combo[4])
@@ -926,29 +1124,24 @@ def _evaluate_s12_combo(
         adjusted_entry = 0.0
         entry_second = -1
         for sec in range(start_scan, end_scan + 1):
-            start_sec = sec - lookback_seconds
-            if start_sec < 0:
-                start_sec = 0
-            vals = np.empty(lookback_seconds + 1, dtype=np.float64)
-            count = 0
-            for pos in range(start_sec, sec + 1):
-                value = prices[market_idx, pos]
-                if np.isnan(value):
-                    continue
-                vals[count] = value
-                count += 1
+            count = int(valid_counts[lookback_idx, market_idx, sec])
             if count < 6:
                 continue
-            current_price = vals[count - 1]
-            net_move = vals[count - 1] - vals[0]
+
+            current_price = current_prices[lookback_idx, market_idx, sec]
+            net_move = net_moves[lookback_idx, market_idx, sec]
+            if np.isnan(current_price) or np.isnan(net_move):
+                continue
             if abs(net_move) < net_move_threshold:
                 continue
             if abs(current_price - 0.50) < min_price_distance_from_mid:
                 continue
-            efficiency = _path_efficiency(vals, count)
+
+            efficiency = efficiencies[lookback_idx, market_idx, sec]
             if efficiency < efficiency_min:
                 continue
-            flips = _direction_flips(vals, count, 0.002)
+
+            flips = int(flip_counts[lookback_idx, market_idx, sec])
             if flips > max_flip_count:
                 continue
             if net_move > 0 and current_price > 0.50:
@@ -1164,10 +1357,82 @@ class S11Accelerator(_BaseKernel):
     get_default_config = staticmethod(get_s11_default_config)
     tolerance_values = np.array([1], dtype=np.int64)
 
-    def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
+    def prepare(self, strategy_id: str, markets: list[dict], param_grid: dict[str, list]) -> PrecomputedDataset:
+        common = build_common_payload(markets)
+        nearest = precompute_nearest_prices_multi(
+            common.prices,
+            common.total_seconds,
+            self.tolerance_values,
+        )[0]
+        precondition_windows = np.array(param_grid["precondition_window"], dtype=np.int64)
+        extreme_deviations = np.array(param_grid["extreme_deviation"], dtype=np.float64)
+        hold_seconds_values = np.array(param_grid["hold_seconds"], dtype=np.int64)
+        hold_buffers = np.array(param_grid["hold_buffer"], dtype=np.float64)
+        (
+            raw_valid_prefix,
+            raw_down_prefix,
+            raw_up_prefix,
+            hold_up_prefix,
+            hold_down_prefix,
+        ) = _precompute_s11_prefix_counts(
+            common.prices,
+            common.total_seconds,
+            nearest,
+            extreme_deviations,
+            hold_buffers,
+        )
+        self._precondition_window_to_index = {
+            int(value): idx for idx, value in enumerate(param_grid["precondition_window"])
+        }
+        self._extreme_deviation_to_index = {
+            float(value): idx for idx, value in enumerate(param_grid["extreme_deviation"])
+        }
+        self._hold_seconds_to_index = {
+            int(value): idx for idx, value in enumerate(param_grid["hold_seconds"])
+        }
+        self._hold_buffer_to_index = {
+            float(value): idx for idx, value in enumerate(param_grid["hold_buffer"])
+        }
+        payload = S11Payload(
+            common=common,
+            nearest_prices=nearest,
+            precondition_windows=precondition_windows,
+            extreme_deviations=extreme_deviations,
+            hold_seconds_values=hold_seconds_values,
+            hold_buffers=hold_buffers,
+            raw_valid_prefix=raw_valid_prefix,
+            raw_down_prefix=raw_down_prefix,
+            raw_up_prefix=raw_up_prefix,
+            hold_up_prefix=hold_up_prefix,
+            hold_down_prefix=hold_down_prefix,
+        )
+        return PrecomputedDataset(
+            strategy_id=strategy_id,
+            markets=markets,
+            payload=payload,
+            eligible_markets=len(markets),
+            skipped_markets_missing_features=0,
+        )
+
+    def encode_combo(self, combo):
+        return np.array(
+            [
+                self._precondition_window_to_index[int(combo[0])],
+                self._extreme_deviation_to_index[float(combo[1])],
+                combo[2],
+                combo[3],
+                self._hold_seconds_to_index[int(combo[4])],
+                combo[5],
+                self._hold_buffer_to_index[float(combo[5])],
+                combo[6],
+                combo[7],
+                combo[8],
+            ],
+            dtype=np.float64,
+        )
+
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
-        payload: WindowPayload = dataset.payload
-        nearest = payload.nearest_prices[0]
+        payload: S11Payload = dataset.payload
         results = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values))
@@ -1175,7 +1440,16 @@ class S11Accelerator(_BaseKernel):
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s11_combo(
                 payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
                 payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                nearest, combo_array, dataset.slippage,
+                payload.nearest_prices,
+                payload.precondition_windows,
+                payload.hold_seconds_values,
+                payload.raw_valid_prefix,
+                payload.raw_down_prefix,
+                payload.raw_up_prefix,
+                payload.hold_up_prefix,
+                payload.hold_down_prefix,
+                combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets
@@ -1190,17 +1464,77 @@ class S12Accelerator(_BaseKernel):
     strategy_cls = S12Strategy
     get_default_config = staticmethod(get_s12_default_config)
 
-    def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
+    def prepare(self, strategy_id: str, markets: list[dict], param_grid: dict[str, list]) -> PrecomputedDataset:
+        common = build_common_payload(markets)
+        lookback_seconds_values = np.array(param_grid["lookback_seconds"], dtype=np.int64)
+        (
+            valid_counts,
+            current_prices,
+            net_moves,
+            efficiencies,
+            flip_counts,
+        ) = _precompute_s12_window_stats(
+            common.prices,
+            common.total_seconds,
+            lookback_seconds_values,
+        )
+        self._lookback_seconds_to_index = {
+            int(value): idx for idx, value in enumerate(param_grid["lookback_seconds"])
+        }
+        payload = S12Payload(
+            common=common,
+            lookback_seconds_values=lookback_seconds_values,
+            valid_counts=valid_counts,
+            current_prices=current_prices,
+            net_moves=net_moves,
+            efficiencies=efficiencies,
+            flip_counts=flip_counts,
+        )
+        return PrecomputedDataset(
+            strategy_id=strategy_id,
+            markets=markets,
+            payload=payload,
+            eligible_markets=len(markets),
+            skipped_markets_missing_features=0,
+        )
+
+    def encode_combo(self, combo):
+        return np.array(
+            [
+                combo[0],
+                self._lookback_seconds_to_index[int(combo[1])],
+                combo[2],
+                combo[3],
+                combo[4],
+                combo[5],
+                combo[6],
+                combo[7],
+                combo[8],
+            ],
+            dtype=np.float64,
+        )
+
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
-        payload: WindowPayload = dataset.payload
+        payload: S12Payload = dataset.payload
         results = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values))
             config_id = config_id_builder(dataset.strategy_id, param_dict)
             pnls, entry_fees, exit_fees, asset_codes, durations = _evaluate_s12_combo(
-                payload.common.prices, payload.common.total_seconds, payload.common.final_outcomes,
-                payload.common.asset_codes, payload.common.duration_minutes, payload.common.fee_active,
-                combo_array, dataset.slippage,
+                payload.common.prices,
+                payload.common.total_seconds,
+                payload.common.final_outcomes,
+                payload.common.asset_codes,
+                payload.common.duration_minutes,
+                payload.common.fee_active,
+                payload.lookback_seconds_values,
+                payload.valid_counts,
+                payload.current_prices,
+                payload.net_moves,
+                payload.efficiencies,
+                payload.flip_counts,
+                combo_array,
+                dataset.slippage,
             )
             metrics = compute_metrics_from_arrays(pnls, entry_fees, exit_fees, asset_codes, durations, config_id)
             metrics["eligible_markets"] = dataset.eligible_markets

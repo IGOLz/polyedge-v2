@@ -59,6 +59,8 @@ class S13Strategy(BaseStrategy):
                     "underlying_return": underlying_return,
                     "market_delta": market_delta,
                     "underlying_vol": underlying_vol,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 
@@ -77,6 +79,8 @@ class S13Strategy(BaseStrategy):
                     "underlying_return": underlying_return,
                     "market_delta": market_delta,
                     "underlying_vol": underlying_vol,
+                    "stop_loss_price": cfg.live_stop_loss_price,
+                    "take_profit_price": cfg.live_take_profit_price,
                 },
             )
 

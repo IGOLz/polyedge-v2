@@ -5,6 +5,8 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
+from shared.strategies.S10.config import S10Config, get_candidate_config
+from shared.strategies.S10.strategy import S10Strategy
 from shared.strategies.S5.config import S5Config
 from shared.strategies.S5.strategy import S5Strategy
 from shared.strategies.S9.config import S9Config
@@ -15,7 +17,8 @@ from shared.strategies.base import BaseStrategy
 # Toggle validated live strategies here.
 LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S5": True,
-    "S9": False,
+    "S9": True,
+    "S10": True,
 }
 
 
@@ -53,6 +56,14 @@ def build_live_s5_config() -> S5Config:
     )
 
 
+def build_live_s10_config() -> S10Config:
+    """Return the live-tested S10 candidate with crypto market scope."""
+    candidate = get_candidate_config()
+    candidate.allowed_assets = ["btc", "eth", "sol", "xrp"]
+    candidate.allowed_durations_minutes = [5, 15]
+    return candidate
+
+
 def build_live_s9_config() -> S9Config:
     """Return the validated S9 live candidate config."""
     return S9Config(
@@ -78,6 +89,8 @@ def _build_strategy(strategy_id: str) -> BaseStrategy:
         return S5Strategy(build_live_s5_config())
     if strategy_id == "S9":
         return S9Strategy(build_live_s9_config())
+    if strategy_id == "S10":
+        return S10Strategy(build_live_s10_config())
     raise ValueError(f"Unsupported live strategy id: {strategy_id}")
 
 
@@ -149,6 +162,20 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
             f"breakout={cfg.breakout_distance} "
             f"momentum={cfg.momentum_lookback} "
             f"efficiency={cfg.efficiency_min} "
+            f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
+        )
+
+    if cfg.strategy_id == "S10":
+        return (
+            f"{cfg.strategy_id} "
+            f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"assets={cfg.allowed_assets} "
+            f"durations={cfg.allowed_durations_minutes} "
+            f"hours={cfg.allowed_hours or 'all'} "
+            f"impulse={cfg.impulse_start}-{cfg.impulse_end}@{cfg.impulse_threshold} "
+            f"retrace={cfg.retrace_window}/{cfg.retrace_min}-{cfg.retrace_max} "
+            f"reaccel={cfg.reacceleration_threshold} "
+            f"eff={cfg.impulse_efficiency_min} "
             f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
         )
 

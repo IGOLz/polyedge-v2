@@ -95,6 +95,10 @@ docker compose ps
 docker compose logs -f trading
 ```
 
+### Historical Binance 1s Workflow
+
+For the raw Binance 1-second import and feature-materialization workflow used by research backtests, see [src/docs/BINANCE_1S_IMPORT_WORKFLOW.md](src/docs/BINANCE_1S_IMPORT_WORKFLOW.md).
+
 Dashboard auth uses `DASHBOARD_PASSWORD` and `NEXTAUTH_SECRET` from `.env`.
 The dashboard connects to the same PostgreSQL database as the Python services.
 
