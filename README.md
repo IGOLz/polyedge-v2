@@ -74,6 +74,26 @@ To update core (rare, planned):
 # or: docker compose build core && docker compose up -d core
 ```
 
+### Update Live Daily Loss Limit
+
+The trading bot reads `daily_loss_limit` from the `bot_config` table during the
+main loop, so you can change it without restarting the `trading` container.
+
+From the repo root on the LXC:
+
+```bash
+docker compose exec timescaledb psql -U polymarket -d polymarket_tracker -c "INSERT INTO bot_config (key, value) VALUES ('daily_loss_limit', '300') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;"
+```
+
+Verify the current value:
+
+```bash
+docker compose exec timescaledb psql -U polymarket -d polymarket_tracker -c "SELECT key, value FROM bot_config WHERE key = 'daily_loss_limit';"
+```
+
+If you use different PostgreSQL credentials or database names in `.env`, replace
+`polymarket` and `polymarket_tracker` accordingly.
+
 ## Quick Start
 
 ```bash

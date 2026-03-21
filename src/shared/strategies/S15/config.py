@@ -7,6 +7,8 @@ from shared.strategies.base import StrategyConfig
 class S15Config(StrategyConfig):
     """Configuration for S15 breakout with underlying confirmation."""
 
+    allowed_assets: list[str] | None = None
+    allowed_durations_minutes: list[int] | None = None
     setup_window_end: int = 45
     breakout_scan_start: int = 50
     breakout_scan_end: int = 180
@@ -15,13 +17,31 @@ class S15Config(StrategyConfig):
     feature_window: int = 10
     min_underlying_return: float = 0.001
     min_trade_count: float = 20.0
+    live_stop_loss_price: float = 0.35
+    live_take_profit_price: float = 0.75
 
 
-def get_default_config() -> S15Config:
+def get_candidate_config() -> S15Config:
     return S15Config(
         strategy_id="S15",
         strategy_name="S15_breakout_with_underlying_confirmation",
+        allowed_assets=["btc", "eth", "sol", "xrp"],
+        allowed_durations_minutes=[5],
+        setup_window_end=30,
+        breakout_scan_start=25,
+        breakout_scan_end=240,
+        breakout_buffer=0.01,
+        confirmation_points=1,
+        feature_window=5,
+        min_underlying_return=0.0005,
+        min_trade_count=40.0,
+        live_stop_loss_price=0.35,
+        live_take_profit_price=0.75,
     )
+
+
+def get_default_config() -> S15Config:
+    return get_candidate_config()
 
 
 def get_param_grid() -> dict[str, list]:

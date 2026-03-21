@@ -11,6 +11,8 @@ from shared.strategies.S13.config import S13Config, get_candidate_config as get_
 from shared.strategies.S13.strategy import S13Strategy
 from shared.strategies.S14.config import S14Config, get_candidate_config as get_s14_candidate_config
 from shared.strategies.S14.strategy import S14Strategy
+from shared.strategies.S15.config import S15Config, get_candidate_config as get_s15_candidate_config
+from shared.strategies.S15.strategy import S15Strategy
 from shared.strategies.S5.config import S5Config
 from shared.strategies.S5.strategy import S5Strategy
 from shared.strategies.S9.config import S9Config
@@ -25,6 +27,7 @@ LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S10": True,
     "S13": False,
     "S14": True,
+    "S15": True,
 }
 
 
@@ -105,6 +108,14 @@ def build_live_s14_config() -> S14Config:
     return candidate
 
 
+def build_live_s15_config() -> S15Config:
+    """Return the validated S15 live candidate config."""
+    candidate = get_s15_candidate_config()
+    candidate.allowed_assets = ["btc", "eth", "sol", "xrp"]
+    candidate.allowed_durations_minutes = [5]
+    return candidate
+
+
 def _build_strategy(strategy_id: str) -> BaseStrategy:
     if strategy_id == "S5":
         return S5Strategy(build_live_s5_config())
@@ -116,6 +127,8 @@ def _build_strategy(strategy_id: str) -> BaseStrategy:
         return S13Strategy(build_live_s13_config())
     if strategy_id == "S14":
         return S14Strategy(build_live_s14_config())
+    if strategy_id == "S15":
+        return S15Strategy(build_live_s15_config())
     raise ValueError(f"Unsupported live strategy id: {strategy_id}")
 
 
@@ -231,6 +244,22 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
             f"underlying={cfg.max_underlying_return_abs} "
             f"extremes={cfg.extreme_price_low}/{cfg.extreme_price_high} "
             f"mismatch={cfg.require_direction_mismatch} "
+            f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
+        )
+
+    if cfg.strategy_id == "S15":
+        return (
+            f"{cfg.strategy_id} "
+            f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"assets={cfg.allowed_assets} "
+            f"durations={cfg.allowed_durations_minutes} "
+            f"setup={cfg.setup_window_end} "
+            f"scan={cfg.breakout_scan_start}-{cfg.breakout_scan_end} "
+            f"buffer={cfg.breakout_buffer} "
+            f"confirm={cfg.confirmation_points} "
+            f"feature={cfg.feature_window} "
+            f"underlying={cfg.min_underlying_return} "
+            f"trades={cfg.min_trade_count} "
             f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
         )
 

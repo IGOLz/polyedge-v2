@@ -7,15 +7,32 @@ import numpy as np
 from shared.strategies.base import MarketSnapshot
 from trading.live_profile import (
     LIVE_STRATEGY_ENABLED,
-    build_live_s5_config,
-    build_live_s9_config,
     build_live_s10_config,
     build_live_s13_config,
     build_live_s14_config,
+    build_live_s15_config,
+    build_live_s5_config,
+    build_live_s9_config,
     get_live_strategies,
     live_profile_summary,
     market_in_live_scope,
 )
+
+
+DEFAULT_LIVE_STRATEGY_ENABLED = {
+    "S5": True,
+    "S9": True,
+    "S10": True,
+    "S13": False,
+    "S14": True,
+    "S15": True,
+}
+
+
+def _restore_live_flags(monkeypatch) -> None:
+    for strategy_id, enabled in DEFAULT_LIVE_STRATEGY_ENABLED.items():
+        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, strategy_id, enabled)
+    get_live_strategies.cache_clear()
 
 
 def _make_s5_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) -> MarketSnapshot:
@@ -136,6 +153,29 @@ def _make_s14_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) 
     )
 
 
+def _make_s15_trigger_snapshot(*, asset: str, duration_minutes: int, hour: int) -> MarketSnapshot:
+    prices = np.full(36, 0.40, dtype=float)
+    prices[31:36] = 0.42
+
+    return MarketSnapshot(
+        market_id=f"{asset}_{duration_minutes}m_s15_market",
+        market_type=f"{asset}_{duration_minutes}m",
+        prices=prices,
+        total_seconds=duration_minutes * 60,
+        elapsed_seconds=35,
+        feature_series={
+            "underlying_return_5s": np.full(len(prices), 0.001, dtype=float),
+            "underlying_trade_count": np.full(len(prices), 80.0, dtype=float),
+        },
+        metadata={
+            "asset": asset,
+            "duration_minutes": duration_minutes,
+            "hour": hour,
+            "started_at": datetime(2026, 3, 19, hour, 0, tzinfo=timezone.utc),
+        },
+    )
+
+
 def test_live_s5_profile_matches_validated_candidate():
     cfg = build_live_s5_config()
 
@@ -229,7 +269,25 @@ def test_live_s14_profile_matches_validated_candidate():
     assert cfg.live_take_profit_price == 0.75
 
 
-def test_live_market_scope_is_union_of_s5_s9_s10_s13_and_s14():
+def test_live_s15_profile_matches_validated_candidate():
+    cfg = build_live_s15_config()
+
+    assert cfg.strategy_id == "S15"
+    assert cfg.allowed_assets == ["btc", "eth", "sol", "xrp"]
+    assert cfg.allowed_durations_minutes == [5]
+    assert cfg.setup_window_end == 30
+    assert cfg.breakout_scan_start == 25
+    assert cfg.breakout_scan_end == 240
+    assert cfg.breakout_buffer == 0.01
+    assert cfg.confirmation_points == 1
+    assert cfg.feature_window == 5
+    assert cfg.min_underlying_return == 0.0005
+    assert cfg.min_trade_count == 40.0
+    assert cfg.live_stop_loss_price == 0.35
+    assert cfg.live_take_profit_price == 0.75
+
+
+def test_live_market_scope_is_union_of_s5_s9_s10_s14_and_s15():
     evening = datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)
     afternoon = datetime(2026, 3, 19, 13, 0, tzinfo=timezone.utc)
 
@@ -248,12 +306,13 @@ def test_live_profile_enables_all_five_strategies_by_default():
     strategies = get_live_strategies()
     summary = live_profile_summary()
 
-    assert [strategy.config.strategy_id for strategy in strategies] == ["S5", "S9", "S10", "S13", "S14"]
+    assert [strategy.config.strategy_id for strategy in strategies] == ["S5", "S9", "S10", "S14", "S15"]
     assert "S5" in summary
     assert "S9" in summary
     assert "S10" in summary
-    assert "S13" in summary
+    assert "S13" not in summary
     assert "S14" in summary
+    assert "S15" in summary
 
 
 def test_live_profile_can_toggle_strategy_subset(monkeypatch):
@@ -262,6 +321,7 @@ def test_live_profile_can_toggle_strategy_subset(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -274,19 +334,20 @@ def test_live_profile_can_toggle_strategy_subset(monkeypatch):
         assert "S10" not in summary
         assert "S13" not in summary
         assert "S14" not in summary
+        assert "S15" not in summary
         assert market_in_live_scope("btc_5m", datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)) is True
         assert market_in_live_scope("eth_15m", datetime(2026, 3, 19, 20, 0, tzinfo=timezone.utc)) is False
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
 
 
 def test_live_s5_strategy_emits_signal_only_for_allowed_scope(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -301,15 +362,16 @@ def test_live_s5_strategy_emits_signal_only_for_allowed_scope(monkeypatch):
         assert strategy.evaluate(blocked_duration) is None
         assert strategy.evaluate(blocked_hour) is None
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
 
 
 def test_live_s9_strategy_emits_signal_only_for_allowed_scope(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -322,9 +384,7 @@ def test_live_s9_strategy_emits_signal_only_for_allowed_scope(monkeypatch):
         assert strategy.evaluate(blocked_asset) is None
         assert strategy.evaluate(blocked_duration) is None
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
 
 
 def test_live_s10_strategy_emits_signal_when_enabled(monkeypatch):
@@ -333,6 +393,7 @@ def test_live_s10_strategy_emits_signal_when_enabled(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -343,11 +404,7 @@ def test_live_s10_strategy_emits_signal_when_enabled(monkeypatch):
         assert signal is not None
         assert signal.strategy_name == "S10_pullback_continuation"
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
 
 
 def test_live_s13_strategy_emits_signal_only_for_5m_scope(monkeypatch):
@@ -356,6 +413,7 @@ def test_live_s13_strategy_emits_signal_only_for_5m_scope(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", True)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -370,11 +428,7 @@ def test_live_s13_strategy_emits_signal_only_for_5m_scope(monkeypatch):
         assert signal.strategy_name == "S13_underlying_lag_follow"
         assert strategy.evaluate(blocked_duration) is None
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
 
 
 def test_live_s14_strategy_emits_signal_only_for_5m_scope(monkeypatch):
@@ -383,6 +437,7 @@ def test_live_s14_strategy_emits_signal_only_for_5m_scope(monkeypatch):
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
     monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", True)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", False)
     get_live_strategies.cache_clear()
 
     try:
@@ -399,9 +454,30 @@ def test_live_s14_strategy_emits_signal_only_for_5m_scope(monkeypatch):
         assert strategy.evaluate(blocked_asset) is None
         assert strategy.evaluate(blocked_duration) is None
     finally:
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", True)
-        monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", True)
-        get_live_strategies.cache_clear()
+        _restore_live_flags(monkeypatch)
+
+
+def test_live_s15_strategy_emits_signal_only_for_5m_scope(monkeypatch):
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S5", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S9", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S10", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S13", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S14", False)
+    monkeypatch.setitem(LIVE_STRATEGY_ENABLED, "S15", True)
+    get_live_strategies.cache_clear()
+
+    try:
+        strategy = get_live_strategies()[0]
+        allowed = _make_s15_trigger_snapshot(asset="btc", duration_minutes=5, hour=13)
+        blocked_asset = _make_s15_trigger_snapshot(asset="doge", duration_minutes=5, hour=13)
+        blocked_duration = _make_s15_trigger_snapshot(asset="btc", duration_minutes=15, hour=13)
+
+        signal = strategy.evaluate(allowed)
+
+        assert strategy.config.strategy_id == "S15"
+        assert signal is not None
+        assert signal.strategy_name == "S15_breakout_with_underlying_confirmation"
+        assert strategy.evaluate(blocked_asset) is None
+        assert strategy.evaluate(blocked_duration) is None
+    finally:
+        _restore_live_flags(monkeypatch)

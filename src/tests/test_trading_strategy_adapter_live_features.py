@@ -5,12 +5,14 @@ from unittest.mock import AsyncMock, patch
 from shared.strategies.S10.strategy import S10Strategy
 from shared.strategies.S13.strategy import S13Strategy
 from shared.strategies.S14.strategy import S14Strategy
+from shared.strategies.S15.strategy import S15Strategy
 from trading import strategy_adapter
 from trading.db import MarketInfo, Tick
 from trading.live_profile import (
     build_live_s10_config,
     build_live_s13_config,
     build_live_s14_config,
+    build_live_s15_config,
 )
 
 
@@ -87,6 +89,54 @@ def _make_crypto_rows(
 
 
 class StrategyAdapterLiveFeatureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_evaluate_strategies_builds_live_features_for_s15(self):
+        FrozenDateTime.frozen_now = datetime(2026, 3, 21, 13, 0, 35, tzinfo=timezone.utc)
+        started_at = FrozenDateTime.frozen_now - timedelta(seconds=35)
+        market = _make_market(
+            market_id="btc-s15-market",
+            market_type="btc_5m",
+            started_at=started_at,
+            duration_minutes=5,
+        )
+        ticks = _make_ticks(
+            market.market_id,
+            started_at,
+            {second: 0.40 for second in range(31)} | {31: 0.42, 32: 0.42, 33: 0.42, 34: 0.42, 35: 0.42},
+        )
+        crypto_rows = _make_crypto_rows(
+            "BTCUSDT",
+            started_at,
+            [100.0 + (0.50 * second / 35.0) for second in range(36)],
+        )
+        for row in crypto_rows:
+            row["trade_count"] = 80
+        strategies = (S15Strategy(build_live_s15_config()),)
+
+        with patch.object(strategy_adapter, "datetime", FrozenDateTime), patch.object(
+            strategy_adapter, "get_live_strategies", return_value=strategies
+        ), patch.object(
+            strategy_adapter, "get_usdc_balance", AsyncMock(return_value=1000.0)
+        ), patch.object(
+            strategy_adapter, "already_traded_this_market", AsyncMock(return_value=False)
+        ), patch.object(
+            strategy_adapter.shared_db,
+            "get_latest_crypto_bar_time",
+            AsyncMock(return_value=FrozenDateTime.frozen_now),
+        ), patch.object(
+            strategy_adapter, "latest_bar_is_fresh", return_value=True
+        ) as freshness_mock, patch.object(
+            strategy_adapter.shared_db,
+            "fetch_crypto_price_bars",
+            AsyncMock(return_value=crypto_rows),
+        ) as fetch_mock:
+            signals = await strategy_adapter.evaluate_strategies(market, ticks)
+
+        self.assertEqual(len(signals), 1)
+        self.assertEqual(signals[0].strategy_name, "S15_breakout_with_underlying_confirmation")
+        self.assertEqual(signals[0].direction, "Up")
+        freshness_mock.assert_called_once()
+        fetch_mock.assert_awaited_once()
+
     async def test_evaluate_strategies_builds_live_features_for_s13(self):
         FrozenDateTime.frozen_now = datetime(2026, 3, 21, 13, 0, 30, tzinfo=timezone.utc)
         started_at = FrozenDateTime.frozen_now - timedelta(seconds=30)
