@@ -40,6 +40,22 @@ from trading.strategy_adapter import evaluate_strategies
 from trading.utils import debug_log, log, strategy_log_tag
 
 
+def _get_live_float(live_config: dict[str, str], key: str, fallback: float) -> float:
+    raw_value = live_config.get(key)
+    if raw_value is None:
+        return fallback
+    try:
+        return float(raw_value)
+    except (TypeError, ValueError):
+        log.warning(
+            "Invalid live config value for %s=%r - using fallback %.2f",
+            key,
+            raw_value,
+            fallback,
+        )
+        return fallback
+
+
 def build_clob_client() -> ClobClient:
     creds = ApiCreds(
         api_key=config.API_KEY,
@@ -341,6 +357,7 @@ async def exit_monitor_loop(clob) -> None:
                             exit_fill = await execute_limit_exit_order(
                                 clob,
                                 trade["token_id"],
+                                float(trade["shares"] or 0.0),
                                 tp_price,
                                 log_prefix="TAKE-PROFIT",
                                 trade_id=trade["id"],
@@ -450,6 +467,7 @@ async def exit_monitor_loop(clob) -> None:
                                     forced_exit = await force_close_position(
                                         clob,
                                         trade["token_id"],
+                                        shares=float(trade["shares"] or 0.0),
                                         trade_id=trade["id"],
                                         reason=f"stop-loss order {status.lower()}",
                                     )
@@ -587,6 +605,13 @@ async def run() -> None:
     except Exception:
         log.exception("Error resolving outcomes on startup")
     await sync_daily_net_loss_from_db()
+    startup_live_config = await db.get_live_config()
+    startup_bet_size = _get_live_float(startup_live_config, "bet_size_usd", config.BET_SIZE_USD)
+    startup_daily_loss_limit = _get_live_float(
+        startup_live_config,
+        "daily_loss_limit",
+        config.DAILY_LOSS_LIMIT,
+    )
 
     redemption_mode = "disabled_in_dry_run"
     if config.DRY_RUN:
@@ -599,8 +624,8 @@ async def run() -> None:
         "bot_start",
         "Bot started",
         {
-            "bet_size": config.BET_SIZE_USD,
-            "daily_loss_limit": config.DAILY_LOSS_LIMIT,
+            "bet_size": startup_bet_size,
+            "daily_loss_limit": startup_daily_loss_limit,
             "balance": balance,
             "dry_run": config.DRY_RUN,
             "live_profile": live_profile_summary(),
@@ -621,8 +646,8 @@ async def run() -> None:
         "Bot started - mode=%s | redemption=%s | $%.2f/trade | loss limit $%.2f",
         "DRY RUN" if config.DRY_RUN else "LIVE",
         redemption_mode,
-        config.BET_SIZE_USD,
-        config.DAILY_LOSS_LIMIT,
+        startup_bet_size,
+        startup_daily_loss_limit,
     )
 
     backoff = 0

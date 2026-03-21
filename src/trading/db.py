@@ -594,8 +594,15 @@ async def record_redemption_failure(condition_id: str, error_message: str) -> No
 
 # ── Logging ─────────────────────────────────────────────────────────────
 
-async def log_event(log_type: str, message: str, data: dict | None = None) -> None:
-    logger.info(message)
+async def log_event(
+    log_type: str,
+    message: str,
+    data: dict | None = None,
+    *,
+    echo: bool = True,
+) -> None:
+    if echo:
+        logger.info(message)
     try:
         pool = get_pool()
         async with pool.acquire() as conn:

@@ -240,6 +240,8 @@ async def _fetch_sellable_shares(
 
     loop = asyncio.get_event_loop()
     balance = 0
+    actual_shares = 0.0
+    sellable_shares = 0
     attempts_used = 0
     for attempt in range(attempts):
         attempts_used = attempt + 1
@@ -259,35 +261,45 @@ async def _fetch_sellable_shares(
                 timeout=5.0,
             )
             balance = int(balance_resp.get("balance", "0")) if isinstance(balance_resp, dict) else 0
-            if balance > 0:
+            actual_shares = balance / 1_000_000
+            sellable_shares = math.floor(actual_shares)
+            if sellable_shares >= config.MIN_EXIT_ORDER_SHARES:
                 break
             if attempt + 1 == attempts or attempt == 0:
                 debug_log.info(
-                    "[%s] No settled token balance yet for trade=%s on attempt %d/%d",
+                    "[%s] Waiting for sellable balance for trade=%s on attempt %d/%d | balance: %.4f | sellable: %d",
                     log_prefix,
                     trade_id if trade_id is not None else "?",
                     attempt + 1,
                     attempts,
+                    actual_shares,
+                    sellable_shares,
                 )
             await asyncio.sleep(1.0)
         except Exception as exc:
             log.warning("[%s] Balance check failed attempt %d: %s", log_prefix, attempt + 1, exc)
             await asyncio.sleep(1.0)
 
-    if balance <= 0:
+    if sellable_shares < config.MIN_EXIT_ORDER_SHARES:
         if trade_id is None:
-            log.warning("[%s] Token balance is 0 after %d attempts", log_prefix, attempts)
+            log.warning(
+                "[%s] Sellable token balance stayed below minimum after %d attempts | balance: %.4f | sellable: %d",
+                log_prefix,
+                attempts,
+                actual_shares,
+                sellable_shares,
+            )
         else:
             log.warning(
-                "[%s] Token balance is 0 after %d attempts for trade %d",
+                "[%s] Sellable token balance stayed below minimum after %d attempts for trade %d | balance: %.4f | sellable: %d",
                 log_prefix,
                 attempts,
                 trade_id,
+                actual_shares,
+                sellable_shares,
             )
         return None
 
-    actual_shares = balance / 1_000_000
-    sellable_shares = math.floor(actual_shares)
     log.info(
         "[%s] Trade %s settled after %d attempt(s) | balance: %.4f shares | sellable: %d",
         log_prefix,
@@ -307,6 +319,48 @@ async def _fetch_sellable_shares(
         return None
 
     return actual_shares, sellable_shares
+
+
+def _resolve_exit_order_shares(
+    *,
+    requested_shares: float,
+    sellable_shares: int,
+    log_prefix: str,
+    trade_id: int | None = None,
+) -> int | None:
+    requested_sellable = math.floor(max(requested_shares, 0.0))
+    if requested_sellable < config.MIN_EXIT_ORDER_SHARES:
+        log.warning(
+            "[%s] Requested shares %d below exit minimum %d for trade %s",
+            log_prefix,
+            requested_sellable,
+            config.MIN_EXIT_ORDER_SHARES,
+            trade_id if trade_id is not None else "?",
+        )
+        return None
+
+    order_shares = min(requested_sellable, sellable_shares)
+    if order_shares < config.MIN_EXIT_ORDER_SHARES:
+        log.warning(
+            "[%s] Available shares %d below exit minimum %d for trade %s",
+            log_prefix,
+            order_shares,
+            config.MIN_EXIT_ORDER_SHARES,
+            trade_id if trade_id is not None else "?",
+        )
+        return None
+
+    if order_shares < requested_sellable:
+        log.warning(
+            "[%s] Capping exit order for trade %s to %d share(s); requested %d, available %d",
+            log_prefix,
+            trade_id if trade_id is not None else "?",
+            order_shares,
+            requested_sellable,
+            sellable_shares,
+        )
+
+    return order_shares
 
 
 def _get_best_price(clob: ClobClient, token_id: str, side: str) -> float | None:
@@ -568,13 +622,22 @@ async def place_stop_loss_order(
         return None
 
     _, sellable_shares = share_info
+    order_shares = _resolve_exit_order_shares(
+        requested_shares=shares,
+        sellable_shares=sellable_shares,
+        log_prefix="STOP-LOSS",
+        trade_id=trade_id,
+    )
+    if order_shares is None:
+        return None
+
     loop = asyncio.get_event_loop()
     from py_clob_client.order_builder.constants import SELL
 
     log.info(
         "[STOP-LOSS] Attempting GTC sell - token: %s | shares: %d | price: %s | trade_id: %d",
         token_id[:16],
-        sellable_shares,
+        order_shares,
         stop_loss_price,
         trade_id,
     )
@@ -583,7 +646,7 @@ async def place_stop_loss_order(
             sell_args = OrderArgs(
                 token_id=token_id,
                 price=round(stop_loss_price, 2),
-                size=float(sellable_shares),
+                size=float(order_shares),
                 side=SELL,
             )
             signed = clob.create_order(sell_args)
@@ -627,6 +690,7 @@ async def place_stop_loss_order(
 async def execute_limit_exit_order(
     clob: ClobClient,
     token_id: str,
+    shares: float,
     target_price: float,
     *,
     log_prefix: str,
@@ -645,6 +709,15 @@ async def execute_limit_exit_order(
         return None
 
     _, sellable_shares = share_info
+    order_shares = _resolve_exit_order_shares(
+        requested_shares=shares,
+        sellable_shares=sellable_shares,
+        log_prefix=log_prefix,
+        trade_id=trade_id,
+    )
+    if order_shares is None:
+        return None
+
     loop = asyncio.get_event_loop()
     from py_clob_client.order_builder.constants import SELL
 
@@ -654,14 +727,14 @@ async def execute_limit_exit_order(
             log_prefix,
             trade_id if trade_id is not None else "?",
             target_price,
-            sellable_shares,
+            order_shares,
         )
 
         def _place():
             sell_args = OrderArgs(
                 token_id=token_id,
                 price=round(target_price, 2),
-                size=float(sellable_shares),
+                size=float(order_shares),
                 side=SELL,
             )
             signed = clob.create_order(sell_args)
@@ -675,7 +748,7 @@ async def execute_limit_exit_order(
         status = (resp.get("status") or "").upper() if isinstance(resp, dict) else ""
 
         if status in ("MATCHED", "FILLED"):
-            fill_shares, fill_price = _parse_fill_from_resp(resp, sellable_shares, round(target_price, 2))
+            fill_shares, fill_price = _parse_fill_from_resp(resp, order_shares, round(target_price, 2))
             log.info(
                 "[%s] Limit exit filled immediately for trade %s | %d shares @ %.4f",
                 log_prefix,
@@ -697,7 +770,7 @@ async def execute_limit_exit_order(
         if filled:
             fill_shares, fill_price = _parse_fill_from_resp(
                 order_detail,
-                sellable_shares,
+                order_shares,
                 round(target_price, 2),
             )
             log.info(
@@ -731,6 +804,7 @@ async def force_close_position(
     clob: ClobClient,
     token_id: str,
     *,
+    shares: float,
     trade_id: int | None = None,
     preferred_price: float | None = None,
     reason: str = "",
@@ -749,6 +823,7 @@ async def force_close_position(
     return await execute_limit_exit_order(
         clob,
         token_id,
+        shares,
         exit_price,
         log_prefix="FORCED-EXIT",
         trade_id=trade_id,
@@ -1795,14 +1870,6 @@ async def execute_trade(
     if not hybrid["filled"]:
         status = hybrid.get("error_status", "hybrid_no_fill")
         if status == "hybrid_no_fill":
-            log.info(
-                "Hybrid no fill - %s %s on %s at %.4f [LOCKED] (all stages exhausted in %.2fs)",
-                signal.strategy_name,
-                signal.direction,
-                market_label,
-                ideal_price,
-                hybrid["elapsed"],
-            )
             await db.log_event(
                 "trade_hybrid_no_fill",
                 f"Hybrid no fill - {signal.strategy_name} {signal.direction} on {market.market_type} at {ideal_price:.4f} [LOCKED]",
@@ -1816,6 +1883,7 @@ async def execute_trade(
                     "execution_time": round(hybrid["elapsed"], 2),
                     "signal_data": signal_data,
                 },
+                echo=False,
             )
         await db.insert_bot_trade(
             market_id=market.market_id,
@@ -2022,6 +2090,7 @@ async def execute_trade(
         forced_exit = await force_close_position(
             clob,
             token_id,
+            shares=actual_shares,
             trade_id=trade_id,
             reason=protection_notes,
         )
@@ -2061,6 +2130,7 @@ async def execute_trade(
         forced_exit = await force_close_position(
             clob,
             token_id,
+            shares=actual_shares,
             trade_id=trade_id,
             reason="stop-loss order could not be placed",
         )
