@@ -48,6 +48,9 @@ async def create_trading_tables() -> None:
                 stop_loss_order_id TEXT,
                 stop_loss_price NUMERIC(6,4),
                 stop_loss_triggered BOOLEAN DEFAULT FALSE,
+                take_profit_order_id TEXT,
+                take_profit_price NUMERIC(6,4),
+                take_profit_triggered BOOLEAN DEFAULT FALSE,
                 signal_data     JSONB,
                 execution_stage TEXT,
                 locked_entry_price NUMERIC(10,6),
@@ -98,6 +101,43 @@ async def create_trading_tables() -> None:
         await conn.execute(
             "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS amount_redeemed NUMERIC(10,6)"
         )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS stop_loss_order_id TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS stop_loss_price NUMERIC(6,4)"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS stop_loss_triggered BOOLEAN DEFAULT FALSE"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS take_profit_order_id TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS take_profit_price NUMERIC(6,4)"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS take_profit_triggered BOOLEAN DEFAULT FALSE"
+        )
+        await conn.execute("""
+            UPDATE bot_trades
+            SET final_outcome = 'win_resolution'
+            WHERE final_outcome = 'win'
+        """)
+        await conn.execute("""
+            UPDATE bot_trades
+            SET stop_loss_price = NULLIF(signal_data->>'stop_loss_price', '')::numeric
+            WHERE stop_loss_price IS NULL
+              AND signal_data ? 'stop_loss_price'
+              AND NULLIF(signal_data->>'stop_loss_price', '') IS NOT NULL
+        """)
+        await conn.execute("""
+            UPDATE bot_trades
+            SET take_profit_price = NULLIF(signal_data->>'take_profit_price', '')::numeric
+            WHERE take_profit_price IS NULL
+              AND signal_data ? 'take_profit_price'
+              AND NULLIF(signal_data->>'take_profit_price', '') IS NOT NULL
+        """)
     logger.info("Trading database tables ready.")
 
 
@@ -293,7 +333,7 @@ async def update_pending_outcomes(clob=None) -> list[dict]:
         await conn.execute("""
             UPDATE bot_trades bt SET
                 final_outcome = CASE
-                    WHEN mo.final_outcome = bt.direction THEN 'win'
+                    WHEN mo.final_outcome = bt.direction THEN 'win_resolution'
                     WHEN mo.final_outcome IS NOT NULL AND mo.final_outcome != bt.direction THEN 'loss'
                 END,
                 resolved_at = NOW(),
@@ -323,7 +363,7 @@ async def update_pending_outcomes(clob=None) -> list[dict]:
             "direction": r["direction"], "entry_price": entry,
             "bet_size_usd": bet_size, "shares": shares,
             "market_outcome": market_outcome,
-            "result": "win" if won else "loss", "pnl": round(pnl, 2),
+            "result": "win_resolution" if won else "loss", "pnl": round(pnl, 2),
         })
 
     return resolved
@@ -339,21 +379,64 @@ async def update_stop_loss_order(trade_id: int, order_id: str, stop_loss_price: 
         """, order_id, Decimal(str(round(stop_loss_price, 4))), trade_id)
 
 
-async def mark_stop_loss_triggered(trade_id: int) -> None:
+async def update_take_profit_order(trade_id: int, order_id: str, take_profit_price: float) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute("""
-            UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
-                resolved_at=NOW(),
-                pnl=(COALESCE(stop_loss_price,0)-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
-            WHERE id=$1
-        """, trade_id)
+            UPDATE bot_trades SET take_profit_order_id=$1, take_profit_price=$2 WHERE id=$3
+        """, order_id, Decimal(str(round(take_profit_price, 4))), trade_id)
+
+
+async def mark_stop_loss_triggered(trade_id: int, exit_price: float | None = None) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        if exit_price is None:
+            await conn.execute("""
+                UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
+                    resolved_at=NOW(),
+                    pnl=(COALESCE(stop_loss_price,0)-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
+                WHERE id=$1
+            """, trade_id)
+        else:
+            await conn.execute("""
+                UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
+                    stop_loss_price=$2,
+                    resolved_at=NOW(),
+                    pnl=($2-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
+                WHERE id=$1
+            """, trade_id, Decimal(str(round(exit_price, 4))))
+
+
+async def mark_take_profit_triggered(trade_id: int, exit_price: float | None = None) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        if exit_price is None:
+            await conn.execute("""
+                UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
+                    resolved_at=NOW(),
+                    pnl=(COALESCE(take_profit_price,0)-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
+                WHERE id=$1
+            """, trade_id)
+        else:
+            await conn.execute("""
+                UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
+                    take_profit_price=$2,
+                    resolved_at=NOW(),
+                    pnl=($2-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
+                WHERE id=$1
+            """, trade_id, Decimal(str(round(exit_price, 4))))
 
 
 async def mark_stop_loss_cancelled(trade_id: int) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE bot_trades SET stop_loss_order_id=NULL WHERE id=$1", trade_id)
+
+
+async def mark_take_profit_cancelled(trade_id: int) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE bot_trades SET take_profit_order_id=NULL WHERE id=$1", trade_id)
 
 
 async def get_open_stop_loss_orders() -> list:
@@ -368,13 +451,32 @@ async def get_open_stop_loss_orders() -> list:
         """)
 
 
+async def get_open_exit_orders() -> list:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetch("""
+            SELECT id, market_id, market_type, strategy_name,
+                   token_id, direction, entry_price, shares, bet_size_usd,
+                   stop_loss_order_id, stop_loss_price, stop_loss_triggered,
+                   take_profit_order_id, take_profit_price, take_profit_triggered
+            FROM bot_trades
+            WHERE status='filled'
+              AND final_outcome IS NULL
+              AND (
+                (stop_loss_order_id IS NOT NULL AND stop_loss_triggered=FALSE)
+                OR
+                (take_profit_order_id IS NOT NULL AND take_profit_triggered=FALSE)
+              )
+        """)
+
+
 async def get_unredeemed_fills() -> list[dict[str, Any]]:
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT DISTINCT bt.market_id, bt.condition_id, bt.token_id, bt.bet_size_usd
             FROM bot_trades bt JOIN market_outcomes mo ON bt.market_id=mo.market_id
-            WHERE bt.status='filled' AND bt.final_outcome='win' AND bt.redeemed=FALSE
+            WHERE bt.status='filled' AND bt.final_outcome='win_resolution' AND bt.redeemed=FALSE
               AND bt.condition_id IS NOT NULL AND bt.condition_id != '' AND mo.resolved=TRUE
         """)
     return [dict(r) for r in rows]
@@ -456,8 +558,8 @@ async def get_bot_stats() -> BotStats:
             row = await conn.fetchrow("""
                 SELECT
                     COUNT(*) FILTER (WHERE status='filled') AS total_trades,
-                    COUNT(*) FILTER (WHERE final_outcome='win') AS wins,
-                    COUNT(*) FILTER (WHERE final_outcome='loss') AS losses,
+                    COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit')) AS wins,
+                    COUNT(*) FILTER (WHERE final_outcome IN ('loss', 'stop_loss')) AS losses,
                     COUNT(*) FILTER (WHERE status='fok_no_fill') AS fok_no_fills,
                     COALESCE(SUM(pnl) FILTER (WHERE final_outcome IS NOT NULL), 0) AS total_pnl,
                     COALESCE(SUM(bet_size_usd) FILTER (WHERE status='filled'), 0) AS total_wagered

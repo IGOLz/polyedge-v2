@@ -16,7 +16,13 @@ from shared.db import close_pool, init_pool
 from trading import config
 from trading import db
 from trading.balance import get_usdc_balance
-from trading.executor import execute_trade, get_execution_metrics, get_variance_metrics
+from trading.executor import (
+    cancel_stop_loss_order,
+    cancel_take_profit_order,
+    execute_trade,
+    get_execution_metrics,
+    get_variance_metrics,
+)
 from trading.live_profile import live_profile_summary, market_in_live_scope
 from trading.redeemer import (
     describe_redemption_mode,
@@ -89,6 +95,79 @@ def _extract_exit_fill(
     return fill_price, fill_shares
 
 
+async def _cancel_sibling_exit_order(clob, trade, filled_exit: str) -> None:
+    sibling_kind = "take_profit" if filled_exit == "stop_loss" else "stop_loss"
+    sibling_order_id = trade.get(f"{sibling_kind}_order_id")
+    if not sibling_order_id:
+        return
+
+    try:
+        if sibling_kind == "take_profit":
+            await cancel_take_profit_order(clob, trade["id"], sibling_order_id)
+        else:
+            await cancel_stop_loss_order(clob, trade["id"], sibling_order_id)
+    except Exception as exc:
+        log.warning(
+            "[EXIT] Failed to cancel sibling %s order for trade %s: %s",
+            sibling_kind,
+            trade["id"],
+            exc,
+        )
+
+
+async def _handle_exit_fill(clob, trade, exit_kind: str, order_id: str, order: dict | None) -> None:
+    price_key = "take_profit_price" if exit_kind == "take_profit" else "stop_loss_price"
+    fallback_price = float(trade[price_key] or 0.0)
+    exit_price, exit_shares = _extract_exit_fill(
+        order,
+        fallback_price,
+        float(trade["shares"] or 0.0),
+    )
+    market_label = _fmt_market(trade["market_type"])
+    entry_price = float(trade["entry_price"])
+    gross_exit = exit_price * exit_shares
+    est_pnl = (exit_price - entry_price) * exit_shares
+    label = "Take-profit" if exit_kind == "take_profit" else "Stop-loss"
+    log_type = "trade_take_profit" if exit_kind == "take_profit" else "trade_stop_loss"
+
+    log.info(
+        "[EXIT] %s filled - %s %s on %s | %d shares @ %.4f ($%.2f) | est pnl: %+.2f | order=%s",
+        label,
+        trade["strategy_name"],
+        trade["direction"],
+        market_label,
+        exit_shares,
+        exit_price,
+        gross_exit,
+        est_pnl,
+        order_id[:16],
+    )
+    await db.log_event(
+        log_type,
+        f"{label} exit - {trade['strategy_name']} {trade['direction']} on {trade['market_type']} | "
+        f"{exit_shares} shares @ {exit_price:.4f} | est pnl {est_pnl:+.2f}",
+        {
+            "trade_id": trade["id"],
+            "market_id": trade["market_id"],
+            "strategy_name": trade["strategy_name"],
+            "direction": trade["direction"],
+            "entry_price": entry_price,
+            "exit_price": round(exit_price, 4),
+            "exit_shares": exit_shares,
+            "gross_exit_value": round(gross_exit, 2),
+            "estimated_pnl": round(est_pnl, 2),
+            f"{exit_kind}_order_id": order_id,
+        },
+    )
+
+    if exit_kind == "take_profit":
+        await db.mark_take_profit_triggered(trade["id"], exit_price)
+    else:
+        await db.mark_stop_loss_triggered(trade["id"], exit_price)
+
+    await _cancel_sibling_exit_order(clob, trade, exit_kind)
+
+
 async def outcome_tracker_loop(clob) -> None:
     log.info("Outcome tracker started (every 5 min)")
     while True:
@@ -99,7 +178,7 @@ async def outcome_tracker_loop(clob) -> None:
                 market_label = _fmt_market(trade["market_type"])
                 pnl = trade["pnl"]
 
-                if trade["result"] == "win":
+                if trade["result"] == "win_resolution":
                     log.info(
                         "[%s] %s | %s -> WIN | PnL: +$%.2f",
                         tag,
@@ -129,7 +208,7 @@ async def outcome_tracker_loop(clob) -> None:
                 )
 
             if resolved:
-                wins = sum(1 for trade in resolved if trade["result"] == "win")
+                wins = sum(1 for trade in resolved if trade["result"] == "win_resolution")
                 total_pnl = sum(trade["pnl"] for trade in resolved)
                 balance = await get_usdc_balance()
                 log.info(
@@ -196,11 +275,63 @@ async def stop_loss_monitor_loop(clob) -> None:
                                 "stop_loss_order_id": order_id,
                             },
                         )
-                        await db.mark_stop_loss_triggered(trade["id"])
+                        await db.mark_stop_loss_triggered(trade["id"], exit_price)
                 except Exception as exc:
                     log.warning("[STOP-LOSS] Check failed: %s", exc)
         except Exception as exc:
             log.error("[STOP-LOSS] Monitor error: %s", exc)
+        await asyncio.sleep(30)
+
+
+async def exit_monitor_loop(clob) -> None:
+    log.info("Exit monitor started (every 30s)")
+    while True:
+        try:
+            open_exits = await db.get_open_exit_orders()
+            for trade_row in open_exits:
+                trade = dict(trade_row)
+                loop = asyncio.get_event_loop()
+                exit_resolved = False
+
+                for exit_kind in ("take_profit", "stop_loss"):
+                    order_id = trade.get(f"{exit_kind}_order_id")
+                    if not order_id or trade.get(f"{exit_kind}_triggered"):
+                        continue
+
+                    try:
+                        order = await asyncio.wait_for(
+                            loop.run_in_executor(None, lambda oid=order_id: clob.get_order(oid)),
+                            timeout=10.0,
+                        )
+                        status = (order.get("status") or "").upper() if isinstance(order, dict) else ""
+                        if status in ("FILLED", "MATCHED"):
+                            await _handle_exit_fill(clob, trade, exit_kind, order_id, order)
+                            exit_resolved = True
+                            break
+                        if status in ("CANCELLED", "EXPIRED"):
+                            if exit_kind == "take_profit":
+                                await db.mark_take_profit_cancelled(trade["id"])
+                            else:
+                                await db.mark_stop_loss_cancelled(trade["id"])
+                            log.warning(
+                                "[EXIT] %s order %s for trade %s is %s",
+                                exit_kind,
+                                order_id[:16],
+                                trade["id"],
+                                status,
+                            )
+                    except Exception as exc:
+                        log.warning(
+                            "[EXIT] %s check failed for trade %s: %s",
+                            exit_kind,
+                            trade["id"],
+                            exc,
+                        )
+
+                if exit_resolved:
+                    continue
+        except Exception as exc:
+            log.error("[EXIT] Monitor error: %s", exc)
         await asyncio.sleep(30)
 
 
@@ -303,7 +434,7 @@ async def run() -> None:
         asyncio.create_task(redemption_loop())
     else:
         log.info("[DRY RUN] Redemption loop disabled")
-    asyncio.create_task(stop_loss_monitor_loop(clob))
+    asyncio.create_task(exit_monitor_loop(clob))
     asyncio.create_task(hourly_summary_loop())
     asyncio.create_task(strategy_report_loop())
 
