@@ -16,6 +16,12 @@ class S14Strategy(BaseStrategy):
         if not super().market_is_eligible(market):
             return False
 
+        allowed_assets = self.config.allowed_assets
+        if allowed_assets is not None:
+            asset = str(market.get("asset", "")).lower()
+            if asset not in {value.lower() for value in allowed_assets}:
+                return False
+
         allowed_durations = self.config.allowed_durations_minutes
         if allowed_durations is not None:
             duration_minutes = int(market.get("duration_minutes", 0) or 0)
@@ -38,6 +44,11 @@ class S14Strategy(BaseStrategy):
         sec = current_second(snapshot)
         if sec < cfg.entry_window_start or sec > cfg.entry_window_end:
             return None
+
+        if cfg.allowed_assets is not None:
+            asset = str(snapshot.metadata.get("asset", "")).lower()
+            if asset not in {value.lower() for value in cfg.allowed_assets}:
+                return None
 
         if cfg.allowed_durations_minutes is not None:
             duration_minutes = int(snapshot.metadata.get("duration_minutes", 0) or 0)

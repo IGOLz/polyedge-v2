@@ -5,10 +5,12 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Any
 
-from shared.strategies.S10.config import S10Config, get_candidate_config
+from shared.strategies.S10.config import S10Config, get_candidate_config as get_s10_candidate_config
 from shared.strategies.S10.strategy import S10Strategy
 from shared.strategies.S13.config import S13Config, get_candidate_config as get_s13_candidate_config
 from shared.strategies.S13.strategy import S13Strategy
+from shared.strategies.S14.config import S14Config, get_candidate_config as get_s14_candidate_config
+from shared.strategies.S14.strategy import S14Strategy
 from shared.strategies.S5.config import S5Config
 from shared.strategies.S5.strategy import S5Strategy
 from shared.strategies.S9.config import S9Config
@@ -22,6 +24,7 @@ LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S9": True,
     "S10": True,
     "S13": True,
+    "S14": True,
 }
 
 
@@ -61,7 +64,7 @@ def build_live_s5_config() -> S5Config:
 
 def build_live_s10_config() -> S10Config:
     """Return the live-tested S10 candidate with crypto market scope."""
-    candidate = get_candidate_config()
+    candidate = get_s10_candidate_config()
     candidate.allowed_assets = ["btc", "eth", "sol", "xrp"]
     candidate.allowed_durations_minutes = [5, 15]
     return candidate
@@ -95,6 +98,13 @@ def build_live_s13_config() -> S13Config:
     return candidate
 
 
+def build_live_s14_config() -> S14Config:
+    """Return the validated S14 live candidate config."""
+    candidate = get_s14_candidate_config()
+    candidate.allowed_assets = ["btc", "eth", "sol", "xrp"]
+    return candidate
+
+
 def _build_strategy(strategy_id: str) -> BaseStrategy:
     if strategy_id == "S5":
         return S5Strategy(build_live_s5_config())
@@ -104,6 +114,8 @@ def _build_strategy(strategy_id: str) -> BaseStrategy:
         return S10Strategy(build_live_s10_config())
     if strategy_id == "S13":
         return S13Strategy(build_live_s13_config())
+    if strategy_id == "S14":
+        return S14Strategy(build_live_s14_config())
     raise ValueError(f"Unsupported live strategy id: {strategy_id}")
 
 
@@ -204,6 +216,21 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
             f"confirm={cfg.min_market_confirmation}-{cfg.max_market_delta} "
             f"mid={cfg.max_price_distance_from_mid} "
             f"vol={cfg.max_underlying_vol} "
+            f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
+        )
+
+    if cfg.strategy_id == "S14":
+        return (
+            f"{cfg.strategy_id} "
+            f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"assets={cfg.allowed_assets} "
+            f"durations={cfg.allowed_durations_minutes} "
+            f"feature={cfg.feature_window} "
+            f"window={cfg.entry_window_start}-{cfg.entry_window_end} "
+            f"delta={cfg.min_market_delta_abs} "
+            f"underlying={cfg.max_underlying_return_abs} "
+            f"extremes={cfg.extreme_price_low}/{cfg.extreme_price_high} "
+            f"mismatch={cfg.require_direction_mismatch} "
             f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
         )
 

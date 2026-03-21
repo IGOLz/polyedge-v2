@@ -7,6 +7,7 @@ from shared.strategies.base import StrategyConfig
 class S14Config(StrategyConfig):
     """Configuration for S14 divergence fade."""
 
+    allowed_assets: list[str] | None = None
     allowed_durations_minutes: list[int] | None = None
     feature_window: int = 30
     entry_window_start: int = 30
@@ -38,7 +39,7 @@ def get_baseline_config() -> S14Config:
 
 
 def get_candidate_config() -> S14Config:
-    """Return the next S14 research candidate to validate."""
+    """Return the validated S14 candidate used for live integration."""
     return S14Config(
         strategy_id="S14",
         strategy_name="S14_divergence_fade",

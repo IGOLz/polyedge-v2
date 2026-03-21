@@ -316,26 +316,34 @@ def _evaluate_s15_combo(
         if start_scan >= int(total_seconds[market_idx]):
             continue
         last_scan = min(breakout_scan_end, int(total_seconds[market_idx]) - 1)
+
+        valid_setup_points = 0
+        range_high = np.nan
+        range_low = np.nan
+        for pos in range(0, setup_window_end + 1):
+            value = prices[market_idx, pos]
+            if np.isnan(value):
+                continue
+            if valid_setup_points == 0:
+                range_high = value
+                range_low = value
+            else:
+                if value > range_high:
+                    range_high = value
+                if value < range_low:
+                    range_low = value
+            valid_setup_points += 1
+        if valid_setup_points < 6:
+            continue
+
+        up_threshold = range_high + breakout_buffer
+        down_threshold = range_low - breakout_buffer
+
         found = False; direction_up = True; adjusted_entry = 0.0; entry_second = -1
         for sec in range(start_scan, last_scan + 1):
-            setup_end = setup_window_end if setup_window_end < sec else sec - 1
-            setup_values = np.empty(setup_end + 1, dtype=np.float64); count = 0
-            for pos in range(0, setup_end + 1):
-                value = prices[market_idx, pos]
-                if np.isnan(value):
-                    continue
-                setup_values[count] = value; count += 1
-            if count < 6:
-                continue
-            range_high = setup_values[0]; range_low = setup_values[0]
-            for idx in range(1, count):
-                value = setup_values[idx]
-                if value > range_high: range_high = value
-                if value < range_low: range_low = value
             up_price = nearest_tol1[market_idx, sec]; underlying_return = ret[market_idx, sec]; trade_count_v = trade_count_matrix[market_idx, sec]
             if np.isnan(up_price) or np.isnan(underlying_return) or np.isnan(trade_count_v) or trade_count_v < min_trade_count:
                 continue
-            up_threshold = range_high + breakout_buffer; down_threshold = range_low - breakout_buffer
             if up_price >= up_threshold and underlying_return >= min_underlying_return:
                 ok = True
                 for check_sec in range(sec - confirmation_points + 1, sec + 1):
