@@ -84,6 +84,7 @@ async def _fetch_resolved_trades() -> list[dict]:
             else (float(r["stop_loss_price"] or 0) - entry_price) * shares if raw_outcome == "stop_loss"
             else -bet_size
         )
+        outcome = "win" if pnl > 0 else "loss"
 
         # Extract asset and duration from market_type (e.g. "btc_5m")
         market_type = r["market_type"] or ""

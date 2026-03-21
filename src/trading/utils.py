@@ -3,6 +3,7 @@
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
 
 try:
     from colorama import Fore, Style, init as colorama_init
@@ -10,6 +11,13 @@ try:
     HAS_COLORAMA = True
 except ImportError:
     HAS_COLORAMA = False
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def setup_logging() -> logging.Logger:
@@ -27,8 +35,13 @@ def setup_logging() -> logging.Logger:
     logger.addHandler(console)
 
     if os.path.isdir("/app/logs"):
-        fh = logging.FileHandler("/app/logs/trading.log", encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
+        fh = RotatingFileHandler(
+            "/app/logs/trading.log",
+            maxBytes=_env_int("TRADING_LOG_MAX_BYTES", 25 * 1024 * 1024),
+            backupCount=_env_int("TRADING_LOG_BACKUP_COUNT", 4),
+            encoding="utf-8",
+        )
+        fh.setLevel(logging.INFO)
         fh.setFormatter(fmt)
         logger.addHandler(fh)
 
@@ -40,8 +53,16 @@ def setup_debug_logging() -> logging.Logger:
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
+    if logger.handlers:
+        return logger
+
     if os.path.isdir("/app/logs"):
-        fh = logging.FileHandler("/app/logs/trading_debug.log", encoding="utf-8")
+        fh = RotatingFileHandler(
+            "/app/logs/trading_debug.log",
+            maxBytes=_env_int("TRADING_DEBUG_LOG_MAX_BYTES", 40 * 1024 * 1024),
+            backupCount=_env_int("TRADING_DEBUG_LOG_BACKUP_COUNT", 3),
+            encoding="utf-8",
+        )
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s"))
         logger.addHandler(fh)

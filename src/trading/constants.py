@@ -75,7 +75,7 @@ BET_SIZING = {
     'starting_bankroll': 200.0,
     'starting_bet_amount': 8.0,
     'bet_percentage': 0.04,
-    'min_bet': 2.0,
+    'min_bet': 5.0,
     'max_bet': 100.0,
     'max_single_trade_pct': 0.20,
     'scale_with_growth': True,

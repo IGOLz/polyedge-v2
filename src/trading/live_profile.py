@@ -23,7 +23,7 @@ LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S5": True,
     "S9": True,
     "S10": True,
-    "S13": True,
+    "S13": False,
     "S14": True,
 }
 

@@ -19,9 +19,15 @@ from trading.balance import get_usdc_balance
 from trading.executor import (
     cancel_stop_loss_order,
     cancel_take_profit_order,
+    execute_limit_exit_order,
     execute_trade,
+    force_close_position,
     get_execution_metrics,
+    get_best_sell_price,
     get_variance_metrics,
+    place_stop_loss_order,
+    record_trade_outcome,
+    sync_daily_net_loss_from_db,
 )
 from trading.live_profile import live_profile_summary, market_in_live_scope
 from trading.redeemer import (
@@ -164,6 +170,8 @@ async def _handle_exit_fill(clob, trade, exit_kind: str, order_id: str, order: d
         await db.mark_take_profit_triggered(trade["id"], exit_price)
     else:
         await db.mark_stop_loss_triggered(trade["id"], exit_price)
+    position_shares = float(trade["shares"] or 0.0)
+    record_trade_outcome((exit_price - entry_price) * position_shares)
 
     await _cancel_sibling_exit_order(clob, trade, exit_kind)
 
@@ -177,6 +185,7 @@ async def outcome_tracker_loop(clob) -> None:
                 tag = strategy_log_tag(trade["strategy_name"])
                 market_label = _fmt_market(trade["market_type"])
                 pnl = trade["pnl"]
+                record_trade_outcome(pnl)
 
                 if trade["result"] == "win_resolution":
                     log.info(
@@ -276,6 +285,8 @@ async def stop_loss_monitor_loop(clob) -> None:
                             },
                         )
                         await db.mark_stop_loss_triggered(trade["id"], exit_price)
+                        position_shares = float(trade["shares"] or 0.0)
+                        record_trade_outcome((exit_price - entry_price) * position_shares)
                 except Exception as exc:
                     log.warning("[STOP-LOSS] Check failed: %s", exc)
         except Exception as exc:
@@ -292,6 +303,112 @@ async def exit_monitor_loop(clob) -> None:
                 trade = dict(trade_row)
                 loop = asyncio.get_event_loop()
                 exit_resolved = False
+
+                tp_price = (
+                    float(trade["take_profit_price"])
+                    if trade.get("take_profit_price") is not None
+                    else None
+                )
+                if tp_price is not None and not trade.get("take_profit_triggered"):
+                    try:
+                        best_sell = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                None,
+                                lambda token_id=trade["token_id"]: get_best_sell_price(clob, token_id),
+                            ),
+                            timeout=5.0,
+                        )
+                        if best_sell is not None and best_sell >= tp_price:
+                            log.info(
+                                "[EXIT] Take-profit threshold reached for trade %s | best bid %.4f >= target %.4f",
+                                trade["id"],
+                                best_sell,
+                                tp_price,
+                            )
+                            stop_loss_order_id = trade.get("stop_loss_order_id")
+                            if stop_loss_order_id:
+                                try:
+                                    await cancel_stop_loss_order(clob, trade["id"], stop_loss_order_id)
+                                    trade["stop_loss_order_id"] = None
+                                except Exception as exc:
+                                    log.warning(
+                                        "[EXIT] Could not cancel stop-loss before take-profit for trade %s: %s",
+                                        trade["id"],
+                                        exc,
+                                    )
+                                    continue
+
+                            exit_fill = await execute_limit_exit_order(
+                                clob,
+                                trade["token_id"],
+                                tp_price,
+                                log_prefix="TAKE-PROFIT",
+                                trade_id=trade["id"],
+                                timeout=3.0,
+                            )
+                            if exit_fill:
+                                synthetic_order = {
+                                    "average_price": exit_fill["fill_price"],
+                                    "matched_size": exit_fill["fill_shares"],
+                                    "status": "FILLED",
+                                }
+                                tp_order_id = str(exit_fill.get("order_id") or f"software-tp-{trade['id']}")
+                                await _handle_exit_fill(clob, trade, "take_profit", tp_order_id, synthetic_order)
+                                exit_resolved = True
+                                continue
+
+                            log.warning(
+                                "[EXIT] Software take-profit trigger failed to execute for trade %s",
+                                trade["id"],
+                            )
+                            if stop_loss_order_id and trade.get("stop_loss_price") is not None:
+                                new_stop_loss = await place_stop_loss_order(
+                                    clob=clob,
+                                    trade_id=trade["id"],
+                                    token_id=trade["token_id"],
+                                    shares=float(trade["shares"] or 0.0),
+                                    stop_loss_price=float(trade["stop_loss_price"]),
+                                    initial_delay=0.0,
+                                )
+                                if new_stop_loss is None:
+                                    log.error(
+                                        "[EXIT] Trade %s is unprotected after failed software take-profit",
+                                        trade["id"],
+                                    )
+                                    await db.log_event(
+                                        "trade_unprotected",
+                                        f"Trade {trade['id']} lost stop-loss protection after failed software take-profit",
+                                        {
+                                            "trade_id": trade["id"],
+                                            "market_id": trade["market_id"],
+                                            "strategy_name": trade["strategy_name"],
+                                            "direction": trade["direction"],
+                                        },
+                                    )
+                                else:
+                                    log.info(
+                                        "[EXIT] Re-armed stop-loss for trade %s after failed software take-profit",
+                                        trade["id"],
+                                    )
+                                    await db.log_event(
+                                        "trade_protection_rearmed",
+                                        f"Re-armed stop-loss for trade {trade['id']} after failed software take-profit",
+                                        {
+                                            "trade_id": trade["id"],
+                                            "market_id": trade["market_id"],
+                                            "strategy_name": trade["strategy_name"],
+                                            "direction": trade["direction"],
+                                        },
+                                    )
+                    except Exception as exc:
+                        log.warning(
+                            "[EXIT] Software take-profit check failed for trade %s: %s",
+                            trade["id"],
+                            exc,
+                        )
+
+                if exit_resolved:
+                    continue
 
                 for exit_kind in ("take_profit", "stop_loss"):
                     order_id = trade.get(f"{exit_kind}_order_id")
@@ -320,6 +437,67 @@ async def exit_monitor_loop(clob) -> None:
                                 trade["id"],
                                 status,
                             )
+                            if exit_kind == "stop_loss" and trade.get("stop_loss_price") is not None:
+                                new_stop_loss = await place_stop_loss_order(
+                                    clob=clob,
+                                    trade_id=trade["id"],
+                                    token_id=trade["token_id"],
+                                    shares=float(trade["shares"] or 0.0),
+                                    stop_loss_price=float(trade["stop_loss_price"]),
+                                    initial_delay=0.0,
+                                )
+                                if new_stop_loss is None:
+                                    forced_exit = await force_close_position(
+                                        clob,
+                                        trade["token_id"],
+                                        trade_id=trade["id"],
+                                        reason=f"stop-loss order {status.lower()}",
+                                    )
+                                    if forced_exit:
+                                        synthetic_order = {
+                                            "average_price": forced_exit["fill_price"],
+                                            "matched_size": forced_exit["fill_shares"],
+                                            "status": "FILLED",
+                                        }
+                                        forced_order_id = str(
+                                            forced_exit.get("order_id") or f"forced-stop-loss-{trade['id']}"
+                                        )
+                                        await _handle_exit_fill(
+                                            clob,
+                                            trade,
+                                            "stop_loss",
+                                            forced_order_id,
+                                            synthetic_order,
+                                        )
+                                        exit_resolved = True
+                                        break
+                                    await db.log_event(
+                                        "trade_unprotected",
+                                        f"Trade {trade['id']} lost stop-loss protection after {status.lower()} order",
+                                        {
+                                            "trade_id": trade["id"],
+                                            "market_id": trade["market_id"],
+                                            "strategy_name": trade["strategy_name"],
+                                            "direction": trade["direction"],
+                                        },
+                                    )
+                                else:
+                                    log.info(
+                                        "[EXIT] Re-armed stop-loss for trade %s after %s order",
+                                        trade["id"],
+                                        status.lower(),
+                                    )
+                                    await db.log_event(
+                                        "trade_protection_rearmed",
+                                        f"Re-armed stop-loss for trade {trade['id']} after {status.lower()} order",
+                                        {
+                                            "trade_id": trade["id"],
+                                            "market_id": trade["market_id"],
+                                            "strategy_name": trade["strategy_name"],
+                                            "direction": trade["direction"],
+                                            "previous_status": status,
+                                        },
+                                    )
                     except Exception as exc:
                         log.warning(
                             "[EXIT] %s check failed for trade %s: %s",
@@ -408,6 +586,7 @@ async def run() -> None:
         log.info("Startup outcome resolution complete")
     except Exception:
         log.exception("Error resolving outcomes on startup")
+    await sync_daily_net_loss_from_db()
 
     redemption_mode = "disabled_in_dry_run"
     if config.DRY_RUN:

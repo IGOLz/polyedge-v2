@@ -19,6 +19,7 @@ from shared.crypto_features import (
     latest_bar_is_fresh,
 )
 from shared.strategies import MarketSnapshot, Signal
+from trading import config
 from trading.balance import get_usdc_balance
 from trading.constants import BET_SIZING
 from trading.db import MarketInfo, Tick, already_traded_this_market
@@ -127,9 +128,17 @@ def _populate_execution_fields(
     balance: float,
 ) -> Signal | None:
     """Fill executor-required ``locked_*`` and ``signal_data`` fields."""
-    bet_size = calculate_dynamic_bet_size(balance)
-    shares = calculate_shares(signal.entry_price, bet_size)
+    bet_size = max(
+        calculate_dynamic_bet_size(balance),
+        config.MIN_LIVE_BET_SIZE_USD,
+        round(signal.entry_price * config.MIN_ENTRY_SHARES, 2),
+    )
+    shares = max(calculate_shares(signal.entry_price, bet_size), config.MIN_ENTRY_SHARES)
     actual_cost = shares * signal.entry_price
+
+    while actual_cost + 1e-9 < config.MIN_LIVE_BET_SIZE_USD:
+        shares += 1
+        actual_cost = shares * signal.entry_price
 
     if actual_cost > balance * BET_SIZING["max_single_trade_pct"]:
         debug_log.info(
@@ -169,6 +178,10 @@ def _populate_execution_fields(
             "price_max": 0.99,
             "stop_loss_price": signal.signal_data.get("stop_loss_price"),
             "take_profit_price": signal.signal_data.get("take_profit_price"),
+            "allow_stage_3": signal.strategy_name not in config.STAGE_3_DISABLED_STRATEGIES,
+            "minimum_live_bet_size": round(config.MIN_LIVE_BET_SIZE_USD, 2),
+            "minimum_entry_shares": config.MIN_ENTRY_SHARES,
+            "minimum_exit_order_shares": config.MIN_EXIT_ORDER_SHARES,
             "profitability_thesis": profitability_thesis,
             "balance_at_signal": round(balance, 2),
             "current_balance": round(balance, 2),
@@ -206,6 +219,21 @@ async def evaluate_strategies(
             "[ADAPTER] Could not fetch balance for %s (got %.2f), skipping",
             market.market_id[:16],
             balance,
+        )
+        return []
+
+    try:
+        if await already_traded_this_market(market.market_id):
+            debug_log.info(
+                "[ADAPTER] %s - skipping: market already has a bot position",
+                market.market_id[:16],
+            )
+            return []
+    except Exception as exc:
+        debug_log.info(
+            "[ADAPTER] global already_traded check failed for %s: %s",
+            market.market_id[:16],
+            exc,
         )
         return []
 
@@ -251,26 +279,6 @@ async def evaluate_strategies(
             continue
 
         try:
-            if await already_traded_this_market(
-                market.market_id,
-                strategy.config.strategy_name,
-            ):
-                debug_log.info(
-                    "[ADAPTER] %s - already traded with %s, skipping",
-                    market.market_id[:16],
-                    strategy.config.strategy_name,
-                )
-                continue
-        except Exception as exc:
-            debug_log.info(
-                "[ADAPTER] already_traded check failed for %s/%s: %s",
-                market.market_id[:16],
-                strategy.config.strategy_name,
-                exc,
-            )
-            continue
-
-        try:
             signal = strategy.evaluate(snapshot)
         except Exception as exc:
             debug_log.info(
@@ -288,6 +296,7 @@ async def evaluate_strategies(
             continue
 
         signals.append(populated)
+        break
 
     if signals:
         log.info(

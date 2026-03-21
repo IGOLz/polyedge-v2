@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -248,11 +248,28 @@ async def already_traded_this_market(market_id: str, strategy_name: str | None =
     async with pool.acquire() as conn:
         if strategy_name:
             row = await conn.fetchrow(
-                "SELECT 1 FROM bot_trades WHERE market_id=$1 AND strategy_name=$2 LIMIT 1",
-                market_id, strategy_name)
+                """
+                SELECT 1
+                FROM bot_trades
+                WHERE market_id=$1
+                  AND strategy_name=$2
+                  AND status='filled'
+                LIMIT 1
+                """,
+                market_id,
+                strategy_name,
+            )
         else:
             row = await conn.fetchrow(
-                "SELECT 1 FROM bot_trades WHERE market_id=$1 LIMIT 1", market_id)
+                """
+                SELECT 1
+                FROM bot_trades
+                WHERE market_id=$1
+                  AND status='filled'
+                LIMIT 1
+                """,
+                market_id,
+            )
     return row is not None
 
 
@@ -312,6 +329,27 @@ async def insert_bot_trade(*, market_id, market_type, strategy_name, direction,
             Decimal(str(signal_age_seconds)) if signal_age_seconds is not None else None,
         )
     return row["id"]
+
+
+async def update_exit_targets(
+    trade_id: int,
+    *,
+    stop_loss_price: float | None = None,
+    take_profit_price: float | None = None,
+) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE bot_trades
+            SET stop_loss_price = COALESCE($2, stop_loss_price),
+                take_profit_price = COALESCE($3, take_profit_price)
+            WHERE id = $1
+            """,
+            trade_id,
+            Decimal(str(round(stop_loss_price, 4))) if stop_loss_price is not None else None,
+            Decimal(str(round(take_profit_price, 4))) if take_profit_price is not None else None,
+        )
 
 
 async def update_pending_outcomes(clob=None) -> list[dict]:
@@ -385,6 +423,24 @@ async def update_take_profit_order(trade_id: int, order_id: str, take_profit_pri
         await conn.execute("""
             UPDATE bot_trades SET take_profit_order_id=$1, take_profit_price=$2 WHERE id=$3
         """, order_id, Decimal(str(round(take_profit_price, 4))), trade_id)
+
+
+async def get_daily_resolved_net_pnl(day_start: datetime | None = None) -> float:
+    if day_start is None:
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(pnl), 0) AS net_pnl
+            FROM bot_trades
+            WHERE resolved_at >= $1
+              AND pnl IS NOT NULL
+            """,
+            day_start,
+        )
+    return float(row["net_pnl"] or 0.0) if row else 0.0
 
 
 async def mark_stop_loss_triggered(trade_id: int, exit_price: float | None = None) -> None:
@@ -465,7 +521,7 @@ async def get_open_exit_orders() -> list:
               AND (
                 (stop_loss_order_id IS NOT NULL AND stop_loss_triggered=FALSE)
                 OR
-                (take_profit_order_id IS NOT NULL AND take_profit_triggered=FALSE)
+                (take_profit_price IS NOT NULL AND take_profit_triggered=FALSE)
               )
         """)
 
@@ -558,8 +614,8 @@ async def get_bot_stats() -> BotStats:
             row = await conn.fetchrow("""
                 SELECT
                     COUNT(*) FILTER (WHERE status='filled') AS total_trades,
-                    COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit')) AS wins,
-                    COUNT(*) FILTER (WHERE final_outcome IN ('loss', 'stop_loss')) AS losses,
+                    COUNT(*) FILTER (WHERE final_outcome IS NOT NULL AND COALESCE(pnl, 0) > 0) AS wins,
+                    COUNT(*) FILTER (WHERE final_outcome IS NOT NULL AND COALESCE(pnl, 0) < 0) AS losses,
                     COUNT(*) FILTER (WHERE status='fok_no_fill') AS fok_no_fills,
                     COALESCE(SUM(pnl) FILTER (WHERE final_outcome IS NOT NULL), 0) AS total_pnl,
                     COALESCE(SUM(bet_size_usd) FILTER (WHERE status='filled'), 0) AS total_wagered
@@ -573,6 +629,7 @@ async def get_bot_stats() -> BotStats:
                 stats.total_pnl = float(row["total_pnl"])
                 wagered = float(row["total_wagered"])
                 stats.roi = (stats.total_pnl / wagered * 100) if wagered > 0 else 0.0
+                stats.daily_net_loss_today = max(0.0, -await get_daily_resolved_net_pnl())
     except Exception:
         logger.exception("Failed to compute bot stats")
     return stats

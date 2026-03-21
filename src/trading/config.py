@@ -26,10 +26,21 @@ CLOB_BASE_URL = "https://clob.polymarket.com"
 
 # ── Betting parameters ──────────────────────────────────────────────────
 
-BET_SIZE_USD: float = float(os.getenv("BET_SIZE_USD", "1.5"))
+BET_SIZE_USD: float = float(os.getenv("BET_SIZE_USD", "5.0"))
 DAILY_LOSS_LIMIT: float = float(os.getenv("DAILY_LOSS_LIMIT", "30.0"))
 LOOP_INTERVAL: int = int(os.getenv("LOOP_INTERVAL", "1"))
 DRY_RUN: bool = False
+MIN_LIVE_BET_SIZE_USD: float = float(os.getenv("MIN_LIVE_BET_SIZE_USD", "5.0"))
+MIN_EXIT_ORDER_SHARES: int = int(os.getenv("MIN_EXIT_ORDER_SHARES", "5"))
+MIN_ENTRY_SHARES: int = int(os.getenv("MIN_ENTRY_SHARES", "7"))
+STAGE_3_DISABLED_STRATEGIES: set[str] = {
+    item.strip()
+    for item in os.getenv(
+        "STAGE_3_DISABLED_STRATEGIES",
+        "S9_compression_breakout,S14_divergence_fade",
+    ).split(",")
+    if item.strip()
+}
 
 
 # ── Strategy toggles ────────────────────────────────────────────────────
