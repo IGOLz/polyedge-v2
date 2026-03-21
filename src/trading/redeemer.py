@@ -22,7 +22,8 @@ USDC_ADDRESS = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
 CTF_ADDRESS = "0x4D97DCd97eC945f40cF65F87097ACe5EA0476045"
 NEG_RISK_ADDRESS = "0xd91E80cF2E7be2e162c6513ceD06f1dD0dA35296"
 ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
-REDEEM_SELECTOR = bytes.fromhex("baa51c0f")
+REDEEM_FUNCTION_SIGNATURE = "redeemPositions(address,bytes32,bytes32,uint256[])"
+REDEEM_SELECTOR = Web3.keccak(text=REDEEM_FUNCTION_SIGNATURE)[:4]
 HASH_ZERO = b"\x00" * 32
 
 SAFE_ABI = [
@@ -62,6 +63,14 @@ class RedemptionResult:
     transaction_hash: str
     transaction_id: str | None = None
     state: str | None = None
+
+
+def describe_redemption_mode() -> str:
+    if relayer_auth_configured():
+        return "relayer"
+    if config.REDEEM_ONCHAIN_FALLBACK:
+        return "onchain_fallback"
+    return "disabled"
 
 
 def get_w3() -> Web3:
@@ -117,6 +126,51 @@ async def is_neg_risk_market(condition_id: str) -> bool:
                 exc,
             )
     return False
+
+
+def _startup_redemption_preflight_sync() -> dict[str, Any]:
+    mode = describe_redemption_mode()
+    if mode == "relayer":
+        client = PolymarketRelayerClient()
+        api_keys = client.get_api_keys()
+        return {
+            "mode": "relayer",
+            "signer_address": client.signer_address,
+            "proxy_wallet": client.proxy_wallet,
+            "visible_keys": len(api_keys),
+        }
+
+    if mode == "onchain_fallback":
+        w3 = get_w3()
+        return {
+            "mode": "onchain_fallback",
+            "rpc_connected": w3.is_connected(),
+            "signer_address": config.EOA_ADDRESS,
+            "proxy_wallet": config.PROXY_WALLET,
+        }
+
+    raise RuntimeError(
+        "Redemption is disabled: RELAYER_API_KEY is not configured and REDEEM_ONCHAIN_FALLBACK is false"
+    )
+
+
+async def startup_redemption_preflight() -> dict[str, Any]:
+    loop = asyncio.get_event_loop()
+    details = await loop.run_in_executor(None, _startup_redemption_preflight_sync)
+    if details["mode"] == "relayer":
+        log.info(
+            "[REDEEM] Startup preflight ok - mode=relayer signer=%s proxy=%s visible_keys=%s",
+            details["signer_address"],
+            details["proxy_wallet"],
+            details["visible_keys"],
+        )
+    elif details["mode"] == "onchain_fallback":
+        log.warning(
+            "[REDEEM] Startup preflight ok - mode=onchain_fallback signer=%s proxy=%s",
+            details["signer_address"],
+            details["proxy_wallet"],
+        )
+    return details
 
 
 def _redeem_condition_via_relayer(
@@ -283,7 +337,14 @@ async def _redeem_cycle() -> None:
                 result.transaction_hash or "",
             )
 
-            await db.mark_redeemed(condition_id)
+            await db.record_redemption_success(
+                condition_id,
+                mode=result.mode,
+                transaction_id=result.transaction_id,
+                transaction_hash=result.transaction_hash,
+                state=result.state,
+                amount_redeemed=amount,
+            )
             log.info("[REDEEM] Marked redeemed %s ($%.2f returned)", short, amount)
 
             if amount > 0:
@@ -301,6 +362,7 @@ async def _redeem_cycle() -> None:
                     },
                 )
         except Exception as exc:
+            await db.record_redemption_failure(condition_id, str(exc))
             log.error("[REDEEM] Failed %s: %s", short, exc, exc_info=True)
             continue
 
@@ -316,4 +378,3 @@ async def redemption_loop() -> None:
         except Exception:
             log.exception("Unexpected error in redemption loop")
         await asyncio.sleep(REDEEM_INTERVAL)
-

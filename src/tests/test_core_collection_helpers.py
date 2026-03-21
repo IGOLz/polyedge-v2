@@ -3,6 +3,7 @@ import unittest
 from shared.api import (
     _detect_asset,
     _detect_duration,
+    _extract_resolution_details,
     _is_up_down_market,
     _normalize_resolution_outcome,
 )
@@ -32,6 +33,54 @@ class DiscoveryHelperTests(unittest.TestCase):
         self.assertEqual(_normalize_resolution_outcome("YES"), "Up")
         self.assertEqual(_normalize_resolution_outcome("NO"), "Down")
         self.assertIsNone(_normalize_resolution_outcome("MAYBE"))
+
+    def test_extract_resolution_details_from_top_level_resolution(self):
+        result = _extract_resolution_details(
+            {
+                "resolved": True,
+                "winner": "UP",
+                "volume": "12.34",
+                "tokens": [
+                    {"outcome": "Up", "price": "1", "token_id": "up-token"},
+                    {"outcome": "Down", "price": "0", "token_id": "down-token"},
+                ],
+            }
+        )
+        self.assertEqual(
+            result,
+            {
+                "resolved": True,
+                "winner": "Up",
+                "final_up_price": 1.0,
+                "total_volume": 12.34,
+                "resolution_source": "top_level",
+            },
+        )
+
+    def test_extract_resolution_details_from_token_winner_flag(self):
+        result = _extract_resolution_details(
+            {
+                "closed": True,
+                "accepting_orders": False,
+                "resolved": None,
+                "winner": None,
+                "tokens": [
+                    {"outcome": "Up", "price": "0", "winner": False, "token_id": "up-token"},
+                    {"outcome": "Down", "price": "1", "winner": True, "token_id": "down-token"},
+                ],
+                "volumeNum": "55.5",
+            }
+        )
+        self.assertEqual(
+            result,
+            {
+                "resolved": True,
+                "winner": "Down",
+                "final_up_price": 0.0,
+                "total_volume": 55.5,
+                "resolution_source": "token_flag",
+            },
+        )
 
 
 class WebsocketParsingTests(unittest.TestCase):

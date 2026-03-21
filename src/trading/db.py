@@ -77,6 +77,27 @@ async def create_trading_tables() -> None:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
         """)
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_mode TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_transaction_id TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_tx_hash TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_state TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_attempted_at TIMESTAMPTZ"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS redemption_error TEXT"
+        )
+        await conn.execute(
+            "ALTER TABLE bot_trades ADD COLUMN IF NOT EXISTS amount_redeemed NUMERIC(10,6)"
+        )
     logger.info("Trading database tables ready.")
 
 
@@ -363,6 +384,54 @@ async def mark_redeemed(condition_id: str) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute("UPDATE bot_trades SET redeemed=TRUE WHERE condition_id=$1", condition_id)
+
+
+async def record_redemption_success(
+    condition_id: str,
+    *,
+    mode: str,
+    transaction_id: str | None,
+    transaction_hash: str | None,
+    state: str | None,
+    amount_redeemed: float,
+) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE bot_trades
+            SET redeemed=TRUE,
+                redemption_mode=$2,
+                redemption_transaction_id=$3,
+                redemption_tx_hash=$4,
+                redemption_state=$5,
+                redemption_attempted_at=NOW(),
+                redemption_error=NULL,
+                amount_redeemed=$6
+            WHERE condition_id=$1
+            """,
+            condition_id,
+            mode,
+            transaction_id,
+            transaction_hash,
+            state,
+            Decimal(str(round(amount_redeemed, 6))),
+        )
+
+
+async def record_redemption_failure(condition_id: str, error_message: str) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE bot_trades
+            SET redemption_attempted_at=NOW(),
+                redemption_error=$2
+            WHERE condition_id=$1
+            """,
+            condition_id,
+            error_message[:1000],
+        )
 
 
 # ── Logging ─────────────────────────────────────────────────────────────

@@ -271,19 +271,21 @@ class PolymarketRelayerClient:
             if txn:
                 state = str(txn.get("state") or "")
                 tx_hash = str(txn.get("transactionHash") or "")
+                error_msg = str(txn.get("errorMsg") or "")
                 log.info(
-                    "[RELAYER] Poll %d/%d tx=%s state=%s hash=%s",
+                    "[RELAYER] Poll %d/%d tx=%s state=%s hash=%s error=%s",
                     attempt,
                     max_polls,
                     transaction_id,
                     state or "?",
                     tx_hash or "",
+                    error_msg or "",
                 )
                 if state in TERMINAL_SUCCESS_STATES:
                     return txn
                 if state in TERMINAL_FAILURE_STATES:
                     raise RelayerError(
-                        f"Relayer transaction {transaction_id} ended in failure state {state}"
+                        f"Relayer transaction {transaction_id} ended in failure state {state}: {error_msg or 'no errorMsg returned'}"
                     )
             time.sleep(poll_interval_seconds)
 

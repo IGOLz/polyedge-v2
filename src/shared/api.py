@@ -95,6 +95,57 @@ def _normalize_resolution_outcome(raw_winner: str | None) -> Optional[str]:
     return None
 
 
+def _extract_resolution_details(data: dict) -> Optional[dict]:
+    if not isinstance(data, dict):
+        return None
+
+    tokens = data.get("tokens", [])
+    if not isinstance(tokens, list):
+        tokens = []
+
+    winner = _normalize_resolution_outcome(data.get("winner") or data.get("outcome"))
+    resolution_source: Optional[str] = "top_level" if winner else None
+
+    if winner is None:
+        winning_token_id = str(data.get("winner") or "").strip()
+        for token in tokens:
+            if token.get("token_id") == winning_token_id:
+                winner = _normalize_resolution_outcome(token.get("outcome"))
+                if winner is not None:
+                    resolution_source = "winner_token_id"
+                    break
+
+    if winner is None:
+        for token in tokens:
+            if token.get("winner") is True:
+                winner = _normalize_resolution_outcome(token.get("outcome"))
+                if winner is not None:
+                    resolution_source = "token_flag"
+                    break
+
+    is_resolved = bool(data.get("resolved", False)) or winner is not None
+    if not is_resolved or winner is None:
+        return None
+
+    final_up_price: Optional[float] = None
+    for token in tokens:
+        if (token.get("outcome") or "").upper() in {"UP", "YES"}:
+            up_price = _safe_float(token.get("price"))
+            if up_price is not None:
+                final_up_price = up_price
+            break
+
+    total_volume = _extract_market_volume(data)
+
+    return {
+        "resolved": True,
+        "winner": winner,
+        "final_up_price": final_up_price,
+        "total_volume": total_volume,
+        "resolution_source": resolution_source or "unknown",
+    }
+
+
 async def enrich_with_clob(
     client: httpx.AsyncClient,
     market_id: str,
@@ -355,38 +406,7 @@ async def fetch_market_resolution(
         logger.error("Resolution fetch failed - %s: %s", _short(market_id), exc)
         return None
 
-    if not data.get("resolved", False):
-        return None
-
-    winner = _normalize_resolution_outcome(data.get("winner") or data.get("outcome"))
-    if winner is None:
-        winning_token_id = (data.get("winner") or "").strip()
-        for token in data.get("tokens", []):
-            if token.get("token_id") == winning_token_id:
-                winner = _normalize_resolution_outcome(token.get("outcome"))
-                break
-
-    final_up_price: Optional[float] = None
-    total_volume: Optional[float] = None
-    for token in data.get("tokens", []):
-        if (token.get("outcome") or "").upper() in {"UP", "YES"}:
-            final_up_price = _safe_float(token.get("price")) or final_up_price
-            break
-
-    try:
-        total_volume = float(data.get("volume") or data.get("volumeNum") or 0)
-    except (TypeError, ValueError):
-        total_volume = None
-
-    if winner is None:
-        return None
-
-    return {
-        "resolved": True,
-        "winner": winner,
-        "final_up_price": final_up_price,
-        "total_volume": total_volume,
-    }
+    return _extract_resolution_details(data)
 
 
 def fetch_token_ids_sync(

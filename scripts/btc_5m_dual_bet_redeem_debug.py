@@ -35,6 +35,25 @@ from trading import config
 from trading.redeemer import is_neg_risk_market, redeem_condition
 from trading.relayer import PolymarketRelayerClient
 
+LAST_STUCK_BTC_5M_CASE: dict[str, Any] = {
+    "case_name": "btc-5m-stuck-20260321-1455utc",
+    "market_id": "0xbcb0ccec0b3eaad3f88926b8de345c998df35af5f6b2e0bdcac7dcfae4975bc9",
+    "market_type": "BTC_5m",
+    "started_at": "2026-03-21T14:55:00+00:00",
+    "ended_at": "2026-03-21T15:00:00+00:00",
+    "up_token_id": "45072370415483832048641487795749685291015579615663212094712611541254426787525",
+    "down_token_id": "20518276487878124204878476039828122298027820785394293171120616712430967289612",
+    "expected_winner": "Down",
+    "original_trade_context": {
+        "up_order_id": "0xe3170ead8a43cd4cddc3ca77f711982c8d5777d3704c6e2665ddea334ee0ac30",
+        "down_order_id": "0xc2df5bf305e800ce09ba537129aae20fb407090ed22dc4ebffad6b391c1059e8",
+        "up_fill_price": 0.06,
+        "up_fill_size": 16.666665,
+        "down_fill_price": 0.95,
+        "down_fill_size": 1.05263,
+    },
+}
+
 
 def configure_logging() -> tuple[logging.Logger, Path]:
     log_dir = REPO_ROOT / "data" / "redeem_debug"
@@ -93,6 +112,31 @@ def build_clob_client() -> ClobClient:
         signature_type=2,
         funder=config.PROXY_WALLET,
     )
+
+
+def parse_iso8601_utc(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def build_market_from_case(case_data: dict[str, Any]) -> MarketState:
+    return MarketState(
+        market_id=str(case_data["market_id"]),
+        up_token_id=str(case_data["up_token_id"]),
+        down_token_id=str(case_data["down_token_id"]),
+        started_at=parse_iso8601_utc(str(case_data["started_at"])),
+        ended_at=parse_iso8601_utc(str(case_data["ended_at"])),
+        market_type=str(case_data.get("market_type") or "BTC_5m"),
+    )
+
+
+async def fetch_market_debug_snapshot(market_id: str) -> dict[str, Any]:
+    async with config.get_http_client(timeout=20.0) as client:
+        response = await client.get(f"{config.CLOB_BASE_URL}/markets/{market_id}", timeout=20)
+        response.raise_for_status()
+        return response.json()
 
 
 def get_collateral_balance_info(clob: ClobClient) -> dict[str, Any]:
@@ -344,35 +388,47 @@ async def async_main(args: argparse.Namespace) -> int:
     clob = build_clob_client()
     logger.info("CLOB client created successfully")
 
-    async with config.get_http_client(timeout=20.0) as client:
-        market = choose_market(
-            await fetch_open_btc_5min_markets(client),
-            logger,
-            override_market_id=args.market_id,
+    case_data: dict[str, Any] | None = None
+    expected_winner = ""
+    if args.resume_last_stuck_market:
+        case_data = dict(LAST_STUCK_BTC_5M_CASE)
+        market = build_market_from_case(case_data)
+        expected_winner = str(case_data.get("expected_winner") or "").strip()
+        logger.info("Run mode: redeem-only resume mode for embedded stuck BTC 5m case")
+        logger.info("Embedded case payload: %s", json_dump(case_data))
+    else:
+        logger.info("Run mode: live dual-bet smoke test")
+        async with config.get_http_client(timeout=20.0) as client:
+            market = choose_market(
+                await fetch_open_btc_5min_markets(client),
+                logger,
+                override_market_id=args.market_id,
+            )
+        await wait_until_market_window(market, logger, poll_seconds=args.poll_seconds)
+
+        log_balance_snapshot(clob, market, logger, "PRE-TRADE")
+
+        up_fill = place_market_buy(
+            clob,
+            token_id=market.up_token_id,
+            amount_usd=args.bet_usd,
+            label="UP",
+            logger=logger,
+        )
+        down_fill = place_market_buy(
+            clob,
+            token_id=market.down_token_id,
+            amount_usd=args.bet_usd,
+            label="DOWN",
+            logger=logger,
         )
 
-    await wait_until_market_window(market, logger, poll_seconds=args.poll_seconds)
+        logger.info("UP fill summary: %s", json_dump(up_fill))
+        logger.info("DOWN fill summary: %s", json_dump(down_fill))
+        log_balance_snapshot(clob, market, logger, "POST-TRADE")
 
-    log_balance_snapshot(clob, market, logger, "PRE-TRADE")
-
-    up_fill = place_market_buy(
-        clob,
-        token_id=market.up_token_id,
-        amount_usd=args.bet_usd,
-        label="UP",
-        logger=logger,
-    )
-    down_fill = place_market_buy(
-        clob,
-        token_id=market.down_token_id,
-        amount_usd=args.bet_usd,
-        label="DOWN",
-        logger=logger,
-    )
-
-    logger.info("UP fill summary: %s", json_dump(up_fill))
-    logger.info("DOWN fill summary: %s", json_dump(down_fill))
-    log_balance_snapshot(clob, market, logger, "POST-TRADE")
+    market_snapshot = await fetch_market_debug_snapshot(market.market_id)
+    logger.info("Raw market snapshot before resolution/redeem: %s", json_dump(market_snapshot))
 
     resolution = await wait_for_resolution(
         market,
@@ -381,6 +437,13 @@ async def async_main(args: argparse.Namespace) -> int:
         max_minutes=args.max_resolution_minutes,
     )
     logger.info("Final resolution payload: %s", json_dump(resolution))
+    if expected_winner:
+        logger.info("Expected winner for this run: %s", expected_winner)
+        if resolution.get("winner") != expected_winner:
+            raise RuntimeError(
+                f"Resolution mismatch for {market.market_id}: expected {expected_winner}, got {resolution.get('winner')}"
+            )
+        logger.info("Resolution matched expected winner for embedded case")
 
     neg_risk = await is_neg_risk_market(market.market_id)
     logger.info("Neg-risk lookup for %s => %s", market.market_id, neg_risk)
@@ -389,7 +452,11 @@ async def async_main(args: argparse.Namespace) -> int:
     redemption = await redeem_condition(
         market.market_id,
         neg_risk,
-        metadata=f"BTC 5m dual-bet smoke test {market.market_id}",
+        metadata=(
+            f"BTC 5m resume redeem {market.market_id}"
+            if args.resume_last_stuck_market
+            else f"BTC 5m dual-bet smoke test {market.market_id}"
+        ),
     )
     logger.info(
         "Redemption result: mode=%s transaction_id=%s state=%s tx_hash=%s",
@@ -400,13 +467,18 @@ async def async_main(args: argparse.Namespace) -> int:
     )
 
     log_balance_snapshot(clob, market, logger, "POST-REDEEM")
+    if case_data:
+        logger.info("Embedded case original trade context: %s", json_dump(case_data.get("original_trade_context")))
     logger.info("Smoke test completed successfully. Log file: %s", log_path)
     return 0
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Buy $1 UP and $1 DOWN on a BTC 5m market, then redeem after resolution."
+        description=(
+            "Buy $1 UP and $1 DOWN on a BTC 5m market and redeem after resolution, "
+            "or resume a known stuck market in redeem-only mode."
+        )
     )
     parser.add_argument(
         "--bet-usd",
@@ -431,6 +503,14 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional BTC 5m conditionId override to target a specific open market",
     )
+    parser.add_argument(
+        "--resume-last-stuck-market",
+        action="store_true",
+        help=(
+            "Redeem-only mode for the known 2026-03-21 BTC 5m market from the previous stuck run. "
+            "Skips placing new bets, verifies winner=Down, and then attempts redemption."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -448,4 +528,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

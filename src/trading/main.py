@@ -1,4 +1,4 @@
-"""PolyEdge Trading Bot — strategy-based trading bot for Polymarket crypto markets."""
+"""PolyEdge trading bot for Polymarket crypto markets."""
 
 from __future__ import annotations
 
@@ -9,16 +9,20 @@ import sys
 from datetime import datetime, timezone
 
 from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import ApiCreds, BalanceAllowanceParams, AssetType
+from py_clob_client.clob_types import ApiCreds, AssetType, BalanceAllowanceParams
 
 from shared.config import PROXY_URL
-from shared.db import init_pool, close_pool
+from shared.db import close_pool, init_pool
 from trading import config
 from trading import db
 from trading.balance import get_usdc_balance
 from trading.executor import execute_trade, get_execution_metrics, get_variance_metrics
 from trading.live_profile import live_profile_summary, market_in_live_scope
-from trading.redeemer import redemption_loop
+from trading.redeemer import (
+    describe_redemption_mode,
+    redemption_loop,
+    startup_redemption_preflight,
+)
 from trading.report import generate_live_reports
 from trading.strategy_adapter import evaluate_strategies
 from trading.utils import debug_log, log, strategy_log_tag
@@ -42,21 +46,24 @@ def build_clob_client() -> ClobClient:
 
 async def verify_proxy() -> None:
     if not PROXY_URL:
-        log.warning("No PROXY_URL set — traffic routes directly")
+        log.warning("No PROXY_URL set - traffic routes directly")
         return
     try:
         async with config.get_http_client() as client:
             resp = await client.get("https://api64.ipify.org?format=json")
             ip = resp.json()["ip"]
-            log.info("Proxy active — outbound IP: %s", ip)
-    except Exception as e:
-        log.critical("Proxy connection failed: %s — fix PROXY_URL or remove it", e)
+            log.info("Proxy active - outbound IP: %s", ip)
+    except Exception as exc:
+        log.critical("Proxy connection failed: %s - fix PROXY_URL or remove it", exc)
         sys.exit(1)
 
 
 async def heartbeat_loop() -> None:
     while True:
-        log.info("[HEARTBEAT] Bot alive — %s", datetime.now(timezone.utc).strftime('%H:%M:%S'))
+        log.info(
+            "[HEARTBEAT] Bot alive - %s",
+            datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        )
         await asyncio.sleep(10)
 
 
@@ -65,12 +72,16 @@ def _fmt_market(mt: str) -> str:
     return f"{parts[0].upper()} {parts[1]}" if len(parts) == 2 else mt
 
 
-def _extract_exit_fill(order: dict | None, fallback_price: float, fallback_shares: float) -> tuple[float, int]:
+def _extract_exit_fill(
+    order: dict | None, fallback_price: float, fallback_shares: float
+) -> tuple[float, int]:
     fill_price = fallback_price
     fill_shares = max(0, math.floor(fallback_shares))
     if isinstance(order, dict):
         raw_price = order.get("average_price") or order.get("price")
-        raw_shares = order.get("size_matched") or order.get("matched_size") or order.get("filled")
+        raw_shares = (
+            order.get("size_matched") or order.get("matched_size") or order.get("filled")
+        )
         if raw_price is not None:
             fill_price = float(raw_price)
         if raw_shares is not None:
@@ -83,28 +94,51 @@ async def outcome_tracker_loop(clob) -> None:
     while True:
         try:
             resolved = await db.update_pending_outcomes(clob)
-            for t in resolved:
-                tag = strategy_log_tag(t["strategy_name"])
-                market_label = _fmt_market(t["market_type"])
-                pnl = t["pnl"]
+            for trade in resolved:
+                tag = strategy_log_tag(trade["strategy_name"])
+                market_label = _fmt_market(trade["market_type"])
+                pnl = trade["pnl"]
 
-                if t["result"] == "win":
-                    log.info("[%s] %s | %s → ✅ WIN | PnL: +$%.2f", tag, market_label, t["market_id"][:12], abs(pnl))
+                if trade["result"] == "win":
+                    log.info(
+                        "[%s] %s | %s -> WIN | PnL: +$%.2f",
+                        tag,
+                        market_label,
+                        trade["market_id"][:12],
+                        abs(pnl),
+                    )
                 else:
-                    log.warning("[%s] %s | %s → ❌ LOSS | PnL: -$%.2f", tag, market_label, t["market_id"][:12], abs(pnl))
+                    log.warning(
+                        "[%s] %s | %s -> LOSS | PnL: -$%.2f",
+                        tag,
+                        market_label,
+                        trade["market_id"][:12],
+                        abs(pnl),
+                    )
 
-                await db.log_event(f"trade_{t['result']}", f"[{tag}] {market_label} → {t['result'].upper()} | PnL: {pnl:+.2f}", {
-                    "trade_id": t["trade_id"], "market_id": t["market_id"],
-                    "strategy_name": t["strategy_name"], "direction": t["direction"],
-                    "pnl": pnl,
-                })
+                await db.log_event(
+                    f"trade_{trade['result']}",
+                    f"[{tag}] {market_label} -> {trade['result'].upper()} | PnL: {pnl:+.2f}",
+                    {
+                        "trade_id": trade["trade_id"],
+                        "market_id": trade["market_id"],
+                        "strategy_name": trade["strategy_name"],
+                        "direction": trade["direction"],
+                        "pnl": pnl,
+                    },
+                )
 
             if resolved:
-                wins = sum(1 for t in resolved if t["result"] == "win")
-                total_pnl = sum(t["pnl"] for t in resolved)
+                wins = sum(1 for trade in resolved if trade["result"] == "win")
+                total_pnl = sum(trade["pnl"] for trade in resolved)
                 balance = await get_usdc_balance()
-                log.info("Outcome batch: %d resolved (%d WIN) | Batch PnL: %+.2f | Balance: $%.2f",
-                         len(resolved), wins, total_pnl, max(balance, 0))
+                log.info(
+                    "Outcome batch: %d resolved (%d WIN) | Batch PnL: %+.2f | Balance: $%.2f",
+                    len(resolved),
+                    wins,
+                    total_pnl,
+                    max(balance, 0),
+                )
         except Exception:
             log.exception("Error in outcome tracker")
         await asyncio.sleep(300)
@@ -116,13 +150,15 @@ async def stop_loss_monitor_loop(clob) -> None:
         try:
             open_stop_losses = await db.get_open_stop_loss_orders()
             for trade in open_stop_losses:
-                order_id = trade['stop_loss_order_id']
+                order_id = trade["stop_loss_order_id"]
                 try:
                     loop = asyncio.get_event_loop()
                     order = await asyncio.wait_for(
-                        loop.run_in_executor(None, lambda oid=order_id: clob.get_order(oid)), timeout=10.0)
-                    status = order.get('status', '') if isinstance(order, dict) else ''
-                    if status in ('FILLED', 'MATCHED'):
+                        loop.run_in_executor(None, lambda oid=order_id: clob.get_order(oid)),
+                        timeout=10.0,
+                    )
+                    status = order.get("status", "") if isinstance(order, dict) else ""
+                    if status in ("FILLED", "MATCHED"):
                         exit_price, exit_shares = _extract_exit_fill(
                             order,
                             float(trade["stop_loss_price"] or 0.0),
@@ -133,7 +169,7 @@ async def stop_loss_monitor_loop(clob) -> None:
                         gross_exit = exit_price * exit_shares
                         est_pnl = (exit_price - entry_price) * exit_shares
                         log.info(
-                            "[EXIT] Stop-loss filled — %s %s on %s | %d shares @ %.4f ($%.2f) | est pnl: %+.2f | order=%s",
+                            "[EXIT] Stop-loss filled - %s %s on %s | %d shares @ %.4f ($%.2f) | est pnl: %+.2f | order=%s",
                             trade["strategy_name"],
                             trade["direction"],
                             market_label,
@@ -145,7 +181,7 @@ async def stop_loss_monitor_loop(clob) -> None:
                         )
                         await db.log_event(
                             "trade_stop_loss",
-                            f"Stop-loss exit — {trade['strategy_name']} {trade['direction']} on {trade['market_type']} | "
+                            f"Stop-loss exit - {trade['strategy_name']} {trade['direction']} on {trade['market_type']} | "
                             f"{exit_shares} shares @ {exit_price:.4f} | est pnl {est_pnl:+.2f}",
                             {
                                 "trade_id": trade["id"],
@@ -160,11 +196,11 @@ async def stop_loss_monitor_loop(clob) -> None:
                                 "stop_loss_order_id": order_id,
                             },
                         )
-                        await db.mark_stop_loss_triggered(trade['id'])
-                except Exception as e:
-                    log.warning("[STOP-LOSS] Check failed: %s", e)
-        except Exception as e:
-            log.error("[STOP-LOSS] Monitor error: %s", e)
+                        await db.mark_stop_loss_triggered(trade["id"])
+                except Exception as exc:
+                    log.warning("[STOP-LOSS] Check failed: %s", exc)
+        except Exception as exc:
+            log.error("[STOP-LOSS] Monitor error: %s", exc)
         await asyncio.sleep(30)
 
 
@@ -178,18 +214,24 @@ async def hourly_summary_loop() -> None:
             metrics = get_execution_metrics()
             if metrics.total > 0:
                 log.info("[EXEC METRICS] %s", metrics.summary())
-            await db.log_event("hourly_summary", f"ROI: {stats.roi:.1f}% | Balance: ${balance:.2f}", {
-                "total_trades": stats.total_trades, "wins": stats.wins,
-                "total_pnl": round(stats.total_pnl, 2), "balance": balance,
-            })
+            await db.log_event(
+                "hourly_summary",
+                f"ROI: {stats.roi:.1f}% | Balance: ${balance:.2f}",
+                {
+                    "total_trades": stats.total_trades,
+                    "wins": stats.wins,
+                    "total_pnl": round(stats.total_pnl, 2),
+                    "balance": balance,
+                },
+            )
         except Exception:
             log.exception("Error in hourly summary")
 
 
 async def strategy_report_loop() -> None:
-    """Generate per-strategy reports every hour (offset from hourly summary)."""
+    """Generate per-strategy reports every hour."""
     log.info("Strategy report loop started (every 1h, 5min offset)")
-    await asyncio.sleep(300)  # offset so it doesn't overlap with hourly_summary
+    await asyncio.sleep(300)
     while True:
         try:
             reports = await generate_live_reports(output_dir="./reports/live")
@@ -206,22 +248,25 @@ async def run() -> None:
     await verify_proxy()
     config.patch_clob_client_proxy(PROXY_URL)
 
-    # Init shared DB pool + trading tables
     await init_pool()
     await db.create_trading_tables()
-    await db.seed_config_if_empty({
-        'strategy_momentum_enabled': str(config.STRATEGY_MOMENTUM_ENABLED).lower(),
-        'bet_size_usd': str(config.BET_SIZE_USD),
-        'daily_loss_limit': str(config.DAILY_LOSS_LIMIT),
-    })
+    await db.seed_config_if_empty(
+        {
+            "strategy_momentum_enabled": str(config.STRATEGY_MOMENTUM_ENABLED).lower(),
+            "bet_size_usd": str(config.BET_SIZE_USD),
+            "daily_loss_limit": str(config.DAILY_LOSS_LIMIT),
+        }
+    )
 
     clob = build_clob_client()
 
     try:
-        bal = clob.get_balance_allowance(BalanceAllowanceParams(asset_type=AssetType.COLLATERAL))
+        bal = clob.get_balance_allowance(
+            BalanceAllowanceParams(asset_type=AssetType.COLLATERAL)
+        )
         balance = int(bal.get("balance", "0")) / 1_000_000
     except Exception:
-        log.critical("Could not fetch balance — check connectivity")
+        log.critical("Could not fetch balance - check connectivity")
         raise SystemExit(1)
 
     log.info("USDC balance: $%.2f", balance)
@@ -233,14 +278,25 @@ async def run() -> None:
     except Exception:
         log.exception("Error resolving outcomes on startup")
 
+    redemption_mode = "disabled_in_dry_run"
     if config.DRY_RUN:
-        log.info("[DRY RUN] Mode active — no real orders")
+        log.info("[DRY RUN] Mode active - no real orders")
+    else:
+        preflight = await startup_redemption_preflight()
+        redemption_mode = str(preflight.get("mode") or describe_redemption_mode())
 
-    await db.log_event("bot_start", "Bot started", {
-        "bet_size": config.BET_SIZE_USD, "daily_loss_limit": config.DAILY_LOSS_LIMIT,
-        "balance": balance, "dry_run": config.DRY_RUN,
-        "live_profile": live_profile_summary(),
-    })
+    await db.log_event(
+        "bot_start",
+        "Bot started",
+        {
+            "bet_size": config.BET_SIZE_USD,
+            "daily_loss_limit": config.DAILY_LOSS_LIMIT,
+            "balance": balance,
+            "dry_run": config.DRY_RUN,
+            "live_profile": live_profile_summary(),
+            "redemption_mode": redemption_mode,
+        },
+    )
 
     asyncio.create_task(outcome_tracker_loop(clob))
     if not config.DRY_RUN:
@@ -251,10 +307,14 @@ async def run() -> None:
     asyncio.create_task(hourly_summary_loop())
     asyncio.create_task(strategy_report_loop())
 
-    log.info("Bot started — mode=%s | $%.2f/trade | loss limit $%.2f",
-             "DRY RUN" if config.DRY_RUN else "LIVE", config.BET_SIZE_USD, config.DAILY_LOSS_LIMIT)
+    log.info(
+        "Bot started - mode=%s | redemption=%s | $%.2f/trade | loss limit $%.2f",
+        "DRY RUN" if config.DRY_RUN else "LIVE",
+        redemption_mode,
+        config.BET_SIZE_USD,
+        config.DAILY_LOSS_LIMIT,
+    )
 
-    # ── Main strategy evaluation loop ───────────────────────────────
     backoff = 0
     while True:
         try:
@@ -275,9 +335,9 @@ async def run() -> None:
             backoff = 0
         except Exception as exc:
             log.exception("Strategy loop error")
-            await db.log_event("bot_error", f"Strategy loop error — {exc}", {"error": str(exc)})
+            await db.log_event("bot_error", f"Strategy loop error - {exc}", {"error": str(exc)})
             backoff = min(backoff + 1, 6)
-            await asyncio.sleep(config.LOOP_INTERVAL * (2 ** backoff))
+            await asyncio.sleep(config.LOOP_INTERVAL * (2**backoff))
             continue
 
         await asyncio.sleep(config.LOOP_INTERVAL)
@@ -295,6 +355,11 @@ def main() -> None:
         asyncio.run(run())
     except KeyboardInterrupt:
         log.info("Shutting down (KeyboardInterrupt)")
+    finally:
+        try:
+            asyncio.run(close_pool())
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
