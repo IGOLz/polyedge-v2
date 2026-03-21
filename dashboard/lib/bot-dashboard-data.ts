@@ -64,6 +64,7 @@ type OverviewRow = {
   resolved_trades: string;
   wins: string;
   losses: string;
+  take_profits: string;
   stop_losses: string;
   open_trades: string;
   total_pnl: string | null;
@@ -87,6 +88,7 @@ type TradeRow = {
   direction: string;
   entry_price: string;
   stop_loss_price: string | null;
+  take_profit_price: string | null;
   status: string;
   final_outcome: string | null;
   pnl: string | null;
@@ -137,7 +139,7 @@ function mapOverview(row: OverviewRow | undefined | null): BotOverviewMetrics | 
     resolvedTrades: toNumber(row.resolved_trades),
     wins: toNumber(row.wins),
     losses: toNumber(row.losses),
-    takeProfits: toNumber(row.wins),
+    takeProfits: toNumber(row.take_profits),
     heldToExpiryLosses: toNumber(row.losses),
     stopLosses: toNumber(row.stop_losses),
     openTrades: toNumber(row.open_trades),
@@ -157,7 +159,7 @@ function mapWindow(row: OverviewRow | undefined | null): BotWindowMetrics | null
     trades: toNumber(row.resolved_trades),
     wins: toNumber(row.wins),
     losses: toNumber(row.losses),
-    takeProfits: toNumber(row.wins),
+    takeProfits: toNumber(row.take_profits),
     heldToExpiryLosses: toNumber(row.losses),
     stopLosses: toNumber(row.stop_losses),
     totalPnl: toNumber(row.total_pnl),
@@ -196,8 +198,8 @@ function buildHourlySeries(rows: HourlyRow[]) {
   return points;
 }
 
-function deriveExitPrice(finalOutcome: string | null, stopLossPrice: string | null) {
-  if (finalOutcome === "win") {
+function deriveExitPrice(finalOutcome: string | null, stopLossPrice: string | null, takeProfitPrice: string | null) {
+  if (finalOutcome === "win" || finalOutcome === "win_resolution") {
     return 1;
   }
 
@@ -206,7 +208,18 @@ function deriveExitPrice(finalOutcome: string | null, stopLossPrice: string | nu
   }
 
   if (finalOutcome === "stop_loss") {
+    if (stopLossPrice == null) {
+      return null;
+    }
     const numeric = Number(stopLossPrice);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  if (finalOutcome === "take_profit") {
+    if (takeProfitPrice == null) {
+      return null;
+    }
+    const numeric = Number(takeProfitPrice);
     return Number.isFinite(numeric) ? numeric : null;
   }
 
@@ -219,13 +232,14 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       withTimeout(
         query<OverviewRow>(`
           SELECT
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NOT NULL) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'win') AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) AS wins,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
             SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
             ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
@@ -235,13 +249,14 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       withTimeout(
         query<OverviewRow>(`
           SELECT
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NOT NULL) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'win') AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) AS wins,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
             SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
             ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
@@ -252,13 +267,14 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       withTimeout(
         query<OverviewRow>(`
           SELECT
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NOT NULL) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'win') AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) AS wins,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
             SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
             ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
@@ -272,8 +288,8 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
           SELECT
             date_trunc('hour', placed_at) AS hour_bucket,
             COUNT(*) FILTER (WHERE status = 'filled') AS trades,
-            COUNT(*) FILTER (WHERE final_outcome = 'win') AS wins,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win', 'loss', 'stop_loss')) AS pnl
+            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit')) AS wins,
+            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS pnl
           FROM bot_trades
           WHERE placed_at > NOW() - INTERVAL '24 hours'
           GROUP BY 1
@@ -289,6 +305,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
             direction,
             entry_price,
             stop_loss_price,
+            take_profit_price,
             status,
             final_outcome,
             COALESCE(pnl, ${PNL_SQL}) AS pnl,
@@ -314,7 +331,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
         strategyName: row.strategy_name,
         side: row.direction,
         entryPrice: toNumber(row.entry_price),
-        exitPrice: deriveExitPrice(row.final_outcome, row.stop_loss_price),
+        exitPrice: deriveExitPrice(row.final_outcome, row.stop_loss_price, row.take_profit_price),
         pnl: row.pnl == null ? null : toNumber(row.pnl),
         placedAt: row.placed_at,
         resolvedAt: row.resolved_at,

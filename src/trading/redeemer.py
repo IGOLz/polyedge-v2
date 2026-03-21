@@ -232,7 +232,7 @@ async def _redeem_cycle() -> None:
 
             if amount > 0:
                 await db.log_event(
-                    "trade_win",
+                    "trade_redeemed",
                     f"Redeemed winning position — ${amount:.2f} returned",
                     {
                         "market_id": fill.get("market_id"),

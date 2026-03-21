@@ -325,6 +325,91 @@ async def cancel_stop_loss_order(clob, trade_id: int, stop_loss_order_id: str) -
         log.warning("[STOP-LOSS] Could not cancel stop-loss %s: %s", stop_loss_order_id[:16], e)
 
 
+async def place_take_profit_order(clob, trade_id: int, token_id: str, shares: float, take_profit_price: float) -> None:
+    """Place a GTC sell order as a take-profit for a filled trade."""
+    await asyncio.sleep(5)  # wait for token settlement before placing take-profit
+
+    loop = asyncio.get_event_loop()
+    balance = 0
+    for attempt in range(5):
+        try:
+            from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
+            balance_resp = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: clob.get_balance_allowance(
+                    BalanceAllowanceParams(asset_type=AssetType.CONDITIONAL, token_id=token_id)
+                )),
+                timeout=5.0,
+            )
+            log.info("[TAKE-PROFIT] Full balance response: %s", balance_resp)
+            balance = int(balance_resp.get('balance', '0')) if isinstance(balance_resp, dict) else 0
+            log.info("[TAKE-PROFIT] Token balance check attempt %d: %d", attempt + 1, balance)
+            if balance > 0:
+                break
+            await asyncio.sleep(3)
+        except Exception as e:
+            log.warning("[TAKE-PROFIT] Balance check failed attempt %d: %s", attempt + 1, e)
+            await asyncio.sleep(3)
+
+    if balance == 0:
+        log.warning("[TAKE-PROFIT] Token balance is 0 after 5 attempts - skipping take-profit for trade %d", trade_id)
+        return
+
+    actual_shares = balance / 1_000_000
+    sellable_shares = math.floor(actual_shares)
+
+    if sellable_shares <= 0:
+        log.warning("[TAKE-PROFIT] Sellable shares is 0 after balance conversion - skipping")
+        return
+
+    log.info("[TAKE-PROFIT] Actual balance: %.4f shares | selling: %d shares", actual_shares, sellable_shares)
+
+    from py_clob_client.order_builder.constants import SELL
+    log.info("[TAKE-PROFIT] Attempting GTC sell - token: %s | shares: %d | price: %s | trade_id: %d",
+             token_id[:16], sellable_shares, take_profit_price, trade_id)
+    try:
+        def _place():
+            log.info("[TAKE-PROFIT-DEBUG] token_id type: %s | value: %s | len: %d", type(token_id), token_id, len(str(token_id)))
+            sell_args = OrderArgs(token_id=token_id, price=round(take_profit_price, 2), size=float(sellable_shares), side=SELL)
+            log.info("[TAKE-PROFIT-DEBUG] OrderArgs token_id: %s | len: %d", sell_args.token_id, len(str(sell_args.token_id)))
+            signed = clob.create_order(sell_args)
+            return clob.post_order(signed, OrderType.GTC)
+
+        resp = await asyncio.wait_for(
+            loop.run_in_executor(None, _place),
+            timeout=10.0,
+        )
+
+        order_id = resp.get('orderID') or resp.get('id') if isinstance(resp, dict) else None
+        if order_id:
+            await db.update_take_profit_order(trade_id, order_id, take_profit_price)
+            log.info("[TAKE-PROFIT] GTC order placed for trade %d @ %.2f | order: %s", trade_id, take_profit_price, order_id[:16])
+        else:
+            log.warning("[TAKE-PROFIT] No order ID returned for trade %d - no take-profit active", trade_id)
+
+    except asyncio.TimeoutError:
+        log.error("[TAKE-PROFIT] Timeout placing take-profit for trade %d - continuing without take-profit", trade_id)
+    except Exception as e:
+        log.error("[TAKE-PROFIT] Full error for trade %d: %s: %s", trade_id, type(e).__name__, e)
+        log.error("[TAKE-PROFIT] Failed order args - token: %s | size: %s | price: %s | side: SELL",
+                  token_id[:16], shares, take_profit_price)
+
+
+async def cancel_take_profit_order(clob, trade_id: int, take_profit_order_id: str) -> None:
+    """Cancel an existing GTC take-profit order."""
+    try:
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(None, lambda: clob.cancel(take_profit_order_id)),
+            timeout=10.0,
+        )
+        await db.mark_take_profit_cancelled(trade_id)
+        log.info("[TAKE-PROFIT] Cancelled GTC order %s for trade %d", take_profit_order_id[:16], trade_id)
+    except asyncio.TimeoutError:
+        log.error("[TAKE-PROFIT] Timeout cancelling take-profit %s", take_profit_order_id[:16])
+    except Exception as e:
+        log.warning("[TAKE-PROFIT] Could not cancel take-profit %s: %s", take_profit_order_id[:16], e)
+
+
 async def _wait_for_fill(clob: ClobClient, order_id: str, timeout: float) -> tuple[bool, dict | None]:
     """Poll order status until filled or timeout. Returns (filled, order_details)."""
     loop = asyncio.get_event_loop()
@@ -369,9 +454,25 @@ def _parse_fill_from_resp(resp: dict | None, fallback_shares: int, fallback_pric
         raw_shares = resp.get("size_matched") or resp.get("matched_size") or resp.get("filled")
         raw_price = resp.get("average_price") or resp.get("price")
         if raw_shares is not None:
-            fill_shares = int(float(raw_shares))
+            try:
+                parsed_shares = math.floor(float(raw_shares))
+            except (TypeError, ValueError):
+                parsed_shares = 0
+            if parsed_shares > 0:
+                fill_shares = parsed_shares
+            elif fill_shares > 0:
+                log.warning(
+                    "[EXEC] Filled response reported non-positive matched size (%s); using fallback %d shares",
+                    raw_shares,
+                    fill_shares,
+                )
         if raw_price is not None:
-            fill_price = float(raw_price)
+            try:
+                parsed_price = float(raw_price)
+            except (TypeError, ValueError):
+                parsed_price = 0.0
+            if parsed_price > 0:
+                fill_price = parsed_price
     return fill_shares, fill_price
 
 
@@ -931,14 +1032,37 @@ async def execute_trade(
         signal_age_seconds=signal_age_s,
     )
 
-    # Place stop-loss GTC order after confirmed fill
+    # Place exit orders after confirmed fill
     if status == "filled" and my_shares and trade_id and stop_loss_enabled:
+        exit_tasks = []
+
         sl_price = signal.signal_data.get('stop_loss_price')
         if sl_price is not None:
             sl_exit = float(sl_price)
-            log.info("[STOP-LOSS] Placing stop-loss @ %.2f | token: %s | direction: %s",
-                     sl_exit, token_id[:16], signal.direction)
-            await place_stop_loss_order(
-                clob=clob, trade_id=trade_id,
-                token_id=token_id, shares=my_shares, stop_loss_price=sl_exit,
-            )
+            if 0 < sl_exit < 1:
+                log.info("[STOP-LOSS] Placing stop-loss @ %.2f | token: %s | direction: %s",
+                         sl_exit, token_id[:16], signal.direction)
+                exit_tasks.append(place_stop_loss_order(
+                    clob=clob,
+                    trade_id=trade_id,
+                    token_id=token_id,
+                    shares=my_shares,
+                    stop_loss_price=sl_exit,
+                ))
+
+        tp_price = signal.signal_data.get('take_profit_price')
+        if tp_price is not None:
+            tp_exit = float(tp_price)
+            if 0 < tp_exit < 1:
+                log.info("[TAKE-PROFIT] Placing take-profit @ %.2f | token: %s | direction: %s",
+                         tp_exit, token_id[:16], signal.direction)
+                exit_tasks.append(place_take_profit_order(
+                    clob=clob,
+                    trade_id=trade_id,
+                    token_id=token_id,
+                    shares=my_shares,
+                    take_profit_price=tp_exit,
+                ))
+
+        if exit_tasks:
+            await asyncio.gather(*exit_tasks, return_exceptions=True)

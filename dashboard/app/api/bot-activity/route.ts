@@ -19,6 +19,7 @@ type BotTrade = {
   confidence_multiplier: string | null;
   shares: string | null;
   stop_loss_price: string | null;
+  take_profit_price: string | null;
   stop_loss_triggered: boolean | null;
   stop_loss_order_id: string | null;
   notes: string | null;
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
       id, market_id, market_type, strategy_name, direction,
       entry_price, bet_size_usd, status, final_outcome, pnl,
       placed_at, resolved_at, confidence_multiplier,
-      shares, stop_loss_price, stop_loss_triggered, stop_loss_order_id, notes, signal_data
+      shares, stop_loss_price, take_profit_price, stop_loss_triggered, stop_loss_order_id, notes, signal_data
     FROM bot_trades`;
     const tradeParams: (string | number)[] = [];
     let paramIdx = 1;
@@ -62,7 +63,7 @@ export async function GET(request: Request) {
     if (type === "filled") {
       tradesQuery += ` WHERE status = 'filled'`;
     } else if (type === "wins") {
-      tradesQuery += ` WHERE final_outcome = 'win'`;
+      tradesQuery += ` WHERE final_outcome IN ('win_resolution', 'take_profit')`;
     } else if (type === "losses") {
       tradesQuery += ` WHERE final_outcome = 'loss'`;
     } else if (type === "pending") {
@@ -77,9 +78,9 @@ export async function GET(request: Request) {
     let logsQuery = `SELECT * FROM bot_logs`;
 
     if (type === "trades") {
-      logsQuery += ` WHERE log_type IN ('trade_placed', 'trade_win', 'trade_loss', 'trade_stop_loss', 'trade_fok_no_fill', 'trade_skipped', 'trade_dry_run')`;
+      logsQuery += ` WHERE log_type IN ('trade_placed', 'trade_win_resolution', 'trade_take_profit', 'trade_loss', 'trade_stop_loss', 'trade_redeemed', 'trade_fok_no_fill', 'trade_skipped', 'trade_dry_run')`;
     } else if (type === "wins_losses") {
-      logsQuery += ` WHERE log_type IN ('trade_win', 'trade_loss', 'trade_stop_loss')`;
+      logsQuery += ` WHERE log_type IN ('trade_win_resolution', 'trade_take_profit', 'trade_loss', 'trade_stop_loss')`;
     } else if (type === "summaries") {
       logsQuery += ` WHERE log_type = 'hourly_summary'`;
     } else if (type === "errors") {
