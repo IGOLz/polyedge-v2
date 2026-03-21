@@ -20,7 +20,7 @@ from typing import Any
 
 from trading import db
 from trading.balance import get_usdc_balance
-from trading.constants import M3_CONFIG, M4_CONFIG, BET_SIZING
+from trading.constants import BET_SIZING, M3_CONFIG, M4_CONFIG, STRATEGY_BET_SIZING
 from trading.utils import log, debug_log
 
 
@@ -43,25 +43,52 @@ class Signal:
 
 # ── Bet sizing (shared by M3 and M4) ─────────────────────────────────────
 
+def normalize_strategy_key(strategy: str | None) -> str:
+    """Collapse a strategy name like ``S13_underlying_lag_follow`` to ``S13``."""
+    if not strategy:
+        return 'DEFAULT'
+
+    normalized = strategy.strip().upper()
+    if not normalized:
+        return 'DEFAULT'
+
+    key = normalized.split('_', 1)[0]
+    if key in STRATEGY_BET_SIZING:
+        return key
+    return 'DEFAULT'
+
+
+def get_strategy_bankroll_pct(strategy: str | None = None) -> float:
+    """Return the bankroll percentage assigned to a strategy."""
+    key = normalize_strategy_key(strategy)
+    return float(STRATEGY_BET_SIZING[key]['bankroll_pct'])
+
+
 def calculate_dynamic_bet_size(current_balance: float, strategy: str | None = None) -> float:
     """
-    Calculate bet size based on current bankroll.
-    Both M3 and M4 get the same sizing (4% of bankroll).
+    Calculate a bankroll-scaled bet size with per-strategy risk budgets.
 
-    Examples:
-    - $200 balance -> $8 bet
-    - $300 balance -> $12 bet
-    - $500 balance -> $20 bet
-    - $1,000 balance -> $40 bet
+    Sizing compounds automatically with balance growth, but it is still capped
+    by the global single-trade bankroll limit and absolute max bet.
     """
-    bet_percentage = BET_SIZING['bet_percentage']
+    if current_balance <= 0:
+        return 0.0
+
+    bet_percentage = get_strategy_bankroll_pct(strategy)
     min_bet = BET_SIZING['min_bet']
     max_bet = BET_SIZING['max_bet']
+    max_single_trade = current_balance * BET_SIZING['max_single_trade_pct']
 
-    calculated_bet = current_balance * bet_percentage
-    bet_size = max(min_bet, min(calculated_bet, max_bet))
+    if BET_SIZING['scale_with_growth']:
+        calculated_bet = current_balance * bet_percentage
+    else:
+        calculated_bet = BET_SIZING['starting_bet_amount']
 
-    return round(bet_size, 2)
+    capped_bet = min(calculated_bet, max_bet, max_single_trade)
+    if capped_bet < min_bet:
+        return round(capped_bet, 2)
+
+    return round(max(min_bet, capped_bet), 2)
 
 
 def calculate_shares(entry_price: float, bet_size: float) -> int:
@@ -210,10 +237,11 @@ def log_performance_metrics():
         )
 
     bal = strategy_tracker.current_balance
-    bet_size = bal * BET_SIZING['bet_percentage']
+    m3_bet_size = calculate_dynamic_bet_size(bal, 'M3')
+    m4_bet_size = calculate_dynamic_bet_size(bal, 'M4')
     # Expected daily: 16.3 M3 trades + 47.7 M4 trades
-    m3_daily_ev = 16.3 * bet_size * 0.01747
-    m4_daily_ev = 47.7 * bet_size * 0.00943
+    m3_daily_ev = 16.3 * m3_bet_size * 0.01747
+    m4_daily_ev = 47.7 * m4_bet_size * 0.00943
 
     log.info(
         "[COMBINED] Daily Summary | Total Trades: %d | Win%%: %.1f%% | "

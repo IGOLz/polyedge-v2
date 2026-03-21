@@ -54,6 +54,8 @@ dashboard/           # Next.js dashboard (analytics + limited DB controls)
 | `trading` | polyedge-trading | Live trading bot | Safe to restart |
 | `dashboard` | polyedge-dashboard | Next.js UI for monitoring + light control actions | Safe to restart |
 
+Deployment and update notes: [DEPLOY.md](DEPLOY.md)
+
 ## Update Workflow (on LXC)
 
 ```bash

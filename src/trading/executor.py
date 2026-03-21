@@ -325,9 +325,17 @@ async def cancel_stop_loss_order(clob, trade_id: int, stop_loss_order_id: str) -
         log.warning("[STOP-LOSS] Could not cancel stop-loss %s: %s", stop_loss_order_id[:16], e)
 
 
-async def place_take_profit_order(clob, trade_id: int, token_id: str, shares: float, take_profit_price: float) -> None:
+async def place_take_profit_order(
+    clob,
+    trade_id: int,
+    token_id: str,
+    shares: float,
+    take_profit_price: float,
+    settlement_wait_seconds: float = 5.0,
+) -> None:
     """Place a GTC sell order as a take-profit for a filled trade."""
-    await asyncio.sleep(5)  # wait for token settlement before placing take-profit
+    if settlement_wait_seconds > 0:
+        await asyncio.sleep(settlement_wait_seconds)
 
     loop = asyncio.get_event_loop()
     balance = 0
@@ -1054,15 +1062,12 @@ async def execute_trade(
         if tp_price is not None:
             tp_exit = float(tp_price)
             if 0 < tp_exit < 1:
-                log.info("[TAKE-PROFIT] Placing take-profit @ %.2f | token: %s | direction: %s",
-                         tp_exit, token_id[:16], signal.direction)
-                exit_tasks.append(place_take_profit_order(
-                    clob=clob,
-                    trade_id=trade_id,
-                    token_id=token_id,
-                    shares=my_shares,
-                    take_profit_price=tp_exit,
-                ))
+                log.info(
+                    "[TAKE-PROFIT] Armed virtual take-profit @ %.2f | token: %s | direction: %s",
+                    tp_exit,
+                    token_id[:16],
+                    signal.direction,
+                )
 
         if exit_tasks:
             await asyncio.gather(*exit_tasks, return_exceptions=True)

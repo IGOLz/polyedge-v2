@@ -127,7 +127,7 @@ def _populate_execution_fields(
     balance: float,
 ) -> Signal | None:
     """Fill executor-required ``locked_*`` and ``signal_data`` fields."""
-    bet_size = calculate_dynamic_bet_size(balance)
+    bet_size = calculate_dynamic_bet_size(balance, signal.strategy_name)
     shares = calculate_shares(signal.entry_price, bet_size)
     actual_cost = shares * signal.entry_price
 

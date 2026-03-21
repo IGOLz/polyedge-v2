@@ -16,6 +16,7 @@ from shared.strategies.S5.strategy import S5Strategy
 from shared.strategies.S9.config import S9Config
 from shared.strategies.S9.strategy import S9Strategy
 from shared.strategies.base import BaseStrategy
+from trading.constants import STRATEGY_BET_SIZING
 
 
 # Toggle validated live strategies here.
@@ -38,6 +39,11 @@ def _parse_market_type(market_type: str) -> tuple[str, int]:
         except ValueError:
             duration_minutes = 0
     return asset, duration_minutes
+
+
+def _strategy_size_pct(strategy_id: str) -> float:
+    sizing = STRATEGY_BET_SIZING.get(strategy_id, STRATEGY_BET_SIZING["DEFAULT"])
+    return float(sizing["bankroll_pct"]) * 100.0
 
 
 def build_live_s5_config() -> S5Config:
@@ -164,6 +170,7 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
         return (
             f"{cfg.strategy_id} "
             f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"size={_strategy_size_pct(cfg.strategy_id):.1f}% "
             f"assets={cfg.allowed_assets} "
             f"durations={cfg.allowed_durations_minutes} "
             f"hours={cfg.allowed_hours} "
@@ -179,6 +186,7 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
         return (
             f"{cfg.strategy_id} "
             f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"size={_strategy_size_pct(cfg.strategy_id):.1f}% "
             f"assets={cfg.allowed_assets} "
             f"durations={cfg.allowed_durations_minutes} "
             f"hours={cfg.allowed_hours or 'all'} "
@@ -194,6 +202,7 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
         return (
             f"{cfg.strategy_id} "
             f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"size={_strategy_size_pct(cfg.strategy_id):.1f}% "
             f"assets={cfg.allowed_assets} "
             f"durations={cfg.allowed_durations_minutes} "
             f"hours={cfg.allowed_hours or 'all'} "
@@ -208,6 +217,7 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
         return (
             f"{cfg.strategy_id} "
             f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"size={_strategy_size_pct(cfg.strategy_id):.1f}% "
             f"assets={cfg.allowed_assets} "
             f"durations={cfg.allowed_durations_minutes} "
             f"feature={cfg.feature_window} "
@@ -223,6 +233,7 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
         return (
             f"{cfg.strategy_id} "
             f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+            f"size={_strategy_size_pct(cfg.strategy_id):.1f}% "
             f"assets={cfg.allowed_assets} "
             f"durations={cfg.allowed_durations_minutes} "
             f"feature={cfg.feature_window} "
@@ -234,7 +245,11 @@ def _summarize_strategy(strategy: BaseStrategy) -> str:
             f"sl_tp={cfg.live_stop_loss_price}/{cfg.live_take_profit_price}"
         )
 
-    return f"{cfg.strategy_id} enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)}"
+    return (
+        f"{cfg.strategy_id} "
+        f"enabled={LIVE_STRATEGY_ENABLED.get(cfg.strategy_id, False)} "
+        f"size={_strategy_size_pct(cfg.strategy_id):.1f}%"
+    )
 
 
 def live_profile_summary() -> str:

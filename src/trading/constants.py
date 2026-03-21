@@ -71,13 +71,28 @@ M4_CONFIG = {
 
 # ── Shared Bet Sizing ───────────────────────────────────────────────────
 
+STRATEGY_BET_SIZING = {
+    # Current live bankroll sizing, based on the validated edge/risk profile
+    # of each strategy. At a $170 bankroll this maps to:
+    # S13 ~$10.20, S9 ~$7.65, S14 ~$6.80, S5 ~$5.95, S10 ~$4.25.
+    'DEFAULT': {'bankroll_pct': 0.03},
+    'M3': {'bankroll_pct': 0.04},
+    'M4': {'bankroll_pct': 0.03},
+    'S5': {'bankroll_pct': 0.035},
+    'S9': {'bankroll_pct': 0.045},
+    'S10': {'bankroll_pct': 0.025},
+    'S13': {'bankroll_pct': 0.06},
+    'S14': {'bankroll_pct': 0.04},
+}
+
+
 BET_SIZING = {
-    'starting_bankroll': 200.0,
-    'starting_bet_amount': 8.0,
-    'bet_percentage': 0.04,
+    'starting_bankroll': 170.0,
+    'starting_bet_amount': 5.1,
+    'bet_percentage': 0.03,
     'min_bet': 2.0,
     'max_bet': 100.0,
-    'max_single_trade_pct': 0.20,
+    'max_single_trade_pct': 0.12,
     'scale_with_growth': True,
     'track_m3_separately': True,
     'track_m4_separately': True,

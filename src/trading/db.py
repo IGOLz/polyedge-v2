@@ -243,6 +243,28 @@ async def get_market_ticks(market_id: str, started_at: datetime, limit: int = 30
     ]
 
 
+async def get_latest_position_price(market_id: str, direction: str) -> float | None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT up_price
+            FROM market_ticks
+            WHERE market_id = $1
+            ORDER BY time DESC
+            LIMIT 1
+            """,
+            market_id,
+        )
+    if not row:
+        return None
+
+    up_price = float(row["up_price"])
+    if direction.lower() == "down":
+        return round(1.0 - up_price, 6)
+    return up_price
+
+
 async def already_traded_this_market(market_id: str, strategy_name: str | None = None) -> bool:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -465,7 +487,7 @@ async def get_open_exit_orders() -> list:
               AND (
                 (stop_loss_order_id IS NOT NULL AND stop_loss_triggered=FALSE)
                 OR
-                (take_profit_order_id IS NOT NULL AND take_profit_triggered=FALSE)
+                (take_profit_price IS NOT NULL AND take_profit_triggered=FALSE)
               )
         """)
 

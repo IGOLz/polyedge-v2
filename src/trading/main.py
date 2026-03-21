@@ -22,6 +22,7 @@ from trading.executor import (
     execute_trade,
     get_execution_metrics,
     get_variance_metrics,
+    place_take_profit_order,
 )
 from trading.live_profile import live_profile_summary, market_in_live_scope
 from trading.redeemer import (
@@ -113,6 +114,54 @@ async def _cancel_sibling_exit_order(clob, trade, filled_exit: str) -> None:
             trade["id"],
             exc,
         )
+
+
+async def _trigger_virtual_take_profit(clob, trade: dict) -> bool:
+    take_profit_price = trade.get("take_profit_price")
+    if take_profit_price is None or trade.get("take_profit_triggered"):
+        return False
+    if trade.get("take_profit_order_id"):
+        return False
+    if not trade.get("token_id"):
+        return False
+
+    current_price = await db.get_latest_position_price(trade["market_id"], trade["direction"])
+    if current_price is None:
+        return False
+
+    target_price = float(take_profit_price)
+    if current_price < target_price:
+        return False
+
+    log.info(
+        "[TAKE-PROFIT] Trigger reached for trade %s | current=%.4f target=%.4f",
+        trade["id"],
+        current_price,
+        target_price,
+    )
+
+    stop_loss_order_id = trade.get("stop_loss_order_id")
+    if stop_loss_order_id:
+        try:
+            await cancel_stop_loss_order(clob, trade["id"], stop_loss_order_id)
+            trade["stop_loss_order_id"] = None
+        except Exception as exc:
+            log.warning(
+                "[TAKE-PROFIT] Could not cancel stop-loss before TP for trade %s: %s",
+                trade["id"],
+                exc,
+            )
+            return False
+
+    await place_take_profit_order(
+        clob=clob,
+        trade_id=trade["id"],
+        token_id=trade["token_id"],
+        shares=float(trade["shares"] or 0.0),
+        take_profit_price=target_price,
+        settlement_wait_seconds=0.0,
+    )
+    return True
 
 
 async def _handle_exit_fill(clob, trade, exit_kind: str, order_id: str, order: dict | None) -> None:
@@ -292,6 +341,17 @@ async def exit_monitor_loop(clob) -> None:
                 trade = dict(trade_row)
                 loop = asyncio.get_event_loop()
                 exit_resolved = False
+
+                try:
+                    take_profit_triggered = await _trigger_virtual_take_profit(clob, trade)
+                    if take_profit_triggered:
+                        continue
+                except Exception as exc:
+                    log.warning(
+                        "[TAKE-PROFIT] Virtual trigger check failed for trade %s: %s",
+                        trade["id"],
+                        exc,
+                    )
 
                 for exit_kind in ("take_profit", "stop_loss"):
                     order_id = trade.get(f"{exit_kind}_order_id")
