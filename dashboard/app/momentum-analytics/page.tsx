@@ -35,6 +35,7 @@ interface MomentumTrade {
   placed_at: string;
   resolved_at: string | null;
   stop_loss_price: string | null;
+  take_profit_price: string | null;
   stop_loss_triggered: boolean | null;
   notes: string | null;
 }
@@ -143,14 +144,16 @@ function pnlColor(val: number): string {
 
 function outcomeLabel(trade: MomentumTrade): string {
   if (trade.stop_loss_triggered || trade.final_outcome === "stop_loss") return "Stop-loss";
-  if (trade.final_outcome === "win") return "Win";
+  if (trade.final_outcome === "take_profit") return "Take-profit";
+  if (trade.final_outcome === "win" || trade.final_outcome === "win_resolution") return "Win";
   if (trade.final_outcome === "loss") return "Loss";
   return "Pending";
 }
 
 function outcomeBadge(trade: MomentumTrade): string {
   if (trade.stop_loss_triggered || trade.final_outcome === "stop_loss") return "bg-amber-500/10 text-amber-400";
-  if (trade.final_outcome === "win") return "bg-emerald-500/10 text-emerald-400";
+  if (trade.final_outcome === "take_profit") return "bg-emerald-500/10 text-emerald-400";
+  if (trade.final_outcome === "win" || trade.final_outcome === "win_resolution") return "bg-emerald-500/10 text-emerald-400";
   if (trade.final_outcome === "loss") return "bg-red-500/10 text-red-400";
   return "bg-zinc-500/10 text-zinc-400";
 }
@@ -184,7 +187,7 @@ function tradePnl(t: MomentumTrade): number {
 }
 
 function isResolved(t: MomentumTrade): boolean {
-  return t.final_outcome === "win" || t.final_outcome === "loss" || t.final_outcome === "stop_loss" || !!t.stop_loss_triggered;
+  return ["win", "win_resolution", "take_profit", "loss", "stop_loss"].includes(t.final_outcome ?? "") || !!t.stop_loss_triggered;
 }
 
 function computeTierSummary(trades: MomentumTrade[]): TierSummary {
@@ -192,7 +195,7 @@ function computeTierSummary(trades: MomentumTrade[]): TierSummary {
     return { totalTrades: 0, wins: 0, losses: 0, stopLosses: 0, totalPnl: 0, totalWagered: 0, winRate: 0, roi: 0, avgPnl: 0, avgEntryPrice: 0 };
   }
   const resolved = trades.filter(isResolved);
-  const wins = trades.filter((t) => t.final_outcome === "win").length;
+  const wins = trades.filter((t) => ["win", "win_resolution", "take_profit"].includes(t.final_outcome ?? "")).length;
   const losses = trades.filter((t) => t.final_outcome === "loss").length;
   const stopLosses = trades.filter((t) => t.stop_loss_triggered || t.final_outcome === "stop_loss").length;
   const resolvedCount = wins + losses + stopLosses;
@@ -360,8 +363,8 @@ export default function MomentumAnalyticsPage() {
       const sorted = [...tradesByTier[tier]].reverse();
       const outcomes: boolean[] = [];
       sorted.forEach((t) => {
-        if (t.final_outcome === "win" || t.final_outcome === "loss") {
-          outcomes.push(t.final_outcome === "win");
+        if (["win", "win_resolution", "take_profit", "loss"].includes(t.final_outcome ?? "")) {
+          outcomes.push(["win", "win_resolution", "take_profit"].includes(t.final_outcome ?? ""));
           if (outcomes.length >= 2) {
             const window = outcomes.slice(-WINDOW);
             const wr = (window.filter(Boolean).length / window.length) * 100;

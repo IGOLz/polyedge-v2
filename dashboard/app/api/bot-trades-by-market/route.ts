@@ -17,6 +17,7 @@ type MarketTrade = {
   resolved_at: string | null;
   confidence_multiplier: string | null;
   stop_loss_price: string | null;
+  take_profit_price: string | null;
   stop_loss_triggered: boolean | null;
   strategy_name: string;
 };
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
       `SELECT
         id, direction, entry_price, bet_size_usd, status,
         final_outcome, ${PNL_SQL} as pnl, placed_at, resolved_at,
-        confidence_multiplier, stop_loss_price, stop_loss_triggered,
+        confidence_multiplier, stop_loss_price, take_profit_price, stop_loss_triggered,
         strategy_name
       FROM bot_trades
       WHERE market_id = $1 AND status = 'filled'

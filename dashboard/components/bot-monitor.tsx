@@ -87,6 +87,7 @@ interface TradeRow {
 	confidence_multiplier: string | null;
 	shares: string | null;
 	stop_loss_price: string | null;
+	take_profit_price: string | null;
 	stop_loss_triggered: boolean | null;
 	stop_loss_order_id: string | null;
 	notes: string | null;
@@ -128,13 +129,16 @@ function calcPnl(t: TradeRow): number | null {
 	if (Number.isNaN(entry) || Number.isNaN(betSize) || entry === 0) return null;
 	const shares = t.shares ? parseFloat(t.shares) : betSize / entry;
 
-	if (t.final_outcome === "win") {
+	if (t.final_outcome === "win" || t.final_outcome === "win_resolution") {
 		return shares * (1.0 - entry);
 	} else if (t.final_outcome === "loss") {
 		return -betSize;
 	} else if (t.final_outcome === "stop_loss") {
 		const slPrice = t.stop_loss_price ? parseFloat(t.stop_loss_price) : 0;
 		return (slPrice - entry) * shares;
+	} else if (t.final_outcome === "take_profit") {
+		const tpPrice = t.take_profit_price ? parseFloat(t.take_profit_price) : 0;
+		return (tpPrice - entry) * shares;
 	}
 	return null;
 }
@@ -350,6 +354,8 @@ function LogIcon({ logType }: { logType: string }) {
 		case "trade_placed":
 			return <ArrowUpRight size={size} className="text-emerald-400" />;
 		case "trade_win":
+		case "trade_win_resolution":
+		case "trade_take_profit":
 			return <Trophy size={size} className="text-emerald-400" />;
 		case "trade_loss":
 			return <X size={size} className="text-red-400" />;
@@ -375,6 +381,8 @@ function LogIcon({ logType }: { logType: string }) {
 function logRowBg(logType: string): string {
 	switch (logType) {
 		case "trade_win":
+		case "trade_win_resolution":
+		case "trade_take_profit":
 			return "bg-emerald-500/[0.04]";
 		case "trade_loss":
 			return "bg-red-500/[0.04]";
@@ -698,8 +706,11 @@ function ActivityFeed({ logs }: { logs: ActivityData["logs"] }) {
 				[
 					"trade_placed",
 					"trade_win",
+					"trade_win_resolution",
+					"trade_take_profit",
 					"trade_loss",
 					"trade_stop_loss",
+					"trade_redeemed",
 					"trade_fok_no_fill",
 					"trade_skipped",
 					"trade_dry_run",
@@ -707,7 +718,7 @@ function ActivityFeed({ logs }: { logs: ActivityData["logs"] }) {
 			);
 		if (filter === "wins_losses")
 			return logs.filter((l) =>
-				["trade_win", "trade_loss", "trade_stop_loss"].includes(l.log_type),
+				["trade_win", "trade_win_resolution", "trade_take_profit", "trade_loss", "trade_stop_loss"].includes(l.log_type),
 			);
 		if (filter === "summaries")
 			return logs.filter((l) => l.log_type === "hourly_summary");
@@ -759,7 +770,7 @@ function ActivityFeed({ logs }: { logs: ActivityData["logs"] }) {
 							{visible.map((log) => {
 								const data = parseJsonSafe(log.data);
 								const showBadge =
-									["trade_placed", "trade_win", "trade_loss"].includes(
+									["trade_placed", "trade_win", "trade_win_resolution", "trade_take_profit", "trade_loss"].includes(
 										log.log_type,
 									) && data;
 
@@ -1167,7 +1178,7 @@ function TradeHistory({ initialTrades }: { initialTrades: TradeRow[] }) {
 	// Client-side filtering — no re-fetch
 	const filtered = useMemo(() => {
 		if (filter === "wins")
-			return filledTrades.filter((t) => t.final_outcome === "win");
+			return filledTrades.filter((t) => ["win", "win_resolution", "take_profit"].includes(t.final_outcome ?? ""));
 		if (filter === "losses")
 			return filledTrades.filter((t) => t.final_outcome === "loss");
 		if (filter === "stop_loss")
@@ -1403,7 +1414,11 @@ function TradeHistory({ initialTrades }: { initialTrades: TradeRow[] }) {
 																<span className="text-xs font-medium text-yellow-400">
 																	Pending...
 																</span>
-															) : t.final_outcome === "win" ? (
+															) : t.final_outcome === "take_profit" ? (
+																<span className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+																	Take Profit
+																</span>
+															) : t.final_outcome === "win" || t.final_outcome === "win_resolution" ? (
 																<span className="text-xs font-medium text-emerald-400">
 																	Win
 																</span>

@@ -42,7 +42,7 @@ async def _fetch_resolved_trades() -> list[dict]:
     """Fetch all filled+resolved trades from bot_trades.
 
     Returns dicts with keys matching what ``compute_live_metrics`` needs.
-    Only includes trades with a definitive outcome (win/loss).
+    Only includes trades with a definitive outcome (take profit, resolution win, stop loss, loss).
     """
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -58,12 +58,14 @@ async def _fetch_resolved_trades() -> list[dict]:
                 shares,
                 final_outcome,
                 pnl,
+                stop_loss_price,
+                take_profit_price,
                 placed_at,
                 resolved_at,
                 signal_data
             FROM bot_trades
             WHERE status = 'filled'
-              AND final_outcome IN ('win', 'loss')
+              AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')
             ORDER BY placed_at ASC
         """)
 
@@ -74,9 +76,13 @@ async def _fetch_resolved_trades() -> list[dict]:
         shares = float(r["shares"]) if r["shares"] is not None else (
             bet_size / entry_price if entry_price > 0 else 0
         )
-        outcome = r["final_outcome"]  # 'win' or 'loss'
+        raw_outcome = r["final_outcome"]
+        outcome = "win" if raw_outcome in ("win_resolution", "take_profit") else "loss"
         pnl = float(r["pnl"]) if r["pnl"] is not None else (
-            shares * (1.0 - entry_price) if outcome == "win" else -bet_size
+            shares * (1.0 - entry_price) if raw_outcome == "win_resolution"
+            else (float(r["take_profit_price"] or 0) - entry_price) * shares if raw_outcome == "take_profit"
+            else (float(r["stop_loss_price"] or 0) - entry_price) * shares if raw_outcome == "stop_loss"
+            else -bet_size
         )
 
         # Extract asset and duration from market_type (e.g. "btc_5m")
@@ -92,10 +98,16 @@ async def _fetch_resolved_trades() -> list[dict]:
             "strategy_name": r["strategy_name"],
             "direction": r["direction"],
             "entry_price": entry_price,
-            "exit_price": 1.0 if outcome == "win" else 0.0,
+            "exit_price": (
+                1.0 if raw_outcome == "win_resolution"
+                else float(r["take_profit_price"] or 0) if raw_outcome == "take_profit"
+                else float(r["stop_loss_price"] or 0) if raw_outcome == "stop_loss"
+                else 0.0
+            ),
             "bet_size_usd": bet_size,
             "shares": shares,
             "outcome": outcome,
+            "raw_outcome": raw_outcome,
             "pnl": round(pnl, 6),
             "asset": asset,
             "duration_minutes": duration_minutes,

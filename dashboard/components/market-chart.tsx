@@ -28,6 +28,7 @@ interface MarketTrade {
   placed_at: string;
   resolved_at: string | null;
   stop_loss_price: string | null;
+  take_profit_price: string | null;
   stop_loss_triggered: boolean | null;
   strategy_name: string;
 }
@@ -161,7 +162,9 @@ export function MarketChart({ market }: { market: Market }) {
         const betSize = parseFloat(t.bet_size_usd);
 
         let outcomeHtml = "";
-        if (t.final_outcome === "win") {
+        if (t.final_outcome === "take_profit") {
+          outcomeHtml = `<span style="color:#4ade80">Take Profit</span>`;
+        } else if (t.final_outcome === "win" || t.final_outcome === "win_resolution") {
           outcomeHtml = `<span style="color:#4ade80">Win</span>`;
         } else if (t.final_outcome === "loss") {
           outcomeHtml = `<span style="color:#f87171">Loss</span>`;
