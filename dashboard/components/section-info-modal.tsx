@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Info } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -9,7 +10,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-interface SectionInfo {
+export interface SectionInfo {
   title: string;
   sections: {
     heading: string;
@@ -576,6 +577,56 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       },
     ],
   },
+  "Bot Overview": {
+    title: "Bot Overview",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "This section summarizes how the live trading bot is performing right now using the current bot trade database. The headline metrics focus on realized P&L and exit behavior, so the dashboard reflects how the bot is actually trading rather than treating it like a simple win-loss betting counter.",
+      },
+      {
+        heading: "Exit profile",
+        content:
+          "Take Profit counts profitable exits, Stop Loss counts trades closed early at the protective stop, and Held to Expiry Losses counts positions that were carried through resolution and finished negative. Those three outcomes are the key trading signals on this page.",
+      },
+      {
+        heading: "Last 24 Hours",
+        content:
+          "The activity block isolates the most recent 24 hours so short-term changes stand out from the full-history numbers. It shows realized P&L, recent take-profit and stop-loss behavior, and an hourly activity chart for the latest trading window.",
+      },
+    ],
+  },
+  "Strategy Results": {
+    title: "Strategy Results",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "Each card is generated from the latest strategy artifacts found in the repo's optimization and validation result folders. The dashboard surfaces the strongest metrics available for that strategy instead of assuming every file has the same schema.",
+      },
+      {
+        heading: "How to read it",
+        content:
+          "Validated strategies pull from the newest validation candidate files when available. Otherwise the cards fall back to the newest optimization summaries, best-configuration files, and result CSV headers for the most recent run.",
+      },
+    ],
+  },
+  "Trade History": {
+    title: "Trade History",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "This table shows the most recent live bot trades from the existing trade history source. Exit prices use the actual settlement convention already present in the project: winners resolve at $1, losing contracts at $0, and stop-loss exits use the stored stop-loss execution price.",
+      },
+      {
+        heading: "Why it matters",
+        content:
+          "The table helps verify that the bot overview is grounded in real individual trades instead of only aggregate stats. It also lets you spot which markets, strategies, and directions are driving recent P&L.",
+      },
+    ],
+  },
   Markets: {
     title: "Markets Overview",
     sections: [
@@ -615,11 +666,12 @@ function downloadJSON(data: unknown, filename: string) {
 interface SectionInfoButtonProps {
   sectionTitle: string;
   exportData?: unknown;
+  info?: SectionInfo;
 }
 
-export function SectionInfoButton({ sectionTitle, exportData }: SectionInfoButtonProps) {
+export function SectionInfoButton({ sectionTitle, exportData, info: infoOverride }: SectionInfoButtonProps) {
   const [open, setOpen] = useState(false);
-  const info = SECTION_INFO[sectionTitle];
+  const info = infoOverride ?? SECTION_INFO[sectionTitle];
 
   if (!info) return null;
 
@@ -632,7 +684,7 @@ export function SectionInfoButton({ sectionTitle, exportData }: SectionInfoButto
           className="flex h-5 w-5 items-center justify-center rounded-full border border-zinc-700/60 bg-zinc-800/60 text-xs font-semibold text-zinc-400 transition-colors hover:border-primary/40 hover:text-primary hover:bg-primary/10"
           aria-label={`Learn more about ${sectionTitle}`}
         >
-          i
+          <Info className="h-3.5 w-3.5" />
         </button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto border-primary/20 bg-zinc-950 backdrop-blur-xl">
