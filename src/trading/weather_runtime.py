@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from shared.db import create_weather_tables
 from trading import config
 from trading import db as trading_db
 from trading.balance import get_usdc_balance
@@ -325,10 +324,13 @@ async def _run_weather_cycle(clob) -> None:
 
 
 async def weather_loop(clob) -> None:
-    await create_weather_tables()
     while True:
         try:
             await _run_weather_cycle(clob)
-        except Exception:
-            log.exception("[WEATHER] Weather runtime cycle failed")
+        except Exception as exc:
+            log.exception(
+                "[WEATHER] Weather runtime cycle failed: %s: %r",
+                type(exc).__name__,
+                exc,
+            )
         await asyncio.sleep(WEATHER_LOOP_INTERVAL_SECONDS)

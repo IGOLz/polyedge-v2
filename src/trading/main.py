@@ -73,6 +73,26 @@ def build_clob_client() -> ClobClient:
     )
 
 
+def _spawn_background_task(coro, *, name: str) -> asyncio.Task:
+    task = asyncio.create_task(coro, name=name)
+
+    def _report_failure(done_task: asyncio.Task) -> None:
+        if done_task.cancelled():
+            return
+        exc = done_task.exception()
+        if exc is not None:
+            log.exception(
+                "[TASK] %s crashed: %s: %r",
+                name,
+                type(exc).__name__,
+                exc,
+                exc_info=exc,
+            )
+
+    task.add_done_callback(_report_failure)
+    return task
+
+
 async def verify_proxy() -> None:
     if not PROXY_URL:
         log.warning("No PROXY_URL set - traffic routes directly")
@@ -317,7 +337,7 @@ async def stop_loss_monitor_loop(clob) -> None:
                 except Exception as exc:
                     log.warning("[STOP-LOSS] Check failed: %s", exc)
         except Exception as exc:
-            log.error("[STOP-LOSS] Monitor error: %s", exc)
+            log.error("[STOP-LOSS] Monitor error: %s: %r", type(exc).__name__, exc)
         await asyncio.sleep(30)
 
 
@@ -564,7 +584,7 @@ async def exit_monitor_loop(clob) -> None:
                 if exit_resolved:
                     continue
         except Exception as exc:
-            log.error("[EXIT] Monitor error: %s", exc)
+            log.error("[EXIT] Monitor error: %s: %r", type(exc).__name__, exc)
         await asyncio.sleep(30)
 
 
@@ -607,7 +627,7 @@ async def strategy_report_loop() -> None:
 
 
 async def run() -> None:
-    asyncio.create_task(heartbeat_loop())
+    _spawn_background_task(heartbeat_loop(), name="heartbeat")
 
     await verify_proxy()
     config.patch_clob_client_proxy(PROXY_URL)
@@ -676,15 +696,15 @@ async def run() -> None:
         },
     )
 
-    asyncio.create_task(outcome_tracker_loop(clob))
+    _spawn_background_task(outcome_tracker_loop(clob), name="outcome-tracker")
     if not config.DRY_RUN:
-        asyncio.create_task(redemption_loop())
+        _spawn_background_task(redemption_loop(), name="redemption-loop")
     else:
         log.info("[DRY RUN] Redemption loop disabled")
-    asyncio.create_task(exit_monitor_loop(clob))
-    asyncio.create_task(hourly_summary_loop())
-    asyncio.create_task(strategy_report_loop())
-    asyncio.create_task(weather_loop(clob))
+    _spawn_background_task(exit_monitor_loop(clob), name="exit-monitor")
+    _spawn_background_task(hourly_summary_loop(), name="hourly-summary")
+    _spawn_background_task(strategy_report_loop(), name="strategy-report")
+    _spawn_background_task(weather_loop(clob), name="weather-loop")
 
     log.info(
         "Bot started - mode=%s | redemption=%s | $%.2f/trade | loss limit $%.2f",

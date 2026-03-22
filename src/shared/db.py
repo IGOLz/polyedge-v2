@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Optional
@@ -42,11 +43,18 @@ _CRYPTO_BAR_FIELDS = (
 )
 
 
-async def init_pool(min_size: int = 2, max_size: int = 10, retries: int = 30) -> asyncpg.Pool:
+async def init_pool(min_size: int = 1, max_size: int = 5, retries: int = 30) -> asyncpg.Pool:
     """Create the connection pool with retry loop (DB may still be starting)."""
     global _pool
     if _pool is not None:
         return _pool
+
+    env_min_size = os.getenv("POSTGRES_POOL_MIN_SIZE", "").strip()
+    env_max_size = os.getenv("POSTGRES_POOL_MAX_SIZE", "").strip()
+    if env_min_size:
+        min_size = int(env_min_size)
+    if env_max_size:
+        max_size = int(env_max_size)
 
     for attempt in range(1, retries + 1):
         try:
@@ -58,13 +66,22 @@ async def init_pool(min_size: int = 2, max_size: int = 10, retries: int = 30) ->
                 database=DB_CONFIG["database"],
                 min_size=min_size,
                 max_size=max_size,
+                timeout=15.0,
+                command_timeout=30.0,
+                max_inactive_connection_lifetime=300.0,
             )
             logger.info("Database pool ready (%s@%s:%s/%s)",
                         DB_CONFIG["user"], DB_CONFIG["host"],
                         DB_CONFIG["port"], DB_CONFIG["database"])
             return _pool
         except Exception as exc:
-            logger.error("DB connect attempt %d/%d failed: %s", attempt, retries, exc)
+            logger.error(
+                "DB connect attempt %d/%d failed: %s: %r",
+                attempt,
+                retries,
+                type(exc).__name__,
+                exc,
+            )
             if attempt == retries:
                 raise
             await asyncio.sleep(2)
