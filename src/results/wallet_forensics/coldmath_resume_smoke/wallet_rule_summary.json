@@ -1,0 +1,24 @@
+{
+  "bot_candidates": [],
+  "generated_at": "2026-03-22T16:27:33.830707+00:00",
+  "high_confidence_rules": 0,
+  "profile_name": "ColdMath",
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "strategies": [],
+  "top_conditions": [
+    {
+      "condition_id": "0x00f0c1e691c4b02a92defe7e769ccf49e500533f81d16ef1e0e7faffb0530744",
+      "event_slug": "highest-temperature-in-seoul-on-march-25-2026",
+      "is_weather": true,
+      "max_confidence": 0.0,
+      "merge_event_count": 0,
+      "realized_pnl": 0.0,
+      "redeem_event_count": 0,
+      "rule_count": 0,
+      "strategy_keys": [],
+      "trade_event_count": 1
+    }
+  ],
+  "total_rules": 0,
+  "total_shadow_trades": 0
+}

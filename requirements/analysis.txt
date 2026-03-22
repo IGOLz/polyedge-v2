@@ -3,5 +3,6 @@
 numpy
 numba
 pandas
+pyarrow
 psycopg2-binary
 scipy

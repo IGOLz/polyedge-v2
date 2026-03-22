@@ -1,0 +1,40 @@
+{
+  "backtest_summary": {
+    "deployment_readiness": "paper_only",
+    "ranking_score": 67.15,
+    "roi_pct": 2.133827381510701,
+    "support_count": 13,
+    "total_realized_pnl": 352.8344696892842,
+    "win_rate_pct": 100.0
+  },
+  "entry_rule": {
+    "complete_set_cost_lte": 0.995,
+    "condition": "same_condition_both_sides",
+    "max_inventory_imbalance_ratio": 0.491617,
+    "min_matched_size": 0.0
+  },
+  "exit_rule": {
+    "action": "merge_when_inventory_matched",
+    "force_flatten_before_resolution": true,
+    "max_merge_delay_minutes": 240.0
+  },
+  "limitations": [
+    "Backtest uses reconstructed public wallet sequences, not full market-wide quote history.",
+    "Live deployment still requires a market scanner that can detect both-side sub-par complete sets in real time."
+  ],
+  "profile_name": "ColdMath",
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "risk_rule": {
+    "avoid_unmatched_inventory": true,
+    "max_complete_set_cost": 0.995,
+    "max_sequence_buy_usdc": 3752.857753
+  },
+  "sizing_rule": {
+    "inventory_style": "match_smaller_side_and_rebalance",
+    "matched_size_target": 548.934467,
+    "max_sequence_buy_usdc": 1844.240039
+  },
+  "source_blueprint_id": "7332e2ce1d49b3d4694c2820a9caff622d407044",
+  "strategy_key": "inventory_rebalancing_merge",
+  "strategy_name": "coldmath_inventory_rebalancing_merge_v1"
+}

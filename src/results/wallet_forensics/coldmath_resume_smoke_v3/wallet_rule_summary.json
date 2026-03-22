@@ -1,0 +1,411 @@
+{
+  "bot_candidates": [
+    {
+      "candidate_score": 5451.8364,
+      "strategy_key": "dust_long_tail_bucket",
+      "why": "1817 rules, 1817 high-confidence, avg confidence 0.84, conservative replay -468.90"
+    },
+    {
+      "candidate_score": 2307.8,
+      "strategy_key": "neg_risk_basket",
+      "why": "769 rules, 769 high-confidence, avg confidence 0.80, conservative replay -4665.70"
+    },
+    {
+      "candidate_score": 1467.92,
+      "strategy_key": "inventory_rebalancing_merge",
+      "why": "489 rules, 489 high-confidence, avg confidence 0.92, conservative replay -20509.04"
+    },
+    {
+      "candidate_score": 1116.75,
+      "strategy_key": "laddered_execution",
+      "why": "372 rules, 372 high-confidence, avg confidence 0.75, conservative replay 0.00"
+    },
+    {
+      "candidate_score": 251.13,
+      "strategy_key": "inventory_rebalancing_merge",
+      "why": "blueprint status ready_for_backtest, support 1071, priority 249.15"
+    }
+  ],
+  "generated_at": "2026-03-22T22:19:49.402732+00:00",
+  "high_confidence_rules": 3490,
+  "profile_name": "ColdMath",
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "strategies": [
+    {
+      "avg_confidence": 0.8364,
+      "distinct_conditions": 300,
+      "high_confidence_rule_count": 1817,
+      "max_confidence": 0.895,
+      "rule_count": 1817,
+      "sample_summaries": [
+        "Bought a dust-priced tail bucket, consistent with convex payoff harvesting."
+      ],
+      "shadow_pnl_conservative": -468.8972,
+      "shadow_pnl_slippage_free": -182.4739,
+      "shadow_trade_count": 65,
+      "strategy_key": "dust_long_tail_bucket",
+      "supporting_trade_count": 1817
+    },
+    {
+      "avg_confidence": 0.8,
+      "distinct_conditions": 769,
+      "high_confidence_rule_count": 769,
+      "max_confidence": 0.8,
+      "rule_count": 769,
+      "sample_summaries": [
+        "Bought several related legs inside a negative-risk event, consistent with basket construction."
+      ],
+      "shadow_pnl_conservative": -4665.6994,
+      "shadow_pnl_slippage_free": -4188.358,
+      "shadow_trade_count": 625,
+      "strategy_key": "neg_risk_basket",
+      "supporting_trade_count": 20504
+    },
+    {
+      "avg_confidence": 0.92,
+      "distinct_conditions": 489,
+      "high_confidence_rule_count": 489,
+      "max_confidence": 0.92,
+      "rule_count": 489,
+      "sample_summaries": [
+        "Bought both sides on the same condition and later merged inventory back into collateral."
+      ],
+      "shadow_pnl_conservative": -20509.0422,
+      "shadow_pnl_slippage_free": -12768.5379,
+      "shadow_trade_count": 19852,
+      "strategy_key": "inventory_rebalancing_merge",
+      "supporting_trade_count": 19852
+    },
+    {
+      "avg_confidence": 0.75,
+      "distinct_conditions": 372,
+      "high_confidence_rule_count": 372,
+      "max_confidence": 0.75,
+      "rule_count": 372,
+      "sample_summaries": [
+        "Built the position through multiple staggered fills, consistent with laddered execution."
+      ],
+      "shadow_pnl_conservative": 0,
+      "shadow_pnl_slippage_free": 0,
+      "shadow_trade_count": 0,
+      "strategy_key": "laddered_execution",
+      "supporting_trade_count": 11549
+    },
+    {
+      "avg_confidence": 0.78,
+      "distinct_conditions": 43,
+      "high_confidence_rule_count": 43,
+      "max_confidence": 0.78,
+      "rule_count": 43,
+      "sample_summaries": [
+        "Held winning inventory through resolution and redeemed directly for collateral."
+      ],
+      "shadow_pnl_conservative": 0,
+      "shadow_pnl_slippage_free": 0,
+      "shadow_trade_count": 0,
+      "strategy_key": "late_redemption_farming",
+      "supporting_trade_count": 43
+    }
+  ],
+  "strategy_blueprints": [
+    {
+      "confidence": 0.99,
+      "priority_score": 249.15,
+      "status": "ready_for_backtest",
+      "strategy_key": "inventory_rebalancing_merge",
+      "summary": "Accumulate both sides in the same condition when the reconstructed complete-set cost is below par, keep inventory roughly balanced, and exit by merging back into collateral.",
+      "support_count": 1071
+    },
+    {
+      "confidence": 0.9392,
+      "priority_score": 135.7958,
+      "status": "needs_exit_research",
+      "strategy_key": "neg_risk_basket",
+      "summary": "Construct a same-side basket across sibling negative-risk markets when the basket cost is below a synthetic complete set, then monetize through event completion or later operational exits.",
+      "support_count": 421
+    },
+    {
+      "confidence": 0.8921,
+      "priority_score": 26.5453,
+      "status": "needs_exit_research",
+      "strategy_key": "dust_long_tail_bucket",
+      "summary": "Pick up extremely low-priced tail buckets, likely as convex payoff scraps or as complements to a larger basket.",
+      "support_count": 10
+    },
+    {
+      "confidence": 0.9879,
+      "priority_score": 180.9393,
+      "status": "execution_overlay",
+      "strategy_key": "laddered_execution",
+      "summary": "Scale into positions in multiple clips instead of crossing the full size immediately.",
+      "support_count": 830
+    },
+    {
+      "confidence": 0.9193,
+      "priority_score": 85.3212,
+      "status": "operational_only",
+      "strategy_key": "late_redemption_farming",
+      "summary": "Hold winning inventory through resolution and redeem directly, treating redemption as an operational exit path rather than alpha by itself.",
+      "support_count": 43
+    }
+  ],
+  "top_conditions": [
+    {
+      "condition_id": "0xdfd780958dfcbfe6af4ee70a4a1028b2bb4bb2c0950f08e89d46bd54b93281f1",
+      "event_slug": "highest-temperature-in-atlanta-on-march-14-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 10,
+      "realized_pnl": 158.1179,
+      "redeem_event_count": 0,
+      "rule_count": 243,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 379
+    },
+    {
+      "condition_id": "0xbe57e65d2625915a12a0f2c1821f0e3d8660288dd368472cf57d4e6f84134abe",
+      "event_slug": "highest-temperature-in-tokyo-on-march-22-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 34.0664,
+      "redeem_event_count": 0,
+      "rule_count": 125,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 361
+    },
+    {
+      "condition_id": "0x3d2f1a03e2dc9879f92822b07c27bfaa5cde4872088e5fe46d7238bae519ad4a",
+      "event_slug": "highest-temperature-in-wellington-on-february-28-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 3,
+      "realized_pnl": 29.4502,
+      "redeem_event_count": 0,
+      "rule_count": 92,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 193
+    },
+    {
+      "condition_id": "0x40885feba2985e0929b067704d86a00e307deec7a51f95220874b88793de1d68",
+      "event_slug": "highest-temperature-in-seattle-on-march-7-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 1,
+      "realized_pnl": 10.486,
+      "redeem_event_count": 0,
+      "rule_count": 71,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 73
+    },
+    {
+      "condition_id": "0x3e62a09853441b31da2539de74bfd25d99c65d62e78ae1ade7b21759c3697edd",
+      "event_slug": "highest-temperature-in-london-on-february-26-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 1,
+      "realized_pnl": 15.6322,
+      "redeem_event_count": 0,
+      "rule_count": 62,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 90
+    },
+    {
+      "condition_id": "0xa0f45dc7b67f2e054b06a76cc2afc1fe8e207a24314bf8f3bdd1dd3c5c9a39d5",
+      "event_slug": "highest-temperature-in-seoul-on-march-4-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 3,
+      "realized_pnl": 10.5826,
+      "redeem_event_count": 0,
+      "rule_count": 57,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 88
+    },
+    {
+      "condition_id": "0x05ea66701ed7111e7c0e1cad7a798f79567998bcd786fd668cf09fdf6fb260dd",
+      "event_slug": "highest-temperature-in-seoul-on-march-3-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 8.1689,
+      "redeem_event_count": 0,
+      "rule_count": 55,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 85
+    },
+    {
+      "condition_id": "0x373219d6c90b2caf1d38b4a7340102271f8287dac57fd9395497324e83bb8b18",
+      "event_slug": "highest-temperature-in-milan-on-march-22-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 3,
+      "realized_pnl": 3.765,
+      "redeem_event_count": 1,
+      "rule_count": 45,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "late_redemption_farming",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 60
+    },
+    {
+      "condition_id": "0x9965e31f646b21e6459ccb1edfcd133a8c1760ce6b03b20b8b6eca8b1b364b0e",
+      "event_slug": "highest-temperature-in-wellington-on-march-6-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 1,
+      "realized_pnl": 56.6038,
+      "redeem_event_count": 0,
+      "rule_count": 40,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 94
+    },
+    {
+      "condition_id": "0x34c0b81c08d5f2c61fe13be1efb0883a51ca3e625daa3a98d2251c8ba8d583cf",
+      "event_slug": "highest-temperature-in-wellington-on-march-13-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 4.5628,
+      "redeem_event_count": 0,
+      "rule_count": 38,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 45
+    },
+    {
+      "condition_id": "0xd450d0d7e465673fee742a56f4c98655c2b469c75da9db5e0003f1c3165369f7",
+      "event_slug": "highest-temperature-in-toronto-on-february-28-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 1,
+      "realized_pnl": 487.2689,
+      "redeem_event_count": 1,
+      "rule_count": 35,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "late_redemption_farming",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 56
+    },
+    {
+      "condition_id": "0x8f6b3594824957123da6025938307fc2b51b6df7331828d35ed7bfce595d021d",
+      "event_slug": "highest-temperature-in-toronto-on-february-17-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 6.9548,
+      "redeem_event_count": 0,
+      "rule_count": 33,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 38
+    },
+    {
+      "condition_id": "0x2f60b3ceddd369a4f0fd07771b330b2cb6a32893227817afe681d6a996724337",
+      "event_slug": "highest-temperature-in-atlanta-on-march-2-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 3.1306,
+      "redeem_event_count": 0,
+      "rule_count": 32,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 55
+    },
+    {
+      "condition_id": "0xf52a906c49f212334d3a6b1b0660aee846a12f90616a6668f2686e8cb0507451",
+      "event_slug": "highest-temperature-in-dallas-on-march-14-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 2,
+      "realized_pnl": 108.324,
+      "redeem_event_count": 0,
+      "rule_count": 31,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 474
+    },
+    {
+      "condition_id": "0x2dd73a627ca2c2fd2495a32994ca585dfa6563c270987c17fd1617821f429f07",
+      "event_slug": "highest-temperature-in-ankara-on-february-26-2026",
+      "is_weather": true,
+      "max_confidence": 0.92,
+      "merge_event_count": 1,
+      "realized_pnl": 3.3285,
+      "redeem_event_count": 0,
+      "rule_count": 31,
+      "strategy_keys": [
+        "dust_long_tail_bucket",
+        "inventory_rebalancing_merge",
+        "laddered_execution",
+        "neg_risk_basket"
+      ],
+      "trade_event_count": 49
+    }
+  ],
+  "total_rules": 3490,
+  "total_shadow_trades": 20542
+}

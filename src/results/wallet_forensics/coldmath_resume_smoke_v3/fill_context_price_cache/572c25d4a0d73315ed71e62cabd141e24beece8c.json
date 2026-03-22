@@ -1,0 +1,562 @@
+[
+  {
+    "timestamp": 1772546724,
+    "price": 0.055
+  },
+  {
+    "timestamp": 1772546784,
+    "price": 0.055
+  },
+  {
+    "timestamp": 1772546845,
+    "price": 0.055
+  },
+  {
+    "timestamp": 1772546903,
+    "price": 0.06
+  },
+  {
+    "timestamp": 1772546963,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547024,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547083,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547143,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547203,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547263,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547326,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547384,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547444,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547506,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547565,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547626,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547684,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547744,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547803,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547878,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772547926,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548003,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548045,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548106,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548166,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548232,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548286,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548344,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548405,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548466,
+    "price": 0.08
+  },
+  {
+    "timestamp": 1772548534,
+    "price": 0.09
+  },
+  {
+    "timestamp": 1772548590,
+    "price": 0.1
+  },
+  {
+    "timestamp": 1772548645,
+    "price": 0.1
+  },
+  {
+    "timestamp": 1772548705,
+    "price": 0.105
+  },
+  {
+    "timestamp": 1772548764,
+    "price": 0.105
+  },
+  {
+    "timestamp": 1772548826,
+    "price": 0.085
+  },
+  {
+    "timestamp": 1772548885,
+    "price": 0.09
+  },
+  {
+    "timestamp": 1772548944,
+    "price": 0.09
+  },
+  {
+    "timestamp": 1772549003,
+    "price": 0.09
+  },
+  {
+    "timestamp": 1772549063,
+    "price": 0.11
+  },
+  {
+    "timestamp": 1772549125,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772549184,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772549244,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772549305,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772549366,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772549427,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772549484,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772549557,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772549604,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772549663,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772549733,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772549784,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772549844,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772549905,
+    "price": 0.16
+  },
+  {
+    "timestamp": 1772549964,
+    "price": 0.16
+  },
+  {
+    "timestamp": 1772550036,
+    "price": 0.16
+  },
+  {
+    "timestamp": 1772550095,
+    "price": 0.13
+  },
+  {
+    "timestamp": 1772550150,
+    "price": 0.13
+  },
+  {
+    "timestamp": 1772550205,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772550267,
+    "price": 0.13
+  },
+  {
+    "timestamp": 1772550327,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772550385,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772550445,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772550504,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772550566,
+    "price": 0.105
+  },
+  {
+    "timestamp": 1772550626,
+    "price": 0.105
+  },
+  {
+    "timestamp": 1772550686,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772550746,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772550806,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772550865,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772550925,
+    "price": 0.105
+  },
+  {
+    "timestamp": 1772550985,
+    "price": 0.1
+  },
+  {
+    "timestamp": 1772551044,
+    "price": 0.12
+  },
+  {
+    "timestamp": 1772551103,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772551165,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772551225,
+    "price": 0.11
+  },
+  {
+    "timestamp": 1772551300,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772551344,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772551404,
+    "price": 0.11
+  },
+  {
+    "timestamp": 1772551465,
+    "price": 0.11
+  },
+  {
+    "timestamp": 1772551526,
+    "price": 0.115
+  },
+  {
+    "timestamp": 1772551585,
+    "price": 0.12
+  },
+  {
+    "timestamp": 1772551655,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772551711,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772551764,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772551831,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772551884,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772551943,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772552002,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772552062,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772552124,
+    "price": 0.145
+  },
+  {
+    "timestamp": 1772552184,
+    "price": 0.145
+  },
+  {
+    "timestamp": 1772552244,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772552304,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772552364,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772552424,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772552483,
+    "price": 0.155
+  },
+  {
+    "timestamp": 1772552545,
+    "price": 0.15
+  },
+  {
+    "timestamp": 1772552617,
+    "price": 0.14
+  },
+  {
+    "timestamp": 1772552663,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772552724,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772552785,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772552846,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772552904,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772552964,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772553026,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772553084,
+    "price": 0.165
+  },
+  {
+    "timestamp": 1772553144,
+    "price": 0.135
+  },
+  {
+    "timestamp": 1772553216,
+    "price": 0.125
+  },
+  {
+    "timestamp": 1772553278,
+    "price": 0.12
+  },
+  {
+    "timestamp": 1772553329,
+    "price": 0.2
+  },
+  {
+    "timestamp": 1772553385,
+    "price": 0.195
+  },
+  {
+    "timestamp": 1772553445,
+    "price": 0.19
+  },
+  {
+    "timestamp": 1772553505,
+    "price": 0.205
+  },
+  {
+    "timestamp": 1772553563,
+    "price": 0.21
+  },
+  {
+    "timestamp": 1772553629,
+    "price": 0.22
+  },
+  {
+    "timestamp": 1772553685,
+    "price": 0.22
+  },
+  {
+    "timestamp": 1772553743,
+    "price": 0.22
+  },
+  {
+    "timestamp": 1772553804,
+    "price": 0.195
+  },
+  {
+    "timestamp": 1772553878,
+    "price": 0.2
+  },
+  {
+    "timestamp": 1772553926,
+    "price": 0.21
+  },
+  {
+    "timestamp": 1772553984,
+    "price": 0.21
+  },
+  {
+    "timestamp": 1772554044,
+    "price": 0.215
+  },
+  {
+    "timestamp": 1772554102,
+    "price": 0.215
+  },
+  {
+    "timestamp": 1772554162,
+    "price": 0.215
+  },
+  {
+    "timestamp": 1772554227,
+    "price": 0.21
+  },
+  {
+    "timestamp": 1772554284,
+    "price": 0.205
+  },
+  {
+    "timestamp": 1772554346,
+    "price": 0.2
+  },
+  {
+    "timestamp": 1772554403,
+    "price": 0.225
+  },
+  {
+    "timestamp": 1772554463,
+    "price": 0.24
+  },
+  {
+    "timestamp": 1772554526,
+    "price": 0.245
+  },
+  {
+    "timestamp": 1772554586,
+    "price": 0.245
+  },
+  {
+    "timestamp": 1772554643,
+    "price": 0.25
+  },
+  {
+    "timestamp": 1772554704,
+    "price": 0.24
+  },
+  {
+    "timestamp": 1772554764,
+    "price": 0.245
+  },
+  {
+    "timestamp": 1772554840,
+    "price": 0.25
+  },
+  {
+    "timestamp": 1772554894,
+    "price": 0.25
+  },
+  {
+    "timestamp": 1772554958,
+    "price": 0.25
+  },
+  {
+    "timestamp": 1772555003,
+    "price": 0.235
+  },
+  {
+    "timestamp": 1772555065,
+    "price": 0.235
+  }
+]

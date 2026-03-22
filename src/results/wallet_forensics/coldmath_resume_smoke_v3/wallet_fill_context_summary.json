@@ -1,0 +1,266 @@
+{
+  "avg_local_execution_edge_bps": null,
+  "avg_price_history_execution_edge_bps": -43.9666,
+  "buy_fills": 20666,
+  "buy_fills_with_price_history_under_par_pair": 12095,
+  "buy_fills_with_price_history_under_par_pair_pct": 58.5261,
+  "context_source_counts": [
+    {
+      "count": 20716,
+      "label": "prices_history"
+    }
+  ],
+  "fills_with_any_context": 20716,
+  "fills_with_local_quote_pair": 0,
+  "fills_with_local_under_par_pair": 0,
+  "fills_with_price_history_pair": 20716,
+  "fills_with_price_history_under_par_pair": 12095,
+  "generated_at": "2026-03-22T22:57:48.851157+00:00",
+  "local_execution_label_counts": [
+    {
+      "count": 20716,
+      "label": "unknown"
+    }
+  ],
+  "local_quote_coverage_counts": [
+    {
+      "count": 20716,
+      "label": "none"
+    }
+  ],
+  "non_under_par_buy_execution_labels": [
+    {
+      "count": 7298,
+      "label": "worse_than_nearby_trade"
+    },
+    {
+      "count": 1229,
+      "label": "nearby_trade_aligned"
+    },
+    {
+      "count": 44,
+      "label": "better_than_nearby_trade"
+    }
+  ],
+  "price_history_coverage_counts": [
+    {
+      "count": 20716,
+      "label": "full_pair"
+    }
+  ],
+  "price_history_execution_label_counts": [
+    {
+      "count": 8677,
+      "label": "nearby_trade_aligned"
+    },
+    {
+      "count": 7588,
+      "label": "worse_than_nearby_trade"
+    },
+    {
+      "count": 4451,
+      "label": "better_than_nearby_trade"
+    }
+  ],
+  "profile_name": "ColdMath",
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "token_mapped_fills": 20716,
+  "top_conditions": [
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -33.9811,
+      "condition_id": "0xbee8e1a45964fc6c8115ef478b7f68600c56380b8df1adc4503377897606e5e1",
+      "event_slug": "highest-temperature-in-miami-on-march-23-2026",
+      "fill_count": 658,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 658,
+      "price_history_under_par_count": 410,
+      "question": "Will the highest temperature in Miami be between 72-73\u00b0F on March 23?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -11.9719,
+      "condition_id": "0xead8838e1f75807c4ab695a436b50adf20b22d30ebe263d2309ae53ca1e19ed1",
+      "event_slug": "highest-temperature-in-wellington-on-february-26-2026",
+      "fill_count": 638,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 638,
+      "price_history_under_par_count": 524,
+      "question": "Will the highest temperature in Wellington be 15\u00b0C on February 26?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 19.7341,
+      "condition_id": "0xf52a906c49f212334d3a6b1b0660aee846a12f90616a6668f2686e8cb0507451",
+      "event_slug": "highest-temperature-in-dallas-on-march-14-2026",
+      "fill_count": 474,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 474,
+      "price_history_under_par_count": 413,
+      "question": "Will the highest temperature in Dallas be between 86-87\u00b0F on March 14?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 19.0741,
+      "condition_id": "0x7c03930d203c1cac45fd513cb32d818cf0ace564cd2768600cc02c00badfc766",
+      "event_slug": "highest-temperature-in-chicago-on-march-14-2026",
+      "fill_count": 423,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 423,
+      "price_history_under_par_count": 344,
+      "question": "Will the highest temperature in Chicago be between 44-45\u00b0F on March 14?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 9.5291,
+      "condition_id": "0xdfd780958dfcbfe6af4ee70a4a1028b2bb4bb2c0950f08e89d46bd54b93281f1",
+      "event_slug": "highest-temperature-in-atlanta-on-march-14-2026",
+      "fill_count": 379,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 379,
+      "price_history_under_par_count": 348,
+      "question": "Will the highest temperature in Atlanta be between 68-69\u00b0F on March 14?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 15.8234,
+      "condition_id": "0xbe57e65d2625915a12a0f2c1821f0e3d8660288dd368472cf57d4e6f84134abe",
+      "event_slug": "highest-temperature-in-tokyo-on-march-22-2026",
+      "fill_count": 361,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 361,
+      "price_history_under_par_count": 232,
+      "question": "Will the highest temperature in Tokyo be 21\u00b0C or higher on March 22?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -48.4921,
+      "condition_id": "0x7c55c68ea1bb1b5312eef24605cfc7225d08dd8ed6cd0d910295dd14ee232eae",
+      "event_slug": "highest-temperature-in-wellington-on-march-17-2026",
+      "fill_count": 329,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 329,
+      "price_history_under_par_count": 227,
+      "question": "Will the highest temperature in Wellington be 23\u00b0C or higher on March 17?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -11.4471,
+      "condition_id": "0x2f7aa1eacd665c1c40a9344f8bca6ff3f8a2686ebcc510f42defb058cc580883",
+      "event_slug": "highest-temperature-in-atlanta-on-february-17-2026",
+      "fill_count": 323,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 323,
+      "price_history_under_par_count": 189,
+      "question": "Will the highest temperature in Atlanta be between 60-61\u00b0F on February 17?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -22.0787,
+      "condition_id": "0xbcf46994658ed52b8c9c21caceaf06a8d9aaa26ba8934e3e40ad5d7047e19dc5",
+      "event_slug": "highest-temperature-in-tokyo-on-march-22-2026",
+      "fill_count": 314,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 314,
+      "price_history_under_par_count": 206,
+      "question": "Will the highest temperature in Tokyo be 19\u00b0C on March 22?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 643.5299,
+      "condition_id": "0x5f7b7241cad539bdd117b39d683aa5e2109296a20b194396192462a9871eeeb1",
+      "event_slug": "highest-temperature-in-milan-on-march-22-2026",
+      "fill_count": 292,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 292,
+      "price_history_under_par_count": 262,
+      "question": "Will the highest temperature in Milan be 11\u00b0C on March 22?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -140.003,
+      "condition_id": "0x78d3fcf9a6d7311cbace698a666082d653793ecf905da5fcfd2feeae25110b12",
+      "event_slug": "highest-temperature-in-tokyo-on-march-17-2026",
+      "fill_count": 278,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 278,
+      "price_history_under_par_count": 198,
+      "question": "Will the highest temperature in Tokyo be 16\u00b0C on March 17?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -119.2319,
+      "condition_id": "0x90ed69eebba176d7b22ea939de8804fcf832dd3ee919ed5b74582799b58108b3",
+      "event_slug": "highest-temperature-in-wellington-on-march-22-2026",
+      "fill_count": 249,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 249,
+      "price_history_under_par_count": 48,
+      "question": "Will the highest temperature in Wellington be 15\u00b0C on March 22?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -128.5344,
+      "condition_id": "0xbb562b76885d94a56958df7b4acc568626fa687eeeba4ba87574734c00e6c239",
+      "event_slug": "highest-temperature-in-tokyo-on-march-20-2026",
+      "fill_count": 235,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 235,
+      "price_history_under_par_count": 71,
+      "question": "Will the highest temperature in Tokyo be 17\u00b0C on March 20?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": -25.1935,
+      "condition_id": "0x42b791b1a3c375932be8dbb07b55ba613040a0ce39013465ec68f8dee942ea9c",
+      "event_slug": "highest-temperature-in-dallas-on-february-25-2026",
+      "fill_count": 217,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 217,
+      "price_history_under_par_count": 181,
+      "question": "Will the highest temperature in Dallas be between 76-77\u00b0F on February 25?",
+      "quote_labeled_count": 0
+    },
+    {
+      "avg_local_edge_bps": null,
+      "avg_price_history_edge_bps": 77.5313,
+      "condition_id": "0x286ad8483ab74eef3e72ee5e1a1322a89801c08bcf02b0d70155feda7bde24cc",
+      "event_slug": "highest-temperature-in-nyc-on-february-24-2026",
+      "fill_count": 215,
+      "local_under_par_count": 0,
+      "price_history_labeled_count": 215,
+      "price_history_under_par_count": 121,
+      "question": "Will the highest temperature in New York City be between 38-39\u00b0F on February 24?",
+      "quote_labeled_count": 0
+    }
+  ],
+  "total_fills": 20716,
+  "under_par_buy_execution_labels": [
+    {
+      "count": 7398,
+      "label": "nearby_trade_aligned"
+    },
+    {
+      "count": 4407,
+      "label": "better_than_nearby_trade"
+    },
+    {
+      "count": 290,
+      "label": "worse_than_nearby_trade"
+    }
+  ],
+  "weather_fills": 20716
+}
