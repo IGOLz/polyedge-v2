@@ -8,6 +8,7 @@ from shared.api import (
     _normalize_resolution_outcome,
 )
 from shared.ws import extract_up_prices
+from shared.ws import extract_quote_updates
 
 
 class DiscoveryHelperTests(unittest.TestCase):
@@ -114,6 +115,36 @@ class WebsocketParsingTests(unittest.TestCase):
             "asks": [{"price": "0.42"}],
         }
         self.assertEqual(extract_up_prices(msg, {"up-token"}), {"up-token": 0.41})
+
+    def test_extract_quote_update_from_price_change(self):
+        msg = {
+            "event_type": "price_change",
+            "price_changes": [
+                {
+                    "asset_id": "yes-token",
+                    "best_bid": "0.62",
+                    "best_ask": "0.64",
+                    "best_bid_size": "120",
+                    "best_ask_size": "95",
+                }
+            ],
+        }
+        updates = extract_quote_updates(msg, {"yes-token"})
+        self.assertEqual(updates["yes-token"].mid, 0.63)
+        self.assertEqual(updates["yes-token"].best_bid_size, 120.0)
+        self.assertEqual(updates["yes-token"].best_ask_size, 95.0)
+
+    def test_extract_quote_update_from_book(self):
+        msg = {
+            "event_type": "book",
+            "asset_id": "yes-token",
+            "bids": [{"price": "0.31", "size": "15"}],
+            "asks": [{"price": "0.35", "size": "12"}],
+        }
+        updates = extract_quote_updates(msg, {"yes-token"})
+        self.assertEqual(updates["yes-token"].best_bid, 0.31)
+        self.assertEqual(updates["yes-token"].best_ask, 0.35)
+        self.assertEqual(updates["yes-token"].mid, 0.33)
 
 
 if __name__ == "__main__":

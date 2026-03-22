@@ -409,6 +409,45 @@ async def fetch_market_resolution(
     return _extract_resolution_details(data)
 
 
+async def fetch_token_ids_async(
+    client: httpx.AsyncClient,
+    condition_id: str,
+) -> tuple[str, str] | None:
+    """Async fetch of token IDs for a market condition."""
+    try:
+        resp = await client.get(f"{CLOB_REST_BASE}/markets/{condition_id}", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.error("Token ID fetch failed - %s: %s", _short(condition_id), exc)
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    tokens_list = data.get("tokens", [])
+    if len(tokens_list) < 2:
+        return None
+
+    up_id = down_id = None
+    for token in tokens_list:
+        outcome = (token.get("outcome") or "").upper()
+        token_id = token.get("token_id", "")
+        if outcome in {"YES", "UP"}:
+            up_id = token_id
+        elif outcome in {"NO", "DOWN"}:
+            down_id = token_id
+
+    if up_id and down_id:
+        return up_id, down_id
+
+    first = tokens_list[0].get("token_id")
+    second = tokens_list[1].get("token_id")
+    if first and second:
+        return first, second
+    return None
+
+
 def fetch_token_ids_sync(
     condition_id: str, base_url: str | None = None
 ) -> tuple[str, str] | None:

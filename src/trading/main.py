@@ -12,7 +12,7 @@ from py_clob_client.client import ClobClient
 from py_clob_client.clob_types import ApiCreds, AssetType, BalanceAllowanceParams
 
 from shared.config import PROXY_URL
-from shared.db import close_pool, init_pool
+from shared.db import close_pool, create_weather_tables, init_pool
 from trading import config
 from trading import db
 from trading.balance import get_usdc_balance
@@ -37,6 +37,7 @@ from trading.redeemer import (
 )
 from trading.report import generate_live_reports
 from trading.strategy_adapter import evaluate_strategies
+from trading.weather_runtime import weather_loop
 from trading.utils import debug_log, log, strategy_log_tag
 
 
@@ -613,11 +614,17 @@ async def run() -> None:
 
     await init_pool()
     await db.create_trading_tables()
+    await create_weather_tables()
     await db.seed_config_if_empty(
         {
             "strategy_momentum_enabled": str(config.STRATEGY_MOMENTUM_ENABLED).lower(),
             "bet_size_usd": str(config.BET_SIZE_USD),
             "daily_loss_limit": str(config.DAILY_LOSS_LIMIT),
+            "weather_enabled": "true",
+            "weather_probe_bet_size_usd": str(max(config.MIN_LIVE_BET_SIZE_USD, 5.0)),
+            "weather_daily_loss_limit": "10.0",
+            "weather_max_concurrent_events": "2",
+            "weather_shadow_only": "false",
         }
     )
 
@@ -677,6 +684,7 @@ async def run() -> None:
     asyncio.create_task(exit_monitor_loop(clob))
     asyncio.create_task(hourly_summary_loop())
     asyncio.create_task(strategy_report_loop())
+    asyncio.create_task(weather_loop(clob))
 
     log.info(
         "Bot started - mode=%s | redemption=%s | $%.2f/trade | loss limit $%.2f",

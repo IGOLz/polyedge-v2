@@ -18,6 +18,15 @@ from shared.db import get_pool
 logger = logging.getLogger("polyedge.trading")
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
 # ── Schema ──────────────────────────────────────────────────────────────
 
 async def create_trading_tables() -> None:
@@ -441,6 +450,83 @@ async def get_daily_resolved_net_pnl(day_start: datetime | None = None) -> float
             day_start,
         )
     return float(row["net_pnl"] or 0.0) if row else 0.0
+
+
+async def get_daily_resolved_net_pnl_for_market_prefix(
+    market_prefix: str,
+    day_start: datetime | None = None,
+) -> float:
+    if day_start is None:
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(pnl), 0) AS net_pnl
+            FROM bot_trades
+            WHERE resolved_at >= $1
+              AND pnl IS NOT NULL
+              AND market_type LIKE $2
+            """,
+            day_start,
+            market_prefix,
+        )
+    return float(row["net_pnl"] or 0.0) if row else 0.0
+
+
+async def get_open_position_rows_for_market_prefix(
+    market_prefix: str,
+) -> list[dict[str, Any]]:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                id,
+                market_id,
+                market_type,
+                strategy_name,
+                direction,
+                placed_at,
+                signal_data
+            FROM bot_trades
+            WHERE status = 'filled'
+              AND final_outcome IS NULL
+              AND market_type LIKE $1
+            ORDER BY placed_at ASC
+            """,
+            market_prefix,
+        )
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["signal_data"] = _maybe_json(item.get("signal_data"))
+        result.append(item)
+    return result
+
+
+async def get_open_event_ids_for_market_prefix(
+    market_prefix: str,
+) -> set[str]:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT signal_data->>'event_id' AS event_id
+            FROM bot_trades
+            WHERE status = 'filled'
+              AND final_outcome IS NULL
+              AND market_type LIKE $1
+              AND signal_data ? 'event_id'
+            """,
+            market_prefix,
+        )
+    return {
+        str(row["event_id"])
+        for row in rows
+        if row.get("event_id")
+    }
 
 
 async def mark_stop_loss_triggered(

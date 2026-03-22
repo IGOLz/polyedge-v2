@@ -28,6 +28,14 @@ from analysis.accelerators.s13_s19 import (
     S18Accelerator,
     S19Accelerator,
 )
+from analysis.accelerators.s20_s24 import (
+    S20Accelerator,
+    S21Accelerator,
+    S22Accelerator,
+    S23Accelerator,
+    S24Accelerator,
+)
+from analysis.accelerators.s25 import S25Accelerator
 
 _REGISTRY: dict[str, StrategyKernel] = {
     "S1": S1Accelerator(),
@@ -49,6 +57,12 @@ _REGISTRY: dict[str, StrategyKernel] = {
     "S17": S17Accelerator(),
     "S18": S18Accelerator(),
     "S19": S19Accelerator(),
+    "S20": S20Accelerator(),
+    "S21": S21Accelerator(),
+    "S22": S22Accelerator(),
+    "S23": S23Accelerator(),
+    "S24": S24Accelerator(),
+    "S25": S25Accelerator(),
 }
 
 

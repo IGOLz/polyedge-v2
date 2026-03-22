@@ -30,6 +30,13 @@ def _optional_int(name: str, default: int) -> int:
     return int(value.strip())
 
 
+def _optional_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return float(value.strip())
+
+
 def _optional_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -66,6 +73,41 @@ POLYMARKET_API = {
     "clob_rest_base": "https://clob.polymarket.com",
     "clob_ws_url": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
     "gamma_api_base": "https://gamma-api.polymarket.com",
+}
+
+WEATHER_CONFIG = {
+    "weather_page_url": _optional(
+        "WEATHER_MARKETS_URL",
+        "https://polymarket.com/predictions/weather",
+    ),
+    "user_agent": _optional(
+        "WEATHER_USER_AGENT",
+        "polyedge-weather-bot/0.1 (contact: local)",
+    ),
+    "discovery_interval_seconds": _optional_int(
+        "WEATHER_DISCOVERY_INTERVAL_SECONDS", 300
+    ),
+    "forecast_interval_seconds": _optional_int(
+        "WEATHER_FORECAST_INTERVAL_SECONDS", 600
+    ),
+    "observation_interval_seconds": _optional_int(
+        "WEATHER_OBSERVATION_INTERVAL_SECONDS", 300
+    ),
+    "resolution_interval_seconds": _optional_int(
+        "WEATHER_RESOLUTION_INTERVAL_SECONDS", 300
+    ),
+    "lookahead_hours": _optional_int("WEATHER_LOOKAHEAD_HOURS", 72),
+    "min_event_liquidity": _optional_float(
+        "WEATHER_MIN_EVENT_LIQUIDITY", 10000.0
+    ),
+    "max_slug_fetch": _optional_int("WEATHER_MAX_SLUG_FETCH", 80),
+    "quotes_stale_seconds": _optional_int("WEATHER_QUOTES_STALE_SECONDS", 600),
+    "forecast_stale_seconds": _optional_int(
+        "WEATHER_FORECAST_STALE_SECONDS", 10800
+    ),
+    "observation_stale_seconds": _optional_int(
+        "WEATHER_OBSERVATION_STALE_SECONDS", 1800
+    ),
 }
 
 # €€ Binance market data (used by core collection + live feature consumers) €€€€€€€

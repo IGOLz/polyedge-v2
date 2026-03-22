@@ -25,6 +25,14 @@ from analysis.accelerators import get_strategy_kernel
 from analysis.accelerators.base import PrecomputedDataset, compute_metrics_from_arrays
 from analysis.accelerators.s2_s6 import _evaluate_s3_combo, _evaluate_s5_combo
 from analysis.accelerators.s13_s19 import _evaluate_s13_combo, _evaluate_s14_combo, _evaluate_s15_combo, _evaluate_s18_combo
+from analysis.accelerators.s20_s24 import (
+    _evaluate_s20_combo,
+    _evaluate_s21_combo,
+    _evaluate_s22_combo,
+    _evaluate_s23_combo,
+    _evaluate_s24_combo,
+)
+from analysis.accelerators.s25 import _evaluate_s25_combo
 from analysis.backtest.engine import compute_metrics, make_trade
 from analysis.backtest_strategies import market_to_snapshot, run_strategy
 from shared.strategies.helpers import get_price
@@ -285,7 +293,7 @@ def compare_candidate_to_defaults(candidate: StrategyCandidate) -> list[dict[str
 
 
 def _accelerated_supported(strategy_id: str) -> bool:
-    return strategy_id in {"S3", "S5", "S13", "S14", "S15", "S18"}
+    return strategy_id in {"S3", "S5", "S13", "S14", "S15", "S18", "S20", "S21", "S22", "S23", "S24", "S25"}
 
 
 def prepare_accelerated_context(
@@ -410,7 +418,7 @@ def _run_candidate_accelerated(
     slippage: float,
     context: AcceleratedContext | None = None,
 ) -> CandidateRun | None:
-    """Run a candidate through the fast S3/S5 accelerator path."""
+    """Run a candidate through the fast accelerator path."""
     if not _accelerated_supported(candidate.strategy_id):
         return None
 
@@ -589,6 +597,180 @@ def _run_candidate_accelerated(
             encoded,
             dataset.slippage,
         )
+    elif candidate.strategy_id == "S20":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s20_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_from_market_open"],
+            payload.matrices["market_up_delta_from_market_open"],
+            payload.matrices["underlying_return_5s"],
+            payload.availability["underlying_return_from_market_open"],
+            payload.availability["market_up_delta_from_market_open"],
+            payload.availability["underlying_return_5s"],
+            encoded,
+            dataset.slippage,
+        )
+    elif candidate.strategy_id == "S21":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s21_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_from_market_open"],
+            payload.matrices["market_up_delta_from_market_open"],
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["market_up_delta_5s"],
+            payload.matrices["underlying_trade_count"],
+            payload.availability["underlying_return_from_market_open"],
+            payload.availability["market_up_delta_from_market_open"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["market_up_delta_5s"],
+            payload.availability["underlying_trade_count"],
+            encoded,
+            dataset.slippage,
+        )
+    elif candidate.strategy_id == "S22":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s22_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_from_market_open"],
+            payload.matrices["market_up_delta_from_market_open"],
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["underlying_trade_count"],
+            payload.availability["underlying_return_from_market_open"],
+            payload.availability["market_up_delta_from_market_open"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["underlying_trade_count"],
+            encoded,
+            dataset.slippage,
+        )
+    elif candidate.strategy_id == "S23":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s23_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_from_market_open"],
+            payload.matrices["market_up_delta_from_market_open"],
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["underlying_trade_count"],
+            payload.availability["underlying_return_from_market_open"],
+            payload.availability["market_up_delta_from_market_open"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["underlying_trade_count"],
+            encoded,
+            dataset.slippage,
+        )
+    elif candidate.strategy_id == "S24":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s24_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_from_market_open"],
+            payload.matrices["market_up_delta_from_market_open"],
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["underlying_trade_count"],
+            payload.matrices["underlying_volume"],
+            payload.availability["underlying_return_from_market_open"],
+            payload.availability["market_up_delta_from_market_open"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["underlying_trade_count"],
+            payload.availability["underlying_volume"],
+            encoded,
+            dataset.slippage,
+        )
+    elif candidate.strategy_id == "S25":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s25_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["market_up_delta_5s"],
+            payload.matrices["underlying_trade_count"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["market_up_delta_5s"],
+            payload.availability["underlying_trade_count"],
+            encoded,
+            dataset.slippage,
+        )
     else:
         return None
 
@@ -640,6 +822,14 @@ def _run_candidate_accelerated(
             markets,
             active_context,
         )
+        skipped_markets = len(markets) - int(eligible_markets_count)
+    elif candidate.strategy_id in {"S20", "S21", "S22", "S23", "S24", "S25"}:
+        strategy, _, _ = build_candidate(candidate)
+        eligible_market_ids = {
+            market["market_id"]
+            for market in markets
+            if strategy.market_is_eligible(market)
+        }
         skipped_markets = len(markets) - int(eligible_markets_count)
     else:
         eligible_market_ids = {market["market_id"] for market in markets}

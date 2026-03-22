@@ -21,6 +21,7 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     platform: linux/amd64
+    profiles: ["localdb"]
     ports:
       - "5432:5432"
     environment:
@@ -50,8 +51,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
       CORE_DEBUG_MODE: "false"
       BINANCE_WS_URL: ${BINANCE_WS_URL:-wss://stream.binance.com:9443}
       BINANCE_REST_BASE_URL: ${BINANCE_REST_BASE_URL:-https://api.binance.com}
@@ -69,6 +70,28 @@ services:
       polyedge.update: "never"
 
   # ── Core debug: safe parallel validation, never writes to DB ──────────
+  # Weather collector: uses the shared external DB from .env
+  weather:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.weather
+    container_name: polyedge-weather
+    platform: linux/amd64
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+    volumes:
+      - ./logs/weather:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "weather"
+      polyedge.update: "safe"
+
+  # Core debug: safe parallel validation, never writes to DB
   core-debug:
     build:
       context: .
@@ -99,15 +122,12 @@ services:
       dockerfile: docker/Dockerfile.analysis
     container_name: polyedge-analysis
     platform: linux/amd64
-    depends_on:
-      timescaledb:
-        condition: service_healthy
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
     volumes:
       - ./logs/analysis:/app/logs
     restart: "no"
@@ -124,14 +144,11 @@ services:
       dockerfile: docker/Dockerfile.trading
     container_name: polyedge-trading
     platform: linux/amd64
-    depends_on:
-      timescaledb:
-        condition: service_healthy
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
     volumes:
       - ./logs/trading:/app/logs
     restart: unless-stopped
@@ -148,15 +165,12 @@ services:
       dockerfile: Dockerfile
     container_name: polyedge-dashboard
     platform: linux/amd64
-    depends_on:
-      timescaledb:
-        condition: service_healthy
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_HOST: ${POSTGRES_HOST:-timescaledb}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
