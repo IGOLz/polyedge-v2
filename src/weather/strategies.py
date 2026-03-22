@@ -25,6 +25,9 @@ from weather.config import (
 from weather.models import WeatherBucketMarket, WeatherDecision, WeatherSnapshot
 from weather.providers import extract_ensemble_member_maxima
 
+MIN_EXECUTABLE_ENTRY_PRICE = 0.02
+MAX_EXECUTABLE_ENTRY_PRICE = 0.98
+
 
 def _safe_float(value: Any) -> float | None:
     try:
@@ -178,6 +181,12 @@ def _quote_spread(bid: float | None, ask: float | None) -> float | None:
     return ask - bid
 
 
+def _entry_price_is_executable(price: float | None) -> bool:
+    if price is None:
+        return False
+    return MIN_EXECUTABLE_ENTRY_PRICE <= price <= MAX_EXECUTABLE_ENTRY_PRICE
+
+
 def _build_signal(
     *,
     strategy_name: str,
@@ -192,6 +201,8 @@ def _build_signal(
 ) -> Signal:
     stop_loss = max(0.01, round(entry_price - 0.12, 4))
     take_profit = min(0.99, round(entry_price + 0.18, 4))
+    if stop_loss >= entry_price or take_profit <= entry_price:
+        raise ValueError(f"non-viable exits for entry price {entry_price:.4f}")
     signal_data = {
         "market_id": market.market_id,
         "event_id": market.event_id,
@@ -242,6 +253,8 @@ def _evaluate_yes_trade(
 ) -> Signal | None:
     if market.yes_ask is None or market.yes_bid is None or market.yes_ask_size in (None, 0):
         return None
+    if not _entry_price_is_executable(market.yes_ask):
+        return None
     spread = market.yes_ask - market.yes_bid
     edge = fair_yes - market.yes_ask
     net_ev = fair_yes - (market.yes_ask + SLIPPAGE_BUFFER)
@@ -273,6 +286,8 @@ def _evaluate_no_trade(
 ) -> Signal | None:
     fair_no = 1.0 - fair_yes
     if market.no_ask is None or market.no_bid is None or market.no_ask_size in (None, 0):
+        return None
+    if not _entry_price_is_executable(market.no_ask):
         return None
     spread = market.no_ask - market.no_bid
     edge = fair_no - market.no_ask
@@ -600,6 +615,8 @@ def _w4_cross_bucket_structure(
         if left.yes_ask is None or right.yes_ask is None:
             continue
         if left.yes_bid is None or right.yes_bid is None:
+            continue
+        if not _entry_price_is_executable(left.yes_ask) or not _entry_price_is_executable(right.yes_ask):
             continue
         spread_left = left.yes_ask - left.yes_bid
         spread_right = right.yes_ask - right.yes_bid
