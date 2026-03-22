@@ -92,7 +92,7 @@ async def heartbeat_loop() -> None:
             "[HEARTBEAT] Bot alive - %s",
             datetime.now(timezone.utc).strftime("%H:%M:%S"),
         )
-        await asyncio.sleep(10)
+        await asyncio.sleep(60)
 
 
 def _fmt_market(mt: str) -> str:

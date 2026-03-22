@@ -397,18 +397,9 @@ def _eligible_market_ids_for_s18(
     context: AcceleratedContext,
 ) -> set[str]:
     payload = context.dataset.payload
-    mask = (
-        payload.availability["underlying_return_5s"]
-        & payload.availability["underlying_return_10s"]
-        & payload.availability["underlying_return_30s"]
-        & payload.availability["underlying_realized_vol_30s"]
-        & payload.availability["underlying_trade_count"]
-        & payload.availability["market_up_delta_5s"]
-    )
     return {
-        market["market_id"]
-        for market, is_eligible in zip(markets, mask, strict=False)
-        if bool(is_eligible)
+        markets[int(market_idx)]["market_id"]
+        for market_idx in payload.eligible_market_indices
     }
 
 
@@ -585,18 +576,16 @@ def _run_candidate_accelerated(
             payload.common.duration_minutes,
             payload.common.fee_active,
             payload.nearest_tol1,
-            payload.matrices["underlying_return_5s"],
-            payload.matrices["underlying_return_10s"],
-            payload.matrices["underlying_return_30s"],
-            payload.matrices["underlying_realized_vol_30s"],
-            payload.matrices["underlying_trade_count"],
-            payload.matrices["market_up_delta_5s"],
-            payload.availability["underlying_return_5s"],
-            payload.availability["underlying_return_10s"],
-            payload.availability["underlying_return_30s"],
-            payload.availability["underlying_realized_vol_30s"],
-            payload.availability["underlying_trade_count"],
-            payload.availability["market_up_delta_5s"],
+            payload.ret5,
+            payload.ret10,
+            payload.ret30,
+            payload.vol30,
+            payload.trade_count,
+            payload.price_distance,
+            payload.up_base_mask,
+            payload.down_base_mask,
+            payload.eligible_market_indices,
+            payload.first_valid_seconds,
             encoded,
             dataset.slippage,
         )

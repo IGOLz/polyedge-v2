@@ -34,7 +34,10 @@ def _build_config_label(strategy_id: str, param_dict: dict[str, object]) -> str:
     return f"{strategy_id}_{'_'.join(param_parts)}"
 
 
-def _load_strategy_grid(strategy_id: str) -> tuple[dict[str, type], object, dict[str, list], list[str], list[list]]:
+def _load_strategy_grid(
+    strategy_id: str,
+    grid_profile: str = "full",
+) -> tuple[dict[str, type], object, dict[str, list], list[str], list[list]]:
     registry = discover_strategies()
     if strategy_id not in registry:
         available = sorted(registry.keys())
@@ -46,13 +49,21 @@ def _load_strategy_grid(strategy_id: str) -> tuple[dict[str, type], object, dict
         sys.exit(1)
 
     config_module = importlib.import_module(f"shared.strategies.{strategy_id}.config")
-    if not hasattr(config_module, "get_param_grid"):
-        print(f"Strategy {strategy_id} has no get_param_grid() — skipping.")
-        sys.exit(1)
+    grid_loader_name = "get_param_grid" if grid_profile == "full" else f"get_{grid_profile}_param_grid"
+    if not hasattr(config_module, grid_loader_name):
+        if grid_profile != "full":
+            print(
+                f"Strategy {strategy_id} has no {grid_loader_name}(); "
+                "falling back to get_param_grid()."
+            )
+            grid_loader_name = "get_param_grid"
+        else:
+            print(f"Strategy {strategy_id} has no get_param_grid() — skipping.")
+            sys.exit(1)
 
-    grid = config_module.get_param_grid()
+    grid = getattr(config_module, grid_loader_name)()
     if not grid:
-        print(f"Strategy {strategy_id} get_param_grid() returned empty dict — skipping.")
+        print(f"Strategy {strategy_id} {grid_loader_name}() returned empty dict — skipping.")
         sys.exit(1)
 
     param_names = list(grid.keys())
@@ -565,8 +576,12 @@ def optimize_strategy(
     progress_interval: int = 100,
     engine: str = "auto",
     slippage: float = DEFAULT_ENTRY_SLIPPAGE,
+    grid_profile: str = "full",
 ) -> pd.DataFrame | None:
-    registry, config_module, grid, param_names, param_values = _load_strategy_grid(strategy_id)
+    registry, config_module, grid, param_names, param_values = _load_strategy_grid(
+        strategy_id,
+        grid_profile=grid_profile,
+    )
     base_config = config_module.get_default_config()
     config_fields = {f.name for f in dataclasses.fields(type(base_config))}
     kernel = get_strategy_kernel(strategy_id)
@@ -596,6 +611,7 @@ def optimize_strategy(
 
     print(f"\nRunning {total_combos} backtests...\n")
     print(f"Engine: {resolved_engine}")
+    print(f"Grid profile: {grid_profile}")
     print(f"Using {workers} worker process(es)")
     print(f"Progress log interval: every {progress_interval} combinations")
     print(f"Entry slippage: {slippage:.2f}")
@@ -705,6 +721,12 @@ def main(argv: list[str] | None = None) -> None:
             f"(default: {DEFAULT_ENTRY_SLIPPAGE:.2f})."
         ),
     )
+    parser.add_argument(
+        "--grid-profile",
+        choices=("full", "quick"),
+        default="full",
+        help="Parameter grid profile to use (default: full).",
+    )
     args = parser.parse_args(argv)
 
     markets = None
@@ -732,6 +754,7 @@ def main(argv: list[str] | None = None) -> None:
         progress_interval=max(1, args.progress_interval),
         engine=args.engine,
         slippage=args.slippage,
+        grid_profile=args.grid_profile,
     )
 
 

@@ -26,6 +26,7 @@ def get_default_config() -> S18Config:
 
 
 def get_param_grid() -> dict[str, list]:
+    """Return the full S18 grid."""
     return {
         "entry_window_start": [10, 20, 30, 45],
         "entry_window_end": [90, 120, 180, 240],
@@ -38,4 +39,24 @@ def get_param_grid() -> dict[str, list]:
         "max_price_distance_from_mid": [0.08, 0.12, 0.16, 0.20],
         "stop_loss": [0.20, 0.25, 0.30, 0.35],
         "take_profit": [0.65, 0.70, 0.75, 0.80],
+    }
+
+
+def get_quick_param_grid() -> dict[str, list]:
+    """Return a coarse S18 grid for fast first-pass exploration.
+
+    Total combinations: 10,368
+    """
+    return {
+        "entry_window_start": [10, 30],
+        "entry_window_end": [90, 180],
+        "min_return_30s": [0.001, 0.002],
+        "min_return_10s": [0.0006, 0.0014],
+        "min_return_5s": [0.0004, 0.001],
+        "acceleration_ratio": [0.4, 0.8],
+        "max_underlying_vol": [0.008, 0.016, 0.02],
+        "min_trade_count": [5.0, 20.0, 40.0],
+        "max_price_distance_from_mid": [0.08, 0.16],
+        "stop_loss": [0.20, 0.30, 0.35],
+        "take_profit": [0.65, 0.75, 0.80],
     }

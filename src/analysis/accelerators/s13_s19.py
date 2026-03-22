@@ -84,6 +84,22 @@ class S13Payload:
     avail_v30: np.ndarray
 
 
+@dataclass
+class S18Payload:
+    common: object
+    nearest_tol1: np.ndarray
+    ret5: np.ndarray
+    ret10: np.ndarray
+    ret30: np.ndarray
+    vol30: np.ndarray
+    trade_count: np.ndarray
+    price_distance: np.ndarray
+    up_base_mask: np.ndarray
+    down_base_mask: np.ndarray
+    eligible_market_indices: np.ndarray
+    first_valid_seconds: np.ndarray
+
+
 def _build_feature_payload(markets: list[dict], columns: tuple[str, ...] = FEATURE_COLUMNS) -> FeaturePayload:
     common = build_common_payload(markets)
     nearest_tol1 = precompute_nearest_prices_multi(common.prices, common.total_seconds, np.array([1], dtype=np.int64))[0]
@@ -138,6 +154,70 @@ def _build_s13_payload(markets: list[dict]) -> S13Payload:
         avail_m30=payload.availability["market_up_delta_30s"],
         avail_v10=payload.availability["underlying_realized_vol_10s"],
         avail_v30=payload.availability["underlying_realized_vol_30s"],
+    )
+
+
+def _build_s18_payload(markets: list[dict]) -> S18Payload:
+    payload = _build_feature_payload(
+        markets,
+        (
+            "underlying_return_5s",
+            "underlying_return_10s",
+            "underlying_return_30s",
+            "underlying_realized_vol_30s",
+            "underlying_trade_count",
+            "market_up_delta_5s",
+        ),
+    )
+
+    eligible_market_indices: list[int] = []
+    first_valid_seconds: list[int] = []
+    price_distance = np.abs(payload.nearest_tol1 - 0.50)
+    up_base_mask = np.zeros(payload.nearest_tol1.shape, dtype=np.bool_)
+    down_base_mask = np.zeros(payload.nearest_tol1.shape, dtype=np.bool_)
+
+    for market_idx in range(payload.common.prices.shape[0]):
+        if not (
+            payload.availability["underlying_return_5s"][market_idx]
+            and payload.availability["underlying_return_10s"][market_idx]
+            and payload.availability["underlying_return_30s"][market_idx]
+            and payload.availability["underlying_realized_vol_30s"][market_idx]
+            and payload.availability["underlying_trade_count"][market_idx]
+            and payload.availability["market_up_delta_5s"][market_idx]
+        ):
+            continue
+
+        valid_mask = np.isfinite(payload.nearest_tol1[market_idx])
+        valid_mask &= np.isfinite(payload.matrices["underlying_return_5s"][market_idx])
+        valid_mask &= np.isfinite(payload.matrices["underlying_return_10s"][market_idx])
+        valid_mask &= np.isfinite(payload.matrices["underlying_return_30s"][market_idx])
+        valid_mask &= np.isfinite(payload.matrices["underlying_realized_vol_30s"][market_idx])
+        valid_mask &= np.isfinite(payload.matrices["underlying_trade_count"][market_idx])
+        valid_mask &= np.isfinite(payload.matrices["market_up_delta_5s"][market_idx])
+        valid_seconds = np.flatnonzero(valid_mask)
+        if valid_seconds.size == 0:
+            continue
+
+        eligible_market_indices.append(market_idx)
+        first_valid_seconds.append(int(valid_seconds[0]))
+        market_delta = payload.matrices["market_up_delta_5s"][market_idx]
+        up_price = payload.nearest_tol1[market_idx]
+        up_base_mask[market_idx] = valid_mask & (market_delta >= 0.0) & (up_price > 0.50)
+        down_base_mask[market_idx] = valid_mask & (market_delta <= 0.0) & (up_price < 0.50)
+
+    return S18Payload(
+        common=payload.common,
+        nearest_tol1=payload.nearest_tol1,
+        ret5=payload.matrices["underlying_return_5s"],
+        ret10=payload.matrices["underlying_return_10s"],
+        ret30=payload.matrices["underlying_return_30s"],
+        vol30=payload.matrices["underlying_realized_vol_30s"],
+        trade_count=payload.matrices["underlying_trade_count"],
+        price_distance=price_distance,
+        up_base_mask=up_base_mask,
+        down_base_mask=down_base_mask,
+        eligible_market_indices=np.asarray(eligible_market_indices, dtype=np.int64),
+        first_valid_seconds=np.asarray(first_valid_seconds, dtype=np.int64),
     )
 
 
@@ -453,33 +533,37 @@ def _evaluate_s17_combo(
 @njit(cache=True)
 def _evaluate_s18_combo(
     prices, total_seconds, final_outcomes, asset_codes, duration_minutes, fee_active,
-    nearest_tol1, ret5, ret10, ret30, vol30, trade_count_matrix, market_delta_5, avail_ret5, avail_ret10, avail_ret30, avail_vol30, avail_trade_count, avail_md5, combo,
+    nearest_tol1, ret5, ret10, ret30, vol30, trade_count_matrix, price_distance, up_base_mask, down_base_mask, eligible_market_indices, first_valid_seconds, combo,
     entry_slippage,
 ):
     entry_window_start = int(combo[0]); entry_window_end = int(combo[1]); min_return_30s = combo[2]; min_return_10s = combo[3]; min_return_5s = combo[4]
     acceleration_ratio = combo[5]; max_underlying_vol = combo[6]; min_trade_count = combo[7]; max_price_distance_from_mid = combo[8]; stop_loss = combo[9]; take_profit = combo[10]
-    market_count = prices.shape[0]
+    market_count = eligible_market_indices.shape[0]
     pnls = np.empty(market_count, dtype=np.float64); entry_fees = np.empty(market_count, dtype=np.float64); exit_fees = np.empty(market_count, dtype=np.float64)
     trade_asset_codes = np.empty(market_count, dtype=np.int64); trade_durations = np.empty(market_count, dtype=np.int64)
     trade_market_indices = np.empty(market_count, dtype=np.int64)
-    trade_count = 0; eligible_markets = 0
-    for market_idx in range(market_count):
-        if not (avail_ret5[market_idx] and avail_ret10[market_idx] and avail_ret30[market_idx] and avail_vol30[market_idx] and avail_trade_count[market_idx] and avail_md5[market_idx]):
-            continue
-        eligible_markets += 1
+    trade_count = 0; eligible_markets = market_count
+    for pos in range(market_count):
+        market_idx = eligible_market_indices[pos]
+        scan_start = entry_window_start
+        if first_valid_seconds[pos] > scan_start:
+            scan_start = first_valid_seconds[pos]
         last_entry = min(entry_window_end, int(total_seconds[market_idx]) - 1)
-        if last_entry < entry_window_start:
+        if last_entry < scan_start:
             continue
         found = False; direction_up = True; adjusted_entry = 0.0; entry_second = -1
-        for sec in range(entry_window_start, last_entry + 1):
-            up_price = nearest_tol1[market_idx, sec]; r5 = ret5[market_idx, sec]; r10 = ret10[market_idx, sec]; r30 = ret30[market_idx, sec]; underlying_vol = vol30[market_idx, sec]; trades = trade_count_matrix[market_idx, sec]; md5 = market_delta_5[market_idx, sec]
-            if np.isnan(up_price) or np.isnan(r5) or np.isnan(r10) or np.isnan(r30) or np.isnan(underlying_vol) or np.isnan(trades) or np.isnan(md5):
+        for sec in range(scan_start, last_entry + 1):
+            up_ok = up_base_mask[market_idx, sec]
+            down_ok = down_base_mask[market_idx, sec]
+            if not (up_ok or down_ok):
                 continue
-            if underlying_vol > max_underlying_vol or trades < min_trade_count or abs(up_price - 0.50) > max_price_distance_from_mid:
+            underlying_vol = vol30[market_idx, sec]; trades = trade_count_matrix[market_idx, sec]
+            if underlying_vol > max_underlying_vol or trades < min_trade_count or price_distance[market_idx, sec] > max_price_distance_from_mid:
                 continue
-            if r30 >= min_return_30s and r10 >= min_return_10s and r5 >= min_return_5s and r5 >= abs(r10) * acceleration_ratio and md5 >= 0.0 and up_price > 0.50:
+            up_price = nearest_tol1[market_idx, sec]; r5 = ret5[market_idx, sec]; r10 = ret10[market_idx, sec]; r30 = ret30[market_idx, sec]
+            if up_ok and r30 >= min_return_30s and r10 >= min_return_10s and r5 >= min_return_5s and r5 >= r10 * acceleration_ratio:
                 direction_up = True; adjusted_entry = max(0.01, min(0.99, up_price)); entry_second = sec; found = True; break
-            if r30 <= -min_return_30s and r10 <= -min_return_10s and r5 <= -min_return_5s and abs(r5) >= abs(r10) * acceleration_ratio and md5 <= 0.0 and up_price < 0.50:
+            if down_ok and r30 <= -min_return_30s and r10 <= -min_return_10s and r5 <= -min_return_5s and r5 <= r10 * acceleration_ratio:
                 direction_up = False; adjusted_entry = max(0.01, min(0.99, 1.0 - up_price)); entry_second = sec; found = True; break
         if not found:
             continue
@@ -710,12 +794,20 @@ class S18Accelerator(_BaseFeatureKernel):
         "underlying_trade_count",
         "market_up_delta_5s",
     )
+    def prepare(self, strategy_id: str, markets: list[dict], param_grid: dict[str, list]) -> PrecomputedDataset:
+        return PrecomputedDataset(
+            strategy_id=strategy_id,
+            markets=markets,
+            payload=_build_s18_payload(markets),
+            eligible_markets=len(markets),
+            skipped_markets_missing_features=0,
+        )
     def encode_combo(self, combo): return np.array(combo, dtype=np.float64)
     def evaluate_batch(self, dataset, encoded_batch, combo_batch, param_names, config_id_builder):
-        p: FeaturePayload = dataset.payload; r = []
+        p: S18Payload = dataset.payload; r = []
         for combo_array, combo_values in zip(encoded_batch, combo_batch):
             param_dict = dict(zip(param_names, combo_values)); config_id = config_id_builder(dataset.strategy_id, param_dict)
-            result = _evaluate_s18_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.matrices["underlying_return_5s"], p.matrices["underlying_return_10s"], p.matrices["underlying_return_30s"], p.matrices["underlying_realized_vol_30s"], p.matrices["underlying_trade_count"], p.matrices["market_up_delta_5s"], p.availability["underlying_return_5s"], p.availability["underlying_return_10s"], p.availability["underlying_return_30s"], p.availability["underlying_realized_vol_30s"], p.availability["underlying_trade_count"], p.availability["market_up_delta_5s"], combo_array, dataset.slippage)
+            result = _evaluate_s18_combo(p.common.prices, p.common.total_seconds, p.common.final_outcomes, p.common.asset_codes, p.common.duration_minutes, p.common.fee_active, p.nearest_tol1, p.ret5, p.ret10, p.ret30, p.vol30, p.trade_count, p.price_distance, p.up_base_mask, p.down_base_mask, p.eligible_market_indices, p.first_valid_seconds, combo_array, dataset.slippage)
             r.append(_metrics_with_eligible(result, config_id, dataset, param_dict))
         return r
 

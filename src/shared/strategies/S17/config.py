@@ -37,3 +37,22 @@ def get_param_grid() -> dict[str, list]:
         "stop_loss": [0.20, 0.25, 0.30, 0.35],
         "take_profit": [0.60, 0.65, 0.70, 0.75],
     }
+
+
+def get_quick_param_grid() -> dict[str, list]:
+    """Return a coarse S17 grid for fast first-pass exploration.
+
+    Total combinations: 5,184
+    """
+    return {
+        "entry_window_start": [10, 30],
+        "entry_window_end": [90, 180],
+        "underlying_beta": [15.0, 30.0, 50.0],
+        "residual_threshold": [0.02, 0.04, 0.05],
+        "min_underlying_move_abs": [0.0005, 0.0015],
+        "reversal_confirmation_abs": [0.0, 0.004],
+        "extreme_price_low": [0.20, 0.30],
+        "extreme_price_high": [0.65, 0.75],
+        "stop_loss": [0.20, 0.30, 0.35],
+        "take_profit": [0.60, 0.70, 0.75],
+    }

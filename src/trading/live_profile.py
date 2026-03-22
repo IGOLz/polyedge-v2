@@ -23,7 +23,7 @@ from shared.strategies.base import BaseStrategy
 # Toggle validated live strategies here.
 LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S5": True,
-    "S9": True,
+    "S9": False,
     "S10": True,
     "S13": False,
     "S14": True,
