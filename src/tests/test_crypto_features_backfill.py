@@ -70,7 +70,7 @@ def test_backfill_uses_first_finite_value_when_open_second_is_missing():
 
     np.testing.assert_allclose(
         feature_series["market_up_delta_from_market_open"],
-        np.array([np.nan, 0.0, 0.06, 0.09, 0.07, 0.03], dtype=float),
+        np.array([np.nan, 0.02, 0.08, 0.11, 0.09, 0.05], dtype=float),
         atol=1e-12,
         equal_nan=True,
     )
@@ -79,4 +79,29 @@ def test_backfill_uses_first_finite_value_when_open_second_is_missing():
         np.array([np.nan, 0.0, 0.003, 0.006, 0.004, 0.002], dtype=float),
         atol=1e-12,
         equal_nan=True,
+    )
+
+
+def test_backfill_uses_fixed_half_anchor_for_market_open_delta():
+    prices = np.array([0.47, 0.52, 0.58, 0.61, 0.59, 0.55], dtype=float)
+    feature_rows = [
+        {"elapsed_second": idx, "underlying_close": close}
+        for idx, close in enumerate([100.0, 100.2, 100.5, 100.7, 100.6, 100.4])
+    ]
+
+    feature_series = build_feature_series_from_rows(
+        feature_rows,
+        len(prices),
+        prices=prices,
+    )
+
+    np.testing.assert_allclose(
+        feature_series["market_up_price_market_open"],
+        np.full(len(prices), 0.5, dtype=float),
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        feature_series["market_up_delta_from_market_open"],
+        np.array([-0.03, 0.02, 0.08, 0.11, 0.09, 0.05], dtype=float),
+        atol=1e-12,
     )

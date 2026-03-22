@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+MARKET_OPEN_BASELINE = 0.5
+
 CRYPTO_FEATURE_COLUMNS = [
     "market_up_price_market_open",
     "market_up_delta_from_market_open",
@@ -285,7 +287,7 @@ def _backfill_missing_derived_features(
     prices: np.ndarray | None,
 ) -> None:
     market_prices = None if prices is None else np.asarray(prices, dtype=float)
-    market_open = np.nan if market_prices is None else _first_finite_value(market_prices)
+    market_open = MARKET_OPEN_BASELINE if market_prices is not None else np.nan
     close_series = feature_series["underlying_close"]
     underlying_open = _first_finite_value(close_series)
 
