@@ -186,6 +186,60 @@ class WeatherStrategyTests(unittest.TestCase):
         self.assertEqual(decision.signals[0].direction, "Down")
         self.assertEqual(decision.signals[0].signal_data["market_id"], "m3")
 
+    def test_w4_skips_dust_priced_buckets(self):
+        markets = [
+            _market("m1", "16Â°C or below", None, 16.0, 0, yes_bid=0.00, yes_ask=0.01, no_bid=0.98, no_ask=0.99),
+            _market("m2", "17Â°C", 17.0, 17.0, 1, yes_bid=0.00, yes_ask=0.01, no_bid=0.98, no_ask=0.99),
+            _market("m3", "18Â°C or higher", 18.0, None, 2, yes_bid=0.00, yes_ask=0.01, no_bid=0.98, no_ask=0.99),
+        ]
+        ensemble_payload = {
+            "hourly": {
+                "temperature_2m_member01": [16],
+                "temperature_2m_member02": [17],
+                "temperature_2m_member03": [17],
+                "temperature_2m_member04": [18],
+            }
+        }
+        previous_payload = {
+            "hourly": {
+                "temperature_2m_member01": [16],
+                "temperature_2m_member02": [16],
+                "temperature_2m_member03": [17],
+                "temperature_2m_member04": [18],
+            }
+        }
+        snapshot = WeatherSnapshot(
+            context=self._context(markets),
+            captured_at=datetime(2026, 3, 22, 15, 0, tzinfo=UTC),
+            forecasts=[
+                {
+                    "provider": "open_meteo",
+                    "model": "ensemble",
+                    "run_at": datetime(2026, 3, 22, 14, 45, tzinfo=UTC),
+                    "payload_json": ensemble_payload,
+                }
+            ],
+            recent_forecasts=[
+                {
+                    "provider": "open_meteo",
+                    "model": "ensemble",
+                    "run_at": datetime(2026, 3, 22, 14, 45, tzinfo=UTC),
+                    "payload_json": ensemble_payload,
+                },
+                {
+                    "provider": "open_meteo",
+                    "model": "ensemble",
+                    "run_at": datetime(2026, 3, 22, 13, 45, tzinfo=UTC),
+                    "payload_json": previous_payload,
+                },
+            ],
+        )
+
+        decision = evaluate_weather_decision(snapshot)
+
+        self.assertEqual(decision.strategy_name, "weather_skip")
+        self.assertEqual(decision.reason, "no_strategy_fired")
+
 
 if __name__ == "__main__":
     unittest.main()

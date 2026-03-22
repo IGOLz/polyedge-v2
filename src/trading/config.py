@@ -41,6 +41,8 @@ STAGE_3_DISABLED_STRATEGIES: set[str] = {
     ).split(",")
     if item.strip()
 }
+LIVE_META_SELECTOR_MODE: str = os.getenv("LIVE_META_SELECTOR_MODE", "off").strip().lower()
+LIVE_META_SELECTOR_BUNDLE: str = os.getenv("LIVE_META_SELECTOR_BUNDLE", "").strip()
 
 
 # ── Strategy toggles ────────────────────────────────────────────────────

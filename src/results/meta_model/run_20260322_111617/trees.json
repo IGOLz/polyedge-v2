@@ -1,0 +1,224 @@
+{
+  "split_01": {
+    "prediction": 0.028276,
+    "positive_rate": 0.658771,
+    "sample_count": 1351,
+    "type": "split",
+    "feature_index": 35,
+    "feature_name": "signal_entry_price",
+    "threshold": 0.6857,
+    "left": {
+      "prediction": 0.05281,
+      "positive_rate": 0.778626,
+      "sample_count": 524,
+      "type": "split",
+      "feature_index": 6,
+      "feature_name": "entry_second",
+      "threshold": 122.73,
+      "left": {
+        "prediction": 0.036824,
+        "positive_rate": 0.747619,
+        "sample_count": 420,
+        "type": "split",
+        "feature_index": 20,
+        "feature_name": "market_realized_vol_5s",
+        "threshold": 0.017321,
+        "left": {
+          "prediction": 0.087406,
+          "positive_rate": 0.852941,
+          "sample_count": 136,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.012602,
+          "positive_rate": 0.697183,
+          "sample_count": 284,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.117368,
+        "positive_rate": 0.903846,
+        "sample_count": 104,
+        "type": "split",
+        "feature_index": 23,
+        "feature_name": "market_up_delta_5s",
+        "threshold": -0.11,
+        "left": {
+          "prediction": 0.061291,
+          "positive_rate": 0.8125,
+          "sample_count": 32,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.142291,
+          "positive_rate": 0.944444,
+          "sample_count": 72,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.01273,
+      "positive_rate": 0.58283,
+      "sample_count": 827,
+      "type": "split",
+      "feature_index": 37,
+      "feature_name": "signal_trade_count",
+      "threshold": 477.92,
+      "left": {
+        "prediction": 0.009143,
+        "positive_rate": 0.563481,
+        "sample_count": 701,
+        "type": "split",
+        "feature_index": 13,
+        "feature_name": "market_net_move_5s",
+        "threshold": 0.1705,
+        "left": {
+          "prediction": 0.011124,
+          "positive_rate": 0.57382,
+          "sample_count": 657,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.020442,
+          "positive_rate": 0.409091,
+          "sample_count": 44,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.032692,
+        "positive_rate": 0.690476,
+        "sample_count": 126,
+        "type": "split",
+        "feature_index": 17,
+        "feature_name": "market_price_distance_from_mid",
+        "threshold": 0.276,
+        "left": {
+          "prediction": 0.058618,
+          "positive_rate": 0.903846,
+          "sample_count": 52,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.014473,
+          "positive_rate": 0.540541,
+          "sample_count": 74,
+          "type": "leaf"
+        }
+      }
+    }
+  },
+  "split_02": {
+    "prediction": 0.028173,
+    "positive_rate": 0.667347,
+    "sample_count": 1960,
+    "type": "split",
+    "feature_index": 17,
+    "feature_name": "market_price_distance_from_mid",
+    "threshold": 0.21,
+    "left": {
+      "prediction": 0.048134,
+      "positive_rate": 0.81754,
+      "sample_count": 992,
+      "type": "split",
+      "feature_index": 18,
+      "feature_name": "market_realized_vol_10s",
+      "threshold": 0.013317,
+      "left": {
+        "prediction": 0.109013,
+        "positive_rate": 0.942623,
+        "sample_count": 122,
+        "type": "split",
+        "feature_index": 17,
+        "feature_name": "market_price_distance_from_mid",
+        "threshold": 0.1196,
+        "left": {
+          "prediction": 0.152984,
+          "positive_rate": 0.895833,
+          "sample_count": 48,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.080492,
+          "positive_rate": 0.972973,
+          "sample_count": 74,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.039597,
+        "positive_rate": 0.8,
+        "sample_count": 870,
+        "type": "split",
+        "feature_index": 6,
+        "feature_name": "entry_second",
+        "threshold": 120.45,
+        "left": {
+          "prediction": 0.02765,
+          "positive_rate": 0.776316,
+          "sample_count": 684,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.083533,
+          "positive_rate": 0.887097,
+          "sample_count": 186,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.007716,
+      "positive_rate": 0.51343,
+      "sample_count": 968,
+      "type": "split",
+      "feature_index": 39,
+      "feature_name": "underlying_realized_vol_10s",
+      "threshold": 0.000109,
+      "left": {
+        "prediction": -0.00655,
+        "positive_rate": 0.424242,
+        "sample_count": 165,
+        "type": "split",
+        "feature_index": 15,
+        "feature_name": "market_path_efficiency_30s",
+        "threshold": 0.255871,
+        "left": {
+          "prediction": -0.032837,
+          "positive_rate": 0.333333,
+          "sample_count": 27,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.001407,
+          "positive_rate": 0.442029,
+          "sample_count": 138,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.010647,
+        "positive_rate": 0.531756,
+        "sample_count": 803,
+        "type": "split",
+        "feature_index": 17,
+        "feature_name": "market_price_distance_from_mid",
+        "threshold": 0.4024,
+        "left": {
+          "prediction": 0.013593,
+          "positive_rate": 0.589587,
+          "sample_count": 653,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.002174,
+          "positive_rate": 0.28,
+          "sample_count": 150,
+          "type": "leaf"
+        }
+      }
+    }
+  }
+}

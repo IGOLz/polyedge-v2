@@ -27,8 +27,19 @@ LIVE_STRATEGY_ENABLED: dict[str, bool] = {
     "S10": False,
     "S13": False,
     "S14": False,
-    "S15": False,
+    "S15": True,
 }
+
+# When multiple strategies are enabled and the selector is off or shadow-only,
+# the bot falls back to this priority order to choose one market signal.
+LIVE_STRATEGY_PRIORITY: tuple[str, ...] = (
+    "S15",
+    "S14",
+    "S13",
+    "S10",
+    "S9",
+    "S5",
+)
 
 
 def _parse_market_type(market_type: str) -> tuple[str, int]:
@@ -135,9 +146,16 @@ def _build_strategy(strategy_id: str) -> BaseStrategy:
 @lru_cache(maxsize=1)
 def get_live_strategies() -> tuple[BaseStrategy, ...]:
     """Instantiate the live strategy set used by the trading bot."""
+    priority = {
+        strategy_id: index
+        for index, strategy_id in enumerate(LIVE_STRATEGY_PRIORITY)
+    }
     return tuple(
         _build_strategy(strategy_id)
-        for strategy_id, enabled in LIVE_STRATEGY_ENABLED.items()
+        for strategy_id, enabled in sorted(
+            LIVE_STRATEGY_ENABLED.items(),
+            key=lambda item: priority.get(item[0], len(priority)),
+        )
         if enabled
     )
 

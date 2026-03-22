@@ -1,0 +1,194 @@
+{
+  "split_01": {
+    "prediction": 0.020425,
+    "positive_rate": 0.412063,
+    "sample_count": 3150,
+    "type": "split",
+    "feature_index": 3,
+    "feature_name": "direction_mismatch_market_open",
+    "threshold": 0.5,
+    "left": {
+      "prediction": 0.016227,
+      "positive_rate": 0.40894,
+      "sample_count": 3020,
+      "type": "split",
+      "feature_index": 47,
+      "feature_name": "underlying_trade_count",
+      "threshold": 30.7,
+      "left": {
+        "prediction": -0.004416,
+        "positive_rate": 0.124567,
+        "sample_count": 1156,
+        "type": "split",
+        "feature_index": 17,
+        "feature_name": "market_price_distance_from_mid",
+        "threshold": 0.164,
+        "left": {
+          "prediction": 0.031613,
+          "positive_rate": 0.305085,
+          "sample_count": 118,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.008512,
+          "positive_rate": 0.104046,
+          "sample_count": 1038,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.029029,
+        "positive_rate": 0.5853,
+        "sample_count": 1864,
+        "type": "split",
+        "feature_index": 47,
+        "feature_name": "underlying_trade_count",
+        "threshold": 421.97,
+        "left": {
+          "prediction": 0.022337,
+          "positive_rate": 0.560411,
+          "sample_count": 1556,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.062836,
+          "positive_rate": 0.711039,
+          "sample_count": 308,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.117962,
+      "positive_rate": 0.484615,
+      "sample_count": 130,
+      "type": "split",
+      "feature_index": 47,
+      "feature_name": "underlying_trade_count",
+      "threshold": 36.44,
+      "left": {
+        "prediction": -0.007667,
+        "positive_rate": 0.205128,
+        "sample_count": 39,
+        "type": "leaf"
+      },
+      "right": {
+        "prediction": 0.171803,
+        "positive_rate": 0.604396,
+        "sample_count": 91,
+        "type": "split",
+        "feature_index": 47,
+        "feature_name": "underlying_trade_count",
+        "threshold": 339.75,
+        "left": {
+          "prediction": 0.118252,
+          "positive_rate": 0.508197,
+          "sample_count": 61,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.28069,
+          "positive_rate": 0.8,
+          "sample_count": 30,
+          "type": "leaf"
+        }
+      }
+    }
+  },
+  "split_02": {
+    "prediction": 0.021236,
+    "positive_rate": 0.455882,
+    "sample_count": 3876,
+    "type": "split",
+    "feature_index": 3,
+    "feature_name": "direction_mismatch_market_open",
+    "threshold": 0.5,
+    "left": {
+      "prediction": 0.017514,
+      "positive_rate": 0.454253,
+      "sample_count": 3727,
+      "type": "split",
+      "feature_index": 17,
+      "feature_name": "market_price_distance_from_mid",
+      "threshold": 0.143,
+      "left": {
+        "prediction": 0.055212,
+        "positive_rate": 0.759777,
+        "sample_count": 537,
+        "type": "split",
+        "feature_index": 6,
+        "feature_name": "entry_second",
+        "threshold": 121.96,
+        "left": {
+          "prediction": 0.04028,
+          "positive_rate": 0.733021,
+          "sample_count": 427,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.113172,
+          "positive_rate": 0.863636,
+          "sample_count": 110,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.011168,
+        "positive_rate": 0.402821,
+        "sample_count": 3190,
+        "type": "split",
+        "feature_index": 41,
+        "feature_name": "underlying_realized_vol_10s",
+        "threshold": 9.7e-05,
+        "left": {
+          "prediction": -0.003831,
+          "positive_rate": 0.198949,
+          "sample_count": 1332,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.021921,
+          "positive_rate": 0.548977,
+          "sample_count": 1858,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.114331,
+      "positive_rate": 0.496644,
+      "sample_count": 149,
+      "type": "split",
+      "feature_index": 47,
+      "feature_name": "underlying_trade_count",
+      "threshold": 338.6,
+      "left": {
+        "prediction": 0.047749,
+        "positive_rate": 0.371429,
+        "sample_count": 105,
+        "type": "split",
+        "feature_index": 45,
+        "feature_name": "underlying_return_5s",
+        "threshold": -0.000119,
+        "left": {
+          "prediction": 0.125206,
+          "positive_rate": 0.522727,
+          "sample_count": 44,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.008121,
+          "positive_rate": 0.262295,
+          "sample_count": 61,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.273218,
+        "positive_rate": 0.795455,
+        "sample_count": 44,
+        "type": "leaf"
+      }
+    }
+  }
+}

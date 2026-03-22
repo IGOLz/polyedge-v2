@@ -1,0 +1,224 @@
+{
+  "split_01": {
+    "prediction": 0.028276,
+    "positive_rate": 0.658771,
+    "sample_count": 1351,
+    "type": "split",
+    "feature_index": 35,
+    "feature_name": "signal_entry_price",
+    "threshold": 0.6851,
+    "left": {
+      "prediction": 0.05281,
+      "positive_rate": 0.778626,
+      "sample_count": 524,
+      "type": "split",
+      "feature_index": 6,
+      "feature_name": "entry_second",
+      "threshold": 122.73,
+      "left": {
+        "prediction": 0.036824,
+        "positive_rate": 0.747619,
+        "sample_count": 420,
+        "type": "split",
+        "feature_index": 20,
+        "feature_name": "market_realized_vol_5s",
+        "threshold": 0.017321,
+        "left": {
+          "prediction": 0.087427,
+          "positive_rate": 0.851852,
+          "sample_count": 135,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.012854,
+          "positive_rate": 0.698246,
+          "sample_count": 285,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.117368,
+        "positive_rate": 0.903846,
+        "sample_count": 104,
+        "type": "split",
+        "feature_index": 23,
+        "feature_name": "market_up_delta_5s",
+        "threshold": -0.0956,
+        "left": {
+          "prediction": 0.061291,
+          "positive_rate": 0.8125,
+          "sample_count": 32,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.142291,
+          "positive_rate": 0.944444,
+          "sample_count": 72,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.01273,
+      "positive_rate": 0.58283,
+      "sample_count": 827,
+      "type": "split",
+      "feature_index": 37,
+      "feature_name": "signal_trade_count",
+      "threshold": 477.92,
+      "left": {
+        "prediction": 0.009143,
+        "positive_rate": 0.563481,
+        "sample_count": 701,
+        "type": "split",
+        "feature_index": 23,
+        "feature_name": "market_up_delta_5s",
+        "threshold": 0.17,
+        "left": {
+          "prediction": 0.011135,
+          "positive_rate": 0.572317,
+          "sample_count": 643,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": -0.012948,
+          "positive_rate": 0.465517,
+          "sample_count": 58,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.032692,
+        "positive_rate": 0.690476,
+        "sample_count": 126,
+        "type": "split",
+        "feature_index": 35,
+        "feature_name": "signal_entry_price",
+        "threshold": 0.7741,
+        "left": {
+          "prediction": 0.058618,
+          "positive_rate": 0.903846,
+          "sample_count": 52,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.014473,
+          "positive_rate": 0.540541,
+          "sample_count": 74,
+          "type": "leaf"
+        }
+      }
+    }
+  },
+  "split_02": {
+    "prediction": 0.028173,
+    "positive_rate": 0.667347,
+    "sample_count": 1960,
+    "type": "split",
+    "feature_index": 35,
+    "feature_name": "signal_entry_price",
+    "threshold": 0.6804,
+    "left": {
+      "prediction": 0.051868,
+      "positive_rate": 0.789793,
+      "sample_count": 823,
+      "type": "split",
+      "feature_index": 6,
+      "feature_name": "entry_second",
+      "threshold": 120.39,
+      "left": {
+        "prediction": 0.039657,
+        "positive_rate": 0.768182,
+        "sample_count": 660,
+        "type": "split",
+        "feature_index": 20,
+        "feature_name": "market_realized_vol_5s",
+        "threshold": 0.011702,
+        "left": {
+          "prediction": 0.10763,
+          "positive_rate": 0.920792,
+          "sample_count": 101,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.027376,
+          "positive_rate": 0.740608,
+          "sample_count": 559,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.101309,
+        "positive_rate": 0.877301,
+        "sample_count": 163,
+        "type": "split",
+        "feature_index": 39,
+        "feature_name": "underlying_realized_vol_10s",
+        "threshold": 0.000138,
+        "left": {
+          "prediction": 0.057512,
+          "positive_rate": 0.791045,
+          "sample_count": 67,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.131875,
+          "positive_rate": 0.9375,
+          "sample_count": 96,
+          "type": "leaf"
+        }
+      }
+    },
+    "right": {
+      "prediction": 0.011021,
+      "positive_rate": 0.578716,
+      "sample_count": 1137,
+      "type": "split",
+      "feature_index": 17,
+      "feature_name": "market_price_distance_from_mid",
+      "threshold": 0.2246,
+      "left": {
+        "prediction": 0.027688,
+        "positive_rate": 0.957944,
+        "sample_count": 214,
+        "type": "split",
+        "feature_index": 23,
+        "feature_name": "market_up_delta_5s",
+        "threshold": 0.0828,
+        "left": {
+          "prediction": 0.037985,
+          "positive_rate": 0.979452,
+          "sample_count": 146,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.005578,
+          "positive_rate": 0.911765,
+          "sample_count": 68,
+          "type": "leaf"
+        }
+      },
+      "right": {
+        "prediction": 0.007157,
+        "positive_rate": 0.490791,
+        "sample_count": 923,
+        "type": "split",
+        "feature_index": 37,
+        "feature_name": "signal_trade_count",
+        "threshold": 85.76,
+        "left": {
+          "prediction": -0.003963,
+          "positive_rate": 0.402344,
+          "sample_count": 256,
+          "type": "leaf"
+        },
+        "right": {
+          "prediction": 0.011425,
+          "positive_rate": 0.524738,
+          "sample_count": 667,
+          "type": "leaf"
+        }
+      }
+    }
+  }
+}

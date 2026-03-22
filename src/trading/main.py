@@ -30,6 +30,7 @@ from trading.executor import (
     sync_daily_net_loss_from_db,
 )
 from trading.live_profile import live_profile_summary, market_in_live_scope
+from trading.meta_selector import live_meta_selector_summary
 from trading.redeemer import (
     describe_redemption_mode,
     redemption_loop,
@@ -640,11 +641,11 @@ async def run() -> None:
             "strategy_momentum_enabled": str(config.STRATEGY_MOMENTUM_ENABLED).lower(),
             "bet_size_usd": str(config.BET_SIZE_USD),
             "daily_loss_limit": str(config.DAILY_LOSS_LIMIT),
-            "weather_enabled": "true",
+            "weather_enabled": "false",
             "weather_probe_bet_size_usd": str(max(config.MIN_LIVE_BET_SIZE_USD, 5.0)),
             "weather_daily_loss_limit": "10.0",
             "weather_max_concurrent_events": "2",
-            "weather_shadow_only": "false",
+            "weather_shadow_only": "true",
         }
     )
 
@@ -692,6 +693,7 @@ async def run() -> None:
             "balance": balance,
             "dry_run": config.DRY_RUN,
             "live_profile": live_profile_summary(),
+            "meta_selector": live_meta_selector_summary(),
             "redemption_mode": redemption_mode,
         },
     )
@@ -707,9 +709,10 @@ async def run() -> None:
     _spawn_background_task(weather_loop(clob), name="weather-loop")
 
     log.info(
-        "Bot started - mode=%s | redemption=%s | $%.2f/trade | loss limit $%.2f",
+        "Bot started - mode=%s | redemption=%s | %s | $%.2f/trade | loss limit $%.2f",
         "DRY RUN" if config.DRY_RUN else "LIVE",
         redemption_mode,
+        live_meta_selector_summary(),
         startup_bet_size,
         startup_daily_loss_limit,
     )

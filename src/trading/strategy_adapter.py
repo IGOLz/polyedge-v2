@@ -24,6 +24,7 @@ from trading.balance import get_usdc_balance
 from trading.constants import BET_SIZING
 from trading.db import MarketInfo, Tick, already_traded_this_market
 from trading.live_profile import get_live_strategies
+from trading.meta_selector import resolve_live_signal
 from trading.strategies import calculate_dynamic_bet_size, calculate_shares
 from trading.utils import debug_log, log
 
@@ -252,7 +253,7 @@ async def evaluate_strategies(
             feature_skip_reason,
         )
 
-    signals: list[Signal] = []
+    candidate_signals: list[Signal] = []
     market_context = {
         "asset": snapshot.metadata.get("asset"),
         "duration_minutes": snapshot.metadata.get("duration_minutes"),
@@ -295,21 +296,86 @@ async def evaluate_strategies(
         if populated is None:
             continue
 
-        signals.append(populated)
-        break
+        candidate_signals.append(populated)
 
-    if signals:
-        log.info(
-            "[ADAPTER] %d signal(s) for %s: %s",
-            len(signals),
-            market.market_id[:16],
-            [signal.strategy_name for signal in signals],
-        )
-    else:
+    if not candidate_signals:
         debug_log.info(
             "[ADAPTER] No signals for %s (%d strategies evaluated)",
             market.market_id[:16],
             len(strategies),
         )
+        return []
 
-    return signals
+    decision = resolve_live_signal(market, snapshot, candidate_signals)
+    if decision.actual_signal is None:
+        if not decision.scored_candidates.empty:
+            ranked = decision.scored_candidates.sort_values(
+                ["predicted_pnl", "predicted_positive_rate"],
+                ascending=[False, False],
+                kind="mergesort",
+            )
+            top = ranked.iloc[0]
+            log.info(
+                "[ADAPTER] Meta-selector skipped %s | mode=%s reason=%s threshold=%.6f top=%s %.4f/%.4f",
+                market.market_id[:16],
+                decision.mode,
+                decision.reason,
+                decision.threshold or 0.0,
+                top["strategy_name"],
+                float(top["predicted_pnl"]),
+                float(top["predicted_positive_rate"]),
+            )
+        return []
+
+    selected = decision.actual_signal
+    if not decision.scored_candidates.empty:
+        candidate_rows = decision.scored_candidates.sort_values(
+            ["predicted_pnl", "predicted_positive_rate", "candidate_index"],
+            ascending=[False, False, True],
+            kind="mergesort",
+        )
+        selected_row = candidate_rows[
+            candidate_rows["strategy_name"] == selected.strategy_name
+        ].head(1)
+        if not selected_row.empty:
+            selected.signal_data.update(
+                {
+                    "meta_selector_mode": decision.mode,
+                    "meta_selector_threshold": decision.threshold,
+                    "meta_predicted_pnl": round(float(selected_row.iloc[0]["predicted_pnl"]), 6),
+                    "meta_predicted_positive_rate": round(
+                        float(selected_row.iloc[0]["predicted_positive_rate"]),
+                        6,
+                    ),
+                    "meta_passes_threshold": bool(selected_row.iloc[0]["passes_meta_threshold"]),
+                }
+            )
+        model_name = decision.model_signal.strategy_name if decision.model_signal is not None else "none"
+        top_summary = [
+            (
+                row["strategy_name"],
+                round(float(row["predicted_pnl"]), 6),
+                round(float(row["predicted_positive_rate"]), 6),
+                bool(row["passes_meta_threshold"]),
+            )
+            for _, row in candidate_rows.iterrows()
+        ]
+        log.info(
+            "[ADAPTER] %s selected %s | mode=%s reason=%s threshold=%.6f model=%s candidates=%s",
+            market.market_id[:16],
+            selected.strategy_name,
+            decision.mode,
+            decision.reason,
+            decision.threshold or 0.0,
+            model_name,
+            top_summary,
+        )
+    else:
+        log.info(
+            "[ADAPTER] %s selected %s | mode=%s",
+            market.market_id[:16],
+            selected.strategy_name,
+            decision.mode,
+        )
+
+    return [selected]
