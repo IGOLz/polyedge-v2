@@ -1,16 +1,21 @@
-"""Live meta-selector support for multi-strategy crypto trading."""
+"""Live meta-selector support for multi-strategy crypto trading.
+
+This module intentionally avoids research-only dependencies such as pandas so
+the trading container can boot even when the selector is disabled.
+"""
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from datetime import timezone
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
-import pandas as pd
+import numpy as np
 
-from analysis.meta_tree import ExpectedPnlTreeRegressor, TabularFeatureEncoder
 from shared.opportunity_features import (
     context_features,
     numeric_signal_payload,
@@ -29,9 +34,106 @@ class SelectorDecision:
     mode: str
     actual_signal: Signal | None
     model_signal: Signal | None
-    scored_candidates: pd.DataFrame
+    scored_candidates: list[dict[str, Any]]
     threshold: float | None
     reason: str
+
+
+@dataclass(frozen=True)
+class _TreeNode:
+    prediction: float
+    positive_rate: float
+    feature_index: int | None = None
+    threshold: float | None = None
+    left: "_TreeNode | None" = None
+    right: "_TreeNode | None" = None
+
+    @property
+    def is_leaf(self) -> bool:
+        return self.feature_index is None
+
+
+class _BundleEncoder:
+    """Minimal runtime encoder restored from the deployment payload."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.numeric_columns = list(payload.get("numeric_columns", []))
+        self.category_columns = list(payload.get("category_columns", []))
+        self.fill_values = {
+            str(key): float(value)
+            for key, value in dict(payload.get("fill_values", {})).items()
+        }
+        self.dummy_columns = list(payload.get("dummy_columns", []))
+        self.feature_names = list(payload.get("feature_names", []))
+        self._dummy_specs = [self._parse_dummy_column(name) for name in self.dummy_columns]
+
+    def transform_rows(self, rows: list[dict[str, Any]]) -> np.ndarray:
+        matrix: list[list[float]] = []
+        for row in rows:
+            values: list[float] = []
+            for column in self.numeric_columns:
+                values.append(self._numeric_value(row.get(column), self.fill_values.get(column, 0.0)))
+            for category_column, expected_value in self._dummy_specs:
+                actual = str(row.get(category_column, "unknown"))
+                values.append(1.0 if actual == expected_value else 0.0)
+            matrix.append(values)
+        if not matrix:
+            return np.zeros((0, len(self.numeric_columns) + len(self.dummy_columns)), dtype=float)
+        return np.array(matrix, dtype=float)
+
+    @staticmethod
+    def _numeric_value(value: Any, fallback: float) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        return fallback if math.isnan(numeric) else numeric
+
+    def _parse_dummy_column(self, dummy_column: str) -> tuple[str, str]:
+        for category_column in self.category_columns:
+            prefix = f"{category_column}_"
+            if dummy_column.startswith(prefix):
+                return category_column, dummy_column[len(prefix):]
+        raise ValueError(f"Cannot map dummy column '{dummy_column}' to a category column.")
+
+
+class _BundleTreeModel:
+    """Minimal runtime tree predictor restored from the deployment payload."""
+
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self.root = self._node_from_payload(dict(payload["tree"]))
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return np.array([self._predict_row(row)[0] for row in X], dtype=float)
+
+    def predict_positive_rate(self, X: np.ndarray) -> np.ndarray:
+        return np.array([self._predict_row(row)[1] for row in X], dtype=float)
+
+    def _predict_row(self, row: np.ndarray) -> tuple[float, float]:
+        node = self.root
+        while not node.is_leaf:
+            assert node.feature_index is not None
+            assert node.threshold is not None
+            assert node.left is not None
+            assert node.right is not None
+            node = node.left if row[node.feature_index] <= node.threshold else node.right
+        return node.prediction, node.positive_rate
+
+    def _node_from_payload(self, payload: dict[str, Any]) -> _TreeNode:
+        node = _TreeNode(
+            prediction=float(payload["prediction"]),
+            positive_rate=float(payload["positive_rate"]),
+        )
+        if payload.get("type") == "leaf":
+            return node
+        return _TreeNode(
+            prediction=node.prediction,
+            positive_rate=node.positive_rate,
+            feature_index=int(payload["feature_index"]),
+            threshold=float(payload["threshold"]),
+            left=self._node_from_payload(dict(payload["left"])),
+            right=self._node_from_payload(dict(payload["right"])),
+        )
 
 
 class LiveMetaSelector:
@@ -42,8 +144,8 @@ class LiveMetaSelector:
         *,
         bundle_path: Path,
         threshold: float,
-        encoder: TabularFeatureEncoder,
-        model: ExpectedPnlTreeRegressor,
+        encoder: _BundleEncoder,
+        model: _BundleTreeModel,
         experts: tuple[str, ...],
     ) -> None:
         self.bundle_path = bundle_path
@@ -61,8 +163,8 @@ class LiveMetaSelector:
         return cls(
             bundle_path=path,
             threshold=float(deployment["recommended_threshold"]),
-            encoder=TabularFeatureEncoder.from_payload(dict(deployment["encoder"])),
-            model=ExpectedPnlTreeRegressor.from_payload(dict(deployment["model"])),
+            encoder=_BundleEncoder(dict(deployment["encoder"])),
+            model=_BundleTreeModel(dict(deployment["model"])),
             experts=tuple(str(value) for value in payload.get("experts", [])),
         )
 
@@ -71,9 +173,9 @@ class LiveMetaSelector:
         market: MarketInfo,
         snapshot: MarketSnapshot,
         signals: list[Signal],
-    ) -> pd.DataFrame:
+    ) -> list[dict[str, Any]]:
         if not signals:
-            return pd.DataFrame()
+            return []
 
         second = max(0, int(snapshot.elapsed_seconds))
         second_signals = {
@@ -89,7 +191,7 @@ class LiveMetaSelector:
             second_signals=second_signals,
         )
 
-        rows: list[dict[str, object]] = []
+        rows: list[dict[str, Any]] = []
         for candidate_index, signal in enumerate(signals):
             strategy_id = strategy_id_from_name(signal.strategy_name)
             rows.append(
@@ -119,32 +221,60 @@ class LiveMetaSelector:
                 }
             )
 
-        frame = pd.DataFrame(rows)
-        features = self.encoder.transform(frame)
-        frame["predicted_pnl"] = self.model.predict(features)
-        frame["predicted_positive_rate"] = self.model.predict_positive_rate(features)
-        frame["passes_meta_threshold"] = frame["predicted_pnl"] >= self.threshold
-        return frame
+        features = self.encoder.transform_rows(rows)
+        predicted_pnl = self.model.predict(features)
+        predicted_positive_rate = self.model.predict_positive_rate(features)
+
+        scored: list[dict[str, Any]] = []
+        for row, pnl, positive_rate in zip(rows, predicted_pnl, predicted_positive_rate, strict=False):
+            enriched = dict(row)
+            enriched["predicted_pnl"] = float(pnl)
+            enriched["predicted_positive_rate"] = float(positive_rate)
+            enriched["passes_meta_threshold"] = float(pnl) >= self.threshold
+            scored.append(enriched)
+        return scored
 
     def pick_signal(
         self,
         market: MarketInfo,
         snapshot: MarketSnapshot,
         signals: list[Signal],
-    ) -> tuple[Signal | None, pd.DataFrame]:
+    ) -> tuple[Signal | None, list[dict[str, Any]]]:
         scored = self.score_candidates(market, snapshot, signals)
-        if scored.empty:
+        if not scored:
             return None, scored
 
-        ranked = scored.sort_values(
-            ["passes_meta_threshold", "predicted_pnl", "predicted_positive_rate", "candidate_index"],
-            ascending=[False, False, False, True],
-            kind="mergesort",
-        )
-        best_row = ranked.iloc[0]
+        ranked = rank_scored_candidates(scored)
+        best_row = ranked[0]
         if not bool(best_row["passes_meta_threshold"]):
             return None, scored
         return signals[int(best_row["candidate_index"])], scored
+
+
+def rank_scored_candidates(scored_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort scored candidates from strongest to weakest."""
+    return sorted(
+        scored_candidates,
+        key=lambda row: (
+            bool(row.get("passes_meta_threshold", False)),
+            float(row.get("predicted_pnl", float("-inf"))),
+            float(row.get("predicted_positive_rate", float("-inf"))),
+            -int(row.get("candidate_index", 0)),
+        ),
+        reverse=True,
+    )
+
+
+def find_candidate_row(
+    scored_candidates: list[dict[str, Any]],
+    *,
+    candidate_index: int,
+) -> dict[str, Any] | None:
+    """Return the scored row for *candidate_index* when present."""
+    for row in scored_candidates:
+        if int(row.get("candidate_index", -1)) == candidate_index:
+            return row
+    return None
 
 
 def _validate_mode(mode: str) -> str:
@@ -215,7 +345,7 @@ def resolve_live_signal(
             mode="off",
             actual_signal=None,
             model_signal=None,
-            scored_candidates=pd.DataFrame(),
+            scored_candidates=[],
             threshold=None,
             reason="no_signals",
         )
@@ -228,7 +358,7 @@ def resolve_live_signal(
             mode="off",
             actual_signal=fallback_signal,
             model_signal=None,
-            scored_candidates=pd.DataFrame(),
+            scored_candidates=[],
             threshold=None,
             reason="selector_disabled",
         )

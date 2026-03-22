@@ -24,7 +24,7 @@ from trading.balance import get_usdc_balance
 from trading.constants import BET_SIZING
 from trading.db import MarketInfo, Tick, already_traded_this_market
 from trading.live_profile import get_live_strategies
-from trading.meta_selector import resolve_live_signal
+from trading.meta_selector import find_candidate_row, rank_scored_candidates, resolve_live_signal
 from trading.strategies import calculate_dynamic_bet_size, calculate_shares
 from trading.utils import debug_log, log
 
@@ -308,13 +308,8 @@ async def evaluate_strategies(
 
     decision = resolve_live_signal(market, snapshot, candidate_signals)
     if decision.actual_signal is None:
-        if not decision.scored_candidates.empty:
-            ranked = decision.scored_candidates.sort_values(
-                ["predicted_pnl", "predicted_positive_rate"],
-                ascending=[False, False],
-                kind="mergesort",
-            )
-            top = ranked.iloc[0]
+        if decision.scored_candidates:
+            top = rank_scored_candidates(decision.scored_candidates)[0]
             log.info(
                 "[ADAPTER] Meta-selector skipped %s | mode=%s reason=%s threshold=%.6f top=%s %.4f/%.4f",
                 market.market_id[:16],
@@ -328,37 +323,35 @@ async def evaluate_strategies(
         return []
 
     selected = decision.actual_signal
-    if not decision.scored_candidates.empty:
-        candidate_rows = decision.scored_candidates.sort_values(
-            ["predicted_pnl", "predicted_positive_rate", "candidate_index"],
-            ascending=[False, False, True],
-            kind="mergesort",
+    if decision.scored_candidates:
+        selected_index = candidate_signals.index(selected)
+        candidate_rows = rank_scored_candidates(decision.scored_candidates)
+        selected_row = find_candidate_row(
+            decision.scored_candidates,
+            candidate_index=selected_index,
         )
-        selected_row = candidate_rows[
-            candidate_rows["strategy_name"] == selected.strategy_name
-        ].head(1)
-        if not selected_row.empty:
+        if selected_row is not None:
             selected.signal_data.update(
                 {
                     "meta_selector_mode": decision.mode,
                     "meta_selector_threshold": decision.threshold,
-                    "meta_predicted_pnl": round(float(selected_row.iloc[0]["predicted_pnl"]), 6),
+                    "meta_predicted_pnl": round(float(selected_row["predicted_pnl"]), 6),
                     "meta_predicted_positive_rate": round(
-                        float(selected_row.iloc[0]["predicted_positive_rate"]),
+                        float(selected_row["predicted_positive_rate"]),
                         6,
                     ),
-                    "meta_passes_threshold": bool(selected_row.iloc[0]["passes_meta_threshold"]),
+                    "meta_passes_threshold": bool(selected_row["passes_meta_threshold"]),
                 }
             )
         model_name = decision.model_signal.strategy_name if decision.model_signal is not None else "none"
         top_summary = [
             (
-                row["strategy_name"],
+                str(row["strategy_name"]),
                 round(float(row["predicted_pnl"]), 6),
                 round(float(row["predicted_positive_rate"]), 6),
                 bool(row["passes_meta_threshold"]),
             )
-            for _, row in candidate_rows.iterrows()
+            for row in candidate_rows
         ]
         log.info(
             "[ADAPTER] %s selected %s | mode=%s reason=%s threshold=%.6f model=%s candidates=%s",

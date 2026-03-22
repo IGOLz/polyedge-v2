@@ -117,5 +117,6 @@ def test_live_meta_selector_prefers_higher_scoring_signal(tmp_path):
     selected, scored = selector.pick_signal(market, snapshot, [s14, s15])
 
     assert selected is s15
-    assert not scored.empty
-    assert scored.loc[scored["strategy_id"] == "S15", "predicted_pnl"].iloc[0] > 0.0
+    assert scored
+    s15_row = next(row for row in scored if row["strategy_id"] == "S15")
+    assert float(s15_row["predicted_pnl"]) > 0.0
