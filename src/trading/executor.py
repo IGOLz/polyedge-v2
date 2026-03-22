@@ -500,20 +500,43 @@ async def place_stop_loss_order(clob, trade_id: int, token_id: str, shares: floa
                   token_id[:16], shares, stop_loss_price)
 
 
-async def cancel_stop_loss_order(clob, trade_id: int, stop_loss_order_id: str) -> None:
-    """Cancel an existing GTC stop-loss order."""
+async def cancel_stop_loss_order(
+    clob,
+    trade_id: int,
+    stop_loss_order_id: str,
+) -> tuple[str | None, dict | None]:
+    """Cancel an existing GTC stop-loss order and wait for terminal status."""
     try:
         loop = asyncio.get_event_loop()
         await asyncio.wait_for(
             loop.run_in_executor(None, lambda: clob.cancel(stop_loss_order_id)),
             timeout=10.0,
         )
-        await db.mark_stop_loss_cancelled(trade_id)
-        log.info("[STOP-LOSS] Cancelled GTC order %s for trade %d", stop_loss_order_id[:16], trade_id)
+        order = await _wait_for_terminal_order_status(clob, stop_loss_order_id, timeout=8.0)
+        status = (order.get("status") or "").upper() if isinstance(order, dict) else ""
+        if status in ("CANCELLED", "EXPIRED"):
+            await db.mark_stop_loss_cancelled(trade_id)
+            log.info("[STOP-LOSS] Cancelled GTC order %s for trade %d", stop_loss_order_id[:16], trade_id)
+            return status, order
+        elif status in ("FILLED", "MATCHED"):
+            log.warning(
+                "[STOP-LOSS] Order %s for trade %d filled while cancelling",
+                stop_loss_order_id[:16],
+                trade_id,
+            )
+            return status, order
+        else:
+            log.warning(
+                "[STOP-LOSS] Cancellation for order %s on trade %d was not confirmed",
+                stop_loss_order_id[:16],
+                trade_id,
+            )
+            return status or None, order
     except asyncio.TimeoutError:
         log.error("[STOP-LOSS] Timeout cancelling stop-loss %s", stop_loss_order_id[:16])
     except Exception as e:
         log.warning("[STOP-LOSS] Could not cancel stop-loss %s: %s", stop_loss_order_id[:16], e)
+    return None, None
 
 
 async def place_take_profit_order(clob, trade_id: int, token_id: str, shares: float, take_profit_price: float) -> None:
@@ -609,6 +632,7 @@ async def place_stop_loss_order(
     stop_loss_price: float,
     *,
     initial_delay: float = 5.0,
+    balance_attempts: int = 5,
 ) -> str | None:
     """Place a protected stop-loss sell order after settlement."""
     share_info = await _fetch_sellable_shares(
@@ -617,6 +641,7 @@ async def place_stop_loss_order(
         log_prefix="STOP-LOSS",
         trade_id=trade_id,
         initial_delay=initial_delay,
+        attempts=balance_attempts,
     )
     if share_info is None:
         return None
@@ -697,6 +722,7 @@ async def execute_limit_exit_order(
     trade_id: int | None = None,
     initial_delay: float = 0.0,
     timeout: float = 3.0,
+    balance_attempts: int = 5,
 ) -> dict | None:
     share_info = await _fetch_sellable_shares(
         clob,
@@ -704,6 +730,7 @@ async def execute_limit_exit_order(
         log_prefix=log_prefix,
         trade_id=trade_id,
         initial_delay=initial_delay,
+        attempts=balance_attempts,
     )
     if share_info is None:
         return None
@@ -842,14 +869,22 @@ async def _resolve_forced_exit(
     reason: str,
 ) -> None:
     exit_price = float(exit_fill["fill_price"])
-    resolved_shares = float(shares or 0.0)
+    resolved_shares = float(exit_fill.get("fill_shares") or shares or 0.0)
     pnl = (exit_price - entry_price) * resolved_shares
     outcome = "take_profit" if pnl >= 0 else "stop_loss"
 
     if outcome == "take_profit":
-        await db.mark_take_profit_triggered(trade_id, exit_price)
+        await db.mark_take_profit_triggered(
+            trade_id,
+            exit_price,
+            exit_shares=resolved_shares,
+        )
     else:
-        await db.mark_stop_loss_triggered(trade_id, exit_price)
+        await db.mark_stop_loss_triggered(
+            trade_id,
+            exit_price,
+            exit_shares=resolved_shares,
+        )
 
     record_trade_outcome(pnl)
     log.warning(
@@ -902,6 +937,30 @@ async def _wait_for_fill(clob: ClobClient, order_id: str, timeout: float) -> tup
             pass
         await asyncio.sleep(0.15)
     return False, None
+
+
+async def _wait_for_terminal_order_status(
+    clob: ClobClient,
+    order_id: str,
+    timeout: float,
+) -> dict | None:
+    """Poll until an order reaches a terminal state."""
+    loop = asyncio.get_event_loop()
+    start = time.time()
+    while time.time() - start < timeout:
+        try:
+            order = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda oid=order_id: clob.get_order(oid)),
+                timeout=3.0,
+            )
+            if isinstance(order, dict):
+                status = (order.get("status") or "").upper()
+                if status in ("MATCHED", "FILLED", "CANCELLED", "EXPIRED"):
+                    return order
+        except Exception:
+            pass
+        await asyncio.sleep(0.2)
+    return None
 
 
 async def _cancel_open_order(clob: ClobClient, order_id: str) -> bool:

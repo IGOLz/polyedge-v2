@@ -443,17 +443,28 @@ async def get_daily_resolved_net_pnl(day_start: datetime | None = None) -> float
     return float(row["net_pnl"] or 0.0) if row else 0.0
 
 
-async def mark_stop_loss_triggered(trade_id: int, exit_price: float | None = None) -> None:
+async def mark_stop_loss_triggered(
+    trade_id: int,
+    exit_price: float | None = None,
+    exit_shares: float | None = None,
+) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
-        if exit_price is None:
+        if exit_price is None and exit_shares is None:
             await conn.execute("""
                 UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
                     resolved_at=NOW(),
                     pnl=(COALESCE(stop_loss_price,0)-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
                 WHERE id=$1
             """, trade_id)
-        else:
+        elif exit_price is None:
+            await conn.execute("""
+                UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
+                    resolved_at=NOW(),
+                    pnl=(COALESCE(stop_loss_price,0)-entry_price)*$2
+                WHERE id=$1
+            """, trade_id, Decimal(str(round(exit_shares or 0.0, 4))))
+        elif exit_shares is None:
             await conn.execute("""
                 UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
                     stop_loss_price=$2,
@@ -461,19 +472,42 @@ async def mark_stop_loss_triggered(trade_id: int, exit_price: float | None = Non
                     pnl=($2-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
                 WHERE id=$1
             """, trade_id, Decimal(str(round(exit_price, 4))))
+        else:
+            await conn.execute("""
+                UPDATE bot_trades SET stop_loss_triggered=TRUE, final_outcome='stop_loss',
+                    stop_loss_price=$2,
+                    resolved_at=NOW(),
+                    pnl=($2-entry_price)*$3
+                WHERE id=$1
+            """,
+                trade_id,
+                Decimal(str(round(exit_price, 4))),
+                Decimal(str(round(exit_shares, 4))),
+            )
 
 
-async def mark_take_profit_triggered(trade_id: int, exit_price: float | None = None) -> None:
+async def mark_take_profit_triggered(
+    trade_id: int,
+    exit_price: float | None = None,
+    exit_shares: float | None = None,
+) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
-        if exit_price is None:
+        if exit_price is None and exit_shares is None:
             await conn.execute("""
                 UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
                     resolved_at=NOW(),
                     pnl=(COALESCE(take_profit_price,0)-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
                 WHERE id=$1
             """, trade_id)
-        else:
+        elif exit_price is None:
+            await conn.execute("""
+                UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
+                    resolved_at=NOW(),
+                    pnl=(COALESCE(take_profit_price,0)-entry_price)*$2
+                WHERE id=$1
+            """, trade_id, Decimal(str(round(exit_shares or 0.0, 4))))
+        elif exit_shares is None:
             await conn.execute("""
                 UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
                     take_profit_price=$2,
@@ -481,6 +515,18 @@ async def mark_take_profit_triggered(trade_id: int, exit_price: float | None = N
                     pnl=($2-entry_price)*COALESCE(shares,bet_size_usd/NULLIF(entry_price,0))
                 WHERE id=$1
             """, trade_id, Decimal(str(round(exit_price, 4))))
+        else:
+            await conn.execute("""
+                UPDATE bot_trades SET take_profit_triggered=TRUE, final_outcome='take_profit',
+                    take_profit_price=$2,
+                    resolved_at=NOW(),
+                    pnl=($2-entry_price)*$3
+                WHERE id=$1
+            """,
+                trade_id,
+                Decimal(str(round(exit_price, 4))),
+                Decimal(str(round(exit_shares, 4))),
+            )
 
 
 async def mark_stop_loss_cancelled(trade_id: int) -> None:

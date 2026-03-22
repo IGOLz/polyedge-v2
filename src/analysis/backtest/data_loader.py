@@ -138,6 +138,7 @@ def load_all_data():
         return []
 
     markets = []
+    total_markets_raw = len(markets_raw)
     for m in markets_raw:
         mid = m['market_id']
         raw_ticks = ticks_by_market.get(mid, [])
@@ -181,8 +182,12 @@ def load_all_data():
             'feature_series': build_feature_series_from_rows(
                 feature_rows_by_market.get(mid, []),
                 total_seconds,
+                prices=tick_array,
             ),
         })
+
+        if len(markets) % 1000 == 0:
+            print(f"  Processed {len(markets)}/{total_markets_raw} markets...")
 
     _annotate_streak_metadata(markets)
 

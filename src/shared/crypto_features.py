@@ -47,6 +47,8 @@ SUPPORTED_LIVE_FEATURE_COLUMNS = set(CRYPTO_FEATURE_COLUMNS)
 def build_feature_series_from_rows(
     feature_rows: list[dict],
     total_seconds: int,
+    *,
+    prices: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     if not feature_rows:
         return {}
@@ -69,6 +71,10 @@ def build_feature_series_from_rows(
                 feature_series[column][second] = 1.0 if value else 0.0
             else:
                 feature_series[column][second] = float(value)
+
+    # Backfill only missing deterministic derived features so backtests stay
+    # consistent with the live path without recomputing every feature column.
+    _backfill_missing_derived_features(feature_series, prices=prices)
 
     return feature_series
 
@@ -146,7 +152,7 @@ def _assign_float(series: np.ndarray, idx: int, value) -> None:
 
 
 def _populate_market_features(feature_series: dict[str, np.ndarray], prices: np.ndarray) -> None:
-    market_open = float(prices[0]) if len(prices) > 0 and np.isfinite(prices[0]) else np.nan
+    market_open = _first_finite_value(prices)
     if np.isfinite(market_open):
         feature_series["market_up_price_market_open"].fill(market_open)
 
@@ -158,7 +164,7 @@ def _populate_market_features(feature_series: dict[str, np.ndarray], prices: np.
 
 def _populate_underlying_features(feature_series: dict[str, np.ndarray]) -> None:
     close_series = feature_series["underlying_close"]
-    open_close = float(close_series[0]) if len(close_series) > 0 and np.isfinite(close_series[0]) else np.nan
+    open_close = _first_finite_value(close_series)
     if np.isfinite(open_close):
         feature_series["underlying_market_open_close"].fill(open_close)
 
@@ -264,3 +270,115 @@ def _direction_mismatch(
             continue
         result[idx] = 1.0 if np.sign(delta) != np.sign(ret) else 0.0
     return result
+
+
+def _first_finite_value(values: np.ndarray) -> float:
+    for value in values:
+        if np.isfinite(value):
+            return float(value)
+    return np.nan
+
+
+def _backfill_missing_derived_features(
+    feature_series: dict[str, np.ndarray],
+    *,
+    prices: np.ndarray | None,
+) -> None:
+    market_prices = None if prices is None else np.asarray(prices, dtype=float)
+    market_open = np.nan if market_prices is None else _first_finite_value(market_prices)
+    close_series = feature_series["underlying_close"]
+    underlying_open = _first_finite_value(close_series)
+
+    if market_prices is not None and np.isfinite(market_open):
+        if _series_needs_backfill(feature_series["market_up_price_market_open"]):
+            feature_series["market_up_price_market_open"].fill(market_open)
+        if _series_needs_backfill(feature_series["market_up_delta_from_market_open"]):
+            feature_series["market_up_delta_from_market_open"][:] = _delta_from_base(
+                market_prices,
+                market_open,
+            )
+        if _series_needs_backfill(feature_series["market_up_delta_5s"]):
+            feature_series["market_up_delta_5s"][:] = _window_delta(market_prices, 5)
+        if _series_needs_backfill(feature_series["market_up_delta_10s"]):
+            feature_series["market_up_delta_10s"][:] = _window_delta(market_prices, 10)
+        if _series_needs_backfill(feature_series["market_up_delta_30s"]):
+            feature_series["market_up_delta_30s"][:] = _window_delta(market_prices, 30)
+
+    if np.isfinite(underlying_open):
+        if _series_needs_backfill(feature_series["underlying_market_open_close"]):
+            feature_series["underlying_market_open_close"].fill(underlying_open)
+        if _series_needs_backfill(feature_series["underlying_return_from_market_open"]):
+            feature_series["underlying_return_from_market_open"][:] = _return_from_base(
+                close_series,
+                underlying_open,
+            )
+        if _series_needs_backfill(feature_series["underlying_return_5s"]):
+            feature_series["underlying_return_5s"][:] = _window_return(close_series, 5)
+        if _series_needs_backfill(feature_series["underlying_return_10s"]):
+            feature_series["underlying_return_10s"][:] = _window_return(close_series, 10)
+        if _series_needs_backfill(feature_series["underlying_return_30s"]):
+            feature_series["underlying_return_30s"][:] = _window_return(close_series, 30)
+
+        need_vol10 = _series_needs_backfill(feature_series["underlying_realized_vol_10s"])
+        need_vol30 = _series_needs_backfill(feature_series["underlying_realized_vol_30s"])
+        if need_vol10 or need_vol30:
+            log_returns = np.full(len(close_series), np.nan, dtype=float)
+            for idx in range(1, len(close_series)):
+                prev = close_series[idx - 1]
+                curr = close_series[idx]
+                if np.isfinite(prev) and np.isfinite(curr) and prev > 0.0 and curr > 0.0:
+                    log_returns[idx] = float(np.log(curr / prev))
+            if need_vol10:
+                feature_series["underlying_realized_vol_10s"][:] = _rolling_sample_std(
+                    log_returns,
+                    10,
+                )
+            if need_vol30:
+                feature_series["underlying_realized_vol_30s"][:] = _rolling_sample_std(
+                    log_returns,
+                    30,
+                )
+
+    if _series_needs_backfill(feature_series["direction_mismatch_market_open"]):
+        if _series_has_finite(feature_series["market_up_delta_from_market_open"]) and _series_has_finite(
+            feature_series["underlying_return_from_market_open"]
+        ):
+            feature_series["direction_mismatch_market_open"][:] = _direction_mismatch(
+                feature_series["market_up_delta_from_market_open"],
+                feature_series["underlying_return_from_market_open"],
+            )
+
+    if _series_needs_backfill(feature_series["direction_mismatch_5s"]):
+        if _series_has_finite(feature_series["market_up_delta_5s"]) and _series_has_finite(
+            feature_series["underlying_return_5s"]
+        ):
+            feature_series["direction_mismatch_5s"][:] = _direction_mismatch(
+                feature_series["market_up_delta_5s"],
+                feature_series["underlying_return_5s"],
+            )
+
+    if _series_needs_backfill(feature_series["direction_mismatch_10s"]):
+        if _series_has_finite(feature_series["market_up_delta_10s"]) and _series_has_finite(
+            feature_series["underlying_return_10s"]
+        ):
+            feature_series["direction_mismatch_10s"][:] = _direction_mismatch(
+                feature_series["market_up_delta_10s"],
+                feature_series["underlying_return_10s"],
+            )
+
+    if _series_needs_backfill(feature_series["direction_mismatch_30s"]):
+        if _series_has_finite(feature_series["market_up_delta_30s"]) and _series_has_finite(
+            feature_series["underlying_return_30s"]
+        ):
+            feature_series["direction_mismatch_30s"][:] = _direction_mismatch(
+                feature_series["market_up_delta_30s"],
+                feature_series["underlying_return_30s"],
+            )
+
+
+def _series_has_finite(series: np.ndarray) -> bool:
+    return bool(np.any(np.isfinite(series)))
+
+
+def _series_needs_backfill(series: np.ndarray) -> bool:
+    return not _series_has_finite(series)

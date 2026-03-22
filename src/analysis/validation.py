@@ -24,7 +24,7 @@ import pandas as pd
 from analysis.accelerators import get_strategy_kernel
 from analysis.accelerators.base import PrecomputedDataset, compute_metrics_from_arrays
 from analysis.accelerators.s2_s6 import _evaluate_s3_combo, _evaluate_s5_combo
-from analysis.accelerators.s13_s19 import _evaluate_s13_combo, _evaluate_s14_combo, _evaluate_s15_combo
+from analysis.accelerators.s13_s19 import _evaluate_s13_combo, _evaluate_s14_combo, _evaluate_s15_combo, _evaluate_s18_combo
 from analysis.backtest.engine import compute_metrics, make_trade
 from analysis.backtest_strategies import market_to_snapshot, run_strategy
 from shared.strategies.helpers import get_price
@@ -285,7 +285,7 @@ def compare_candidate_to_defaults(candidate: StrategyCandidate) -> list[dict[str
 
 
 def _accelerated_supported(strategy_id: str) -> bool:
-    return strategy_id in {"S3", "S5", "S13", "S14", "S15"}
+    return strategy_id in {"S3", "S5", "S13", "S14", "S15", "S18"}
 
 
 def prepare_accelerated_context(
@@ -385,6 +385,26 @@ def _eligible_market_ids_for_s15(
         ret_mask = payload.availability["underlying_return_30s"]
 
     mask = ret_mask & payload.availability["underlying_trade_count"]
+    return {
+        market["market_id"]
+        for market, is_eligible in zip(markets, mask, strict=False)
+        if bool(is_eligible)
+    }
+
+
+def _eligible_market_ids_for_s18(
+    markets: list[dict],
+    context: AcceleratedContext,
+) -> set[str]:
+    payload = context.dataset.payload
+    mask = (
+        payload.availability["underlying_return_5s"]
+        & payload.availability["underlying_return_10s"]
+        & payload.availability["underlying_return_30s"]
+        & payload.availability["underlying_realized_vol_30s"]
+        & payload.availability["underlying_trade_count"]
+        & payload.availability["market_up_delta_5s"]
+    )
     return {
         market["market_id"]
         for market, is_eligible in zip(markets, mask, strict=False)
@@ -547,6 +567,39 @@ def _run_candidate_accelerated(
             encoded,
             dataset.slippage,
         )
+    elif candidate.strategy_id == "S18":
+        payload = dataset.payload
+        (
+            pnls,
+            entry_fees,
+            exit_fees,
+            asset_codes,
+            durations,
+            market_indices,
+            eligible_markets_count,
+        ) = _evaluate_s18_combo(
+            payload.common.prices,
+            payload.common.total_seconds,
+            payload.common.final_outcomes,
+            payload.common.asset_codes,
+            payload.common.duration_minutes,
+            payload.common.fee_active,
+            payload.nearest_tol1,
+            payload.matrices["underlying_return_5s"],
+            payload.matrices["underlying_return_10s"],
+            payload.matrices["underlying_return_30s"],
+            payload.matrices["underlying_realized_vol_30s"],
+            payload.matrices["underlying_trade_count"],
+            payload.matrices["market_up_delta_5s"],
+            payload.availability["underlying_return_5s"],
+            payload.availability["underlying_return_10s"],
+            payload.availability["underlying_return_30s"],
+            payload.availability["underlying_realized_vol_30s"],
+            payload.availability["underlying_trade_count"],
+            payload.availability["market_up_delta_5s"],
+            encoded,
+            dataset.slippage,
+        )
     else:
         return None
 
@@ -591,6 +644,12 @@ def _run_candidate_accelerated(
             markets,
             active_context,
             feature_window,
+        )
+        skipped_markets = len(markets) - int(eligible_markets_count)
+    elif candidate.strategy_id == "S18":
+        eligible_market_ids = _eligible_market_ids_for_s18(
+            markets,
+            active_context,
         )
         skipped_markets = len(markets) - int(eligible_markets_count)
     else:

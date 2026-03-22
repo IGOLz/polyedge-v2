@@ -183,11 +183,18 @@ async def _handle_exit_fill(clob, trade, exit_kind: str, order_id: str, order: d
     )
 
     if exit_kind == "take_profit":
-        await db.mark_take_profit_triggered(trade["id"], exit_price)
+        await db.mark_take_profit_triggered(
+            trade["id"],
+            exit_price,
+            exit_shares=exit_shares,
+        )
     else:
-        await db.mark_stop_loss_triggered(trade["id"], exit_price)
-    position_shares = float(trade["shares"] or 0.0)
-    record_trade_outcome((exit_price - entry_price) * position_shares)
+        await db.mark_stop_loss_triggered(
+            trade["id"],
+            exit_price,
+            exit_shares=exit_shares,
+        )
+    record_trade_outcome((exit_price - entry_price) * exit_shares)
 
     await _cancel_sibling_exit_order(clob, trade, exit_kind)
 
@@ -300,9 +307,12 @@ async def stop_loss_monitor_loop(clob) -> None:
                                 "stop_loss_order_id": order_id,
                             },
                         )
-                        await db.mark_stop_loss_triggered(trade["id"], exit_price)
-                        position_shares = float(trade["shares"] or 0.0)
-                        record_trade_outcome((exit_price - entry_price) * position_shares)
+                        await db.mark_stop_loss_triggered(
+                            trade["id"],
+                            exit_price,
+                            exit_shares=exit_shares,
+                        )
+                        record_trade_outcome((exit_price - entry_price) * exit_shares)
                 except Exception as exc:
                     log.warning("[STOP-LOSS] Check failed: %s", exc)
         except Exception as exc:
@@ -344,7 +354,27 @@ async def exit_monitor_loop(clob) -> None:
                             stop_loss_order_id = trade.get("stop_loss_order_id")
                             if stop_loss_order_id:
                                 try:
-                                    await cancel_stop_loss_order(clob, trade["id"], stop_loss_order_id)
+                                    cancel_status, cancelled_order = await cancel_stop_loss_order(
+                                        clob,
+                                        trade["id"],
+                                        stop_loss_order_id,
+                                    )
+                                    if cancel_status in ("FILLED", "MATCHED"):
+                                        await _handle_exit_fill(
+                                            clob,
+                                            trade,
+                                            "stop_loss",
+                                            stop_loss_order_id,
+                                            cancelled_order,
+                                        )
+                                        exit_resolved = True
+                                        continue
+                                    if cancel_status not in ("CANCELLED", "EXPIRED"):
+                                        log.warning(
+                                            "[EXIT] Stop-loss cancellation not confirmed for trade %s - deferring take-profit",
+                                            trade["id"],
+                                        )
+                                        continue
                                     trade["stop_loss_order_id"] = None
                                 except Exception as exc:
                                     log.warning(
@@ -354,6 +384,9 @@ async def exit_monitor_loop(clob) -> None:
                                     )
                                     continue
 
+                            if exit_resolved:
+                                continue
+
                             exit_fill = await execute_limit_exit_order(
                                 clob,
                                 trade["token_id"],
@@ -361,7 +394,9 @@ async def exit_monitor_loop(clob) -> None:
                                 tp_price,
                                 log_prefix="TAKE-PROFIT",
                                 trade_id=trade["id"],
+                                initial_delay=0.5,
                                 timeout=3.0,
+                                balance_attempts=10,
                             )
                             if exit_fill:
                                 synthetic_order = {
@@ -385,7 +420,8 @@ async def exit_monitor_loop(clob) -> None:
                                     token_id=trade["token_id"],
                                     shares=float(trade["shares"] or 0.0),
                                     stop_loss_price=float(trade["stop_loss_price"]),
-                                    initial_delay=0.0,
+                                    initial_delay=0.5,
+                                    balance_attempts=10,
                                 )
                                 if new_stop_loss is None:
                                     log.error(
