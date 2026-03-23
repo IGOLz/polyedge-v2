@@ -1,40 +1,73 @@
 {
   "backtest_summary": {
-    "deployment_readiness": "paper_only",
-    "ranking_score": 67.15,
-    "roi_pct": 2.133827381510701,
-    "support_count": 13,
-    "total_realized_pnl": 352.8344696892842,
+    "deployment_readiness": "candidate_for_live_scanner",
+    "ranking_score": 72.5926,
+    "roi_pct": 2.69020538567195,
+    "support_count": 93,
+    "total_realized_pnl": 1683.2983510209078,
     "win_rate_pct": 100.0
   },
   "entry_rule": {
     "complete_set_cost_lte": 0.995,
     "condition": "same_condition_both_sides",
     "max_inventory_imbalance_ratio": 0.491617,
-    "min_matched_size": 0.0
+    "max_worse_buy_fill_ratio": 0.25,
+    "min_matched_size": 0.0,
+    "min_under_par_buy_fill_ratio": 0.5,
+    "preferred_price_history_execution_labels": [
+      "better_than_nearby_trade",
+      "nearby_trade_aligned"
+    ],
+    "require_full_buy_fill_context": true,
+    "worse_buy_override_complete_set_cost_lte": 0.98
   },
+  "execution_mode": "paper_only",
   "exit_rule": {
-    "action": "merge_when_inventory_matched",
+    "action": "merge_or_redeem_when_inventory_matched",
+    "fallback_action": "redeem_if_resolved",
     "force_flatten_before_resolution": true,
-    "max_merge_delay_minutes": 240.0
+    "max_merge_delay_minutes": 240.0,
+    "preferred_action": "merge_before_resolution"
+  },
+  "fill_context_artifact_path": "/Users/igol/Documents/repo/polyedge-v2/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_fill_context.csv",
+  "inventory_balancing_rule": {
+    "max_inventory_imbalance_ratio": 0.491617,
+    "prefer_opposite_leg_when_pair_remains_sub_par": true,
+    "rebalance_tolerance_notional_usdc": 79.716628,
+    "style": "match_smaller_side_and_rebalance"
   },
   "limitations": [
     "Backtest uses reconstructed public wallet sequences, not full market-wide quote history.",
+    "Fill-context labels still rely mostly on nearby trade prints unless direct quote snapshots are available.",
     "Live deployment still requires a market scanner that can detect both-side sub-par complete sets in real time."
   ],
-  "profile_name": "ColdMath",
+  "pnl_attribution": {
+    "avg_under_par_buy_fill_ratio": 0.802482,
+    "avg_worse_buy_fill_ratio": 0.161982,
+    "estimated_under_par_entry_edge_pnl": 1683.298349,
+    "full_fill_context_sequence_count": 93,
+    "inventory_rebalancing_realized_pnl": 0.0,
+    "merge_redeem_realized_pnl": 2025.828817,
+    "other_residual_realized_pnl": -259.447267,
+    "support_count": 93,
+    "tail_dust_residual_realized_pnl": -83.083203,
+    "total_realized_pnl": 1683.298351
+  },
+  "profile_name": null,
   "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
   "risk_rule": {
     "avoid_unmatched_inventory": true,
     "max_complete_set_cost": 0.995,
-    "max_sequence_buy_usdc": 3752.857753
+    "max_sequence_buy_usdc": 1961.952641,
+    "reject_missing_fill_context": true,
+    "tail_dust_behavior_enabled": false
   },
   "sizing_rule": {
     "inventory_style": "match_smaller_side_and_rebalance",
-    "matched_size_target": 548.934467,
-    "max_sequence_buy_usdc": 1844.240039
+    "matched_size_target": 220.132785,
+    "max_sequence_buy_usdc": 836.02856
   },
   "source_blueprint_id": "7332e2ce1d49b3d4694c2820a9caff622d407044",
   "strategy_key": "inventory_rebalancing_merge",
-  "strategy_name": "coldmath_inventory_rebalancing_merge_v1"
+  "strategy_name": "coldmath_inventory_rebalancing_merge_v2"
 }

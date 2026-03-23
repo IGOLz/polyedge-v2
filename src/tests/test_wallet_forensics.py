@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import unittest
 import asyncio
-from datetime import UTC, date, datetime
+import json
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -31,14 +32,21 @@ from analysis.wallet_forensics.inference import build_shadow_replay, infer_strat
 from analysis.wallet_forensics.ledger import build_wallet_ledger
 from analysis.wallet_forensics.main import _receipt_map, _should_persist_derived_rows
 from analysis.wallet_forensics.backtest import (
+    build_inventory_merge_attribution_summary,
     build_inventory_merge_bot_config,
     build_inventory_merge_grid,
+    enrich_inventory_merge_sequences,
     evaluate_inventory_merge_grid,
     rank_inventory_merge_results,
     select_best_inventory_merge_config,
     select_inventory_merge_sequences,
 )
-from analysis.wallet_forensics.paper_scan import build_paper_scan_markdown, scan_inventory_merge_candidates
+from analysis.wallet_forensics.paper_scan import (
+    build_paper_scan_markdown,
+    run_paper_scan,
+    scan_inventory_merge_candidates,
+    scan_inventory_merge_live_report,
+)
 from analysis.wallet_forensics.playbooks import build_strategy_blueprints, extract_playbook_sequences
 from analysis.wallet_forensics.report import (
     build_fill_context_markdown,
@@ -1189,6 +1197,67 @@ class WalletForensicsPlaybookTests(unittest.TestCase):
 
 
 class WalletForensicsBacktestTests(unittest.TestCase):
+    def test_enrich_inventory_merge_sequences_builds_fill_context_and_pnl_attribution(self):
+        sequence = {
+            "sequence_id": "seq-1",
+            "condition_id": "cond-1",
+            "started_at": datetime(2026, 3, 20, 10, 0, tzinfo=UTC),
+            "ended_at": datetime(2026, 3, 20, 10, 10, tzinfo=UTC),
+            "realized_pnl": 4.0,
+            "strategy_tags_json": [],
+            "payload_json": {
+                "matched_size": 20.0,
+                "buy_usdc": 16.0,
+                "buy_trade_ids": ["buy-1", "buy-2"],
+                "min_entry_price": 0.40,
+                "terminal_event_type": "merge",
+            },
+        }
+        fill_context_rows = [
+            {
+                "ledger_event_id": "buy-1",
+                "price_history_execution_label": "better_than_nearby_trade",
+                "price_history_pair_under_par": True,
+                "price_history_coverage": "full_pair",
+            },
+            {
+                "ledger_event_id": "buy-2",
+                "price_history_execution_label": "nearby_trade_aligned",
+                "price_history_pair_under_par": True,
+                "price_history_coverage": "full_pair",
+            },
+        ]
+        ledger_rows = [
+            {
+                "condition_id": "cond-1",
+                "occurred_at": datetime(2026, 3, 20, 10, 5, tzinfo=UTC),
+                "event_type": "merge",
+                "side": "merge",
+                "realized_pnl": 3.5,
+            },
+            {
+                "condition_id": "cond-1",
+                "occurred_at": datetime(2026, 3, 20, 10, 7, tzinfo=UTC),
+                "event_type": "trade",
+                "side": "sell",
+                "realized_pnl": 0.5,
+            },
+        ]
+
+        enriched = enrich_inventory_merge_sequences(
+            sequences=[sequence],
+            fill_context_rows=fill_context_rows,
+            ledger_rows=ledger_rows,
+        )
+        summary = build_inventory_merge_attribution_summary(enriched)
+
+        self.assertEqual(enriched[0]["fill_context_summary_json"]["under_par_buy_fill_ratio"], 1.0)
+        self.assertEqual(enriched[0]["fill_context_summary_json"]["worse_buy_fill_ratio"], 0.0)
+        self.assertAlmostEqual(enriched[0]["pnl_attribution_json"]["merge_redeem_realized_pnl"], 3.5)
+        self.assertAlmostEqual(enriched[0]["pnl_attribution_json"]["inventory_rebalancing_realized_pnl"], 0.5)
+        self.assertAlmostEqual(enriched[0]["pnl_attribution_json"]["other_residual_realized_pnl"], 0.0)
+        self.assertAlmostEqual(summary["estimated_under_par_entry_edge_pnl"], 4.0)
+
     def test_inventory_merge_backtest_grid_prefers_profitable_supported_config(self):
         sequences = [
             {
@@ -1251,6 +1320,78 @@ class WalletForensicsBacktestTests(unittest.TestCase):
         self.assertGreater(best["total_realized_pnl"], 0.0)
         self.assertTrue(all(row["sequence_id"] != "seq-3" for row in selected))
 
+    def test_inventory_merge_selection_applies_fill_context_override(self):
+        sequences = [
+            {
+                "sequence_id": "seq-good",
+                "condition_id": "cond-1",
+                "realized_pnl": 0.2,
+                "payload_json": {
+                    "matched_size": 10.0,
+                    "inventory_imbalance_ratio": 0.10,
+                    "merge_delay_minutes": 5.0,
+                    "buy_usdc": 9.8,
+                },
+                "fill_context_summary_json": {
+                    "buy_trade_count": 2,
+                    "buy_fill_context_count": 2,
+                    "has_full_buy_fill_context": True,
+                    "under_par_buy_fill_ratio": 1.0,
+                    "worse_buy_fill_ratio": 0.50,
+                },
+            },
+            {
+                "sequence_id": "seq-bad",
+                "condition_id": "cond-2",
+                "realized_pnl": 0.05,
+                "payload_json": {
+                    "matched_size": 10.0,
+                    "inventory_imbalance_ratio": 0.10,
+                    "merge_delay_minutes": 5.0,
+                    "buy_usdc": 9.95,
+                },
+                "fill_context_summary_json": {
+                    "buy_trade_count": 2,
+                    "buy_fill_context_count": 2,
+                    "has_full_buy_fill_context": True,
+                    "under_par_buy_fill_ratio": 1.0,
+                    "worse_buy_fill_ratio": 0.50,
+                },
+            },
+            {
+                "sequence_id": "seq-missing",
+                "condition_id": "cond-3",
+                "realized_pnl": 0.2,
+                "payload_json": {
+                    "matched_size": 10.0,
+                    "inventory_imbalance_ratio": 0.10,
+                    "merge_delay_minutes": 5.0,
+                    "buy_usdc": 9.8,
+                },
+                "fill_context_summary_json": {
+                    "buy_trade_count": 2,
+                    "buy_fill_context_count": 1,
+                    "has_full_buy_fill_context": False,
+                    "under_par_buy_fill_ratio": 1.0,
+                    "worse_buy_fill_ratio": 0.0,
+                },
+            },
+        ]
+        config = {
+            "complete_set_cost_lte": 0.995,
+            "max_inventory_imbalance_ratio": 0.25,
+            "min_matched_size": 5.0,
+            "max_merge_delay_minutes": 15.0,
+            "require_full_fill_context": True,
+            "min_under_par_buy_fill_ratio": 0.75,
+            "max_worse_buy_fill_ratio": 0.10,
+            "worse_buy_override_complete_set_cost_lte": 0.98,
+        }
+
+        selected = select_inventory_merge_sequences(sequences, config)
+
+        self.assertEqual([row["sequence_id"] for row in selected], ["seq-good"])
+
     def test_inventory_merge_bot_config_uses_best_config_and_sequence_stats(self):
         best_config = {
             "config_id": "cfg-1",
@@ -1280,6 +1421,56 @@ class WalletForensicsBacktestTests(unittest.TestCase):
         self.assertEqual(config["entry_rule"]["complete_set_cost_lte"], 0.995)
         self.assertEqual(config["source_blueprint_id"], "bp-1")
         self.assertGreater(config["sizing_rule"]["matched_size_target"], 0.0)
+
+    def test_inventory_merge_bot_config_emits_fill_context_rules_for_v2(self):
+        best_config = {
+            "config_id": "cfg-2",
+            "complete_set_cost_lte": 0.98,
+            "max_inventory_imbalance_ratio": 0.20,
+            "min_matched_size": 25.0,
+            "max_merge_delay_minutes": 15.0,
+            "support_count": 6,
+            "total_realized_pnl": 12.0,
+            "roi_pct": 3.1,
+            "win_rate_pct": 100.0,
+            "ranking_score": 91.0,
+            "min_under_par_buy_fill_ratio": 1.0,
+            "max_worse_buy_fill_ratio": 0.10,
+            "worse_buy_override_complete_set_cost_lte": 0.98,
+        }
+        selected_sequences = [
+            {
+                "payload_json": {"matched_size": 30.0, "buy_usdc": 29.0},
+                "fill_context_summary_json": {
+                    "has_full_buy_fill_context": True,
+                    "under_par_buy_fill_ratio": 1.0,
+                    "worse_buy_fill_ratio": 0.0,
+                },
+                "pnl_attribution_json": {
+                    "estimated_under_par_entry_edge_pnl": 1.0,
+                    "merge_redeem_realized_pnl": 1.0,
+                    "inventory_rebalancing_realized_pnl": 0.0,
+                    "tail_dust_residual_realized_pnl": 0.0,
+                    "other_residual_realized_pnl": 0.0,
+                },
+                "realized_pnl": 1.0,
+            }
+        ]
+
+        config = build_inventory_merge_bot_config(
+            target={"proxy_wallet": "0xwallet", "profile_name": "ColdMath"},
+            best_config=best_config,
+            selected_sequences=selected_sequences,
+            source_blueprint={"blueprint_id": "bp-2"},
+            fill_context_enabled=True,
+            fill_context_path="/tmp/wallet_fill_context.csv",
+        )
+
+        self.assertEqual(config["strategy_name"], "coldmath_inventory_rebalancing_merge_v2")
+        self.assertTrue(config["entry_rule"]["require_full_buy_fill_context"])
+        self.assertEqual(config["entry_rule"]["min_under_par_buy_fill_ratio"], 1.0)
+        self.assertEqual(config["inventory_balancing_rule"]["max_inventory_imbalance_ratio"], 0.20)
+        self.assertEqual(config["fill_context_artifact_path"], "/tmp/wallet_fill_context.csv")
 
 
 class WalletForensicsPaperScanTests(unittest.TestCase):
@@ -1387,6 +1578,254 @@ class WalletForensicsPaperScanTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["market_id"], "mkt-good")
 
+    def test_paper_scan_live_report_applies_v2_quote_filters_and_tracks_near_misses(self):
+        captured_at = datetime(2026, 3, 22, 12, 0, tzinfo=UTC)
+        context = WeatherMarketContext(
+            event_id="event-1",
+            event_slug="weather-test",
+            title="Weather Test",
+            city="Rome",
+            city_key="rome",
+            station_code=None,
+            station_name=None,
+            lat=None,
+            lon=None,
+            timezone="Europe/Rome",
+            local_date=date(2026, 3, 22),
+            unit="C",
+            rule_family=None,
+            resolution_source_url=None,
+            verified_station=True,
+            observation_provider=None,
+            forecast_provider=None,
+            markets=[
+                WeatherBucketMarket(
+                    market_id="mkt-good",
+                    event_id="event-1",
+                    event_slug="weather-test",
+                    market_slug="weather-test-good",
+                    question="Good bucket",
+                    city="Rome",
+                    city_key="rome",
+                    station_code=None,
+                    station_name=None,
+                    lat=None,
+                    lon=None,
+                    timezone="Europe/Rome",
+                    local_date=date(2026, 3, 22),
+                    unit="C",
+                    bucket_label="10C to 11C",
+                    bucket_low=10.0,
+                    bucket_high=11.0,
+                    bucket_order=1,
+                    rule_family=None,
+                    resolution_source_url=None,
+                    resolution_precision_scale=0,
+                    neg_risk=False,
+                    active=True,
+                    eligible=True,
+                    eligibility_reason=None,
+                    yes_token_id="yes-1",
+                    no_token_id="no-1",
+                    started_at=datetime(2026, 3, 22, 10, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 3, 22, 18, 0, tzinfo=UTC),
+                    yes_bid=0.46,
+                    yes_ask=0.47,
+                    yes_ask_size=120.0,
+                    no_bid=0.51,
+                    no_ask=0.52,
+                    no_ask_size=100.0,
+                    latest_quote_time=captured_at,
+                ),
+                WeatherBucketMarket(
+                    market_id="mkt-stale",
+                    event_id="event-1",
+                    event_slug="weather-test",
+                    market_slug="weather-test-stale",
+                    question="Stale bucket",
+                    city="Rome",
+                    city_key="rome",
+                    station_code=None,
+                    station_name=None,
+                    lat=None,
+                    lon=None,
+                    timezone="Europe/Rome",
+                    local_date=date(2026, 3, 22),
+                    unit="C",
+                    bucket_label="11C to 12C",
+                    bucket_low=11.0,
+                    bucket_high=12.0,
+                    bucket_order=2,
+                    rule_family=None,
+                    resolution_source_url=None,
+                    resolution_precision_scale=0,
+                    neg_risk=False,
+                    active=True,
+                    eligible=True,
+                    eligibility_reason=None,
+                    yes_token_id="yes-2",
+                    no_token_id="no-2",
+                    started_at=datetime(2026, 3, 22, 10, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 3, 22, 18, 0, tzinfo=UTC),
+                    yes_bid=0.46,
+                    yes_ask=0.47,
+                    yes_ask_size=120.0,
+                    no_bid=0.51,
+                    no_ask=0.52,
+                    no_ask_size=100.0,
+                    latest_quote_time=captured_at - timedelta(hours=2),
+                ),
+                WeatherBucketMarket(
+                    market_id="mkt-imbalanced",
+                    event_id="event-1",
+                    event_slug="weather-test",
+                    market_slug="weather-test-imbalanced",
+                    question="Imbalanced bucket",
+                    city="Rome",
+                    city_key="rome",
+                    station_code=None,
+                    station_name=None,
+                    lat=None,
+                    lon=None,
+                    timezone="Europe/Rome",
+                    local_date=date(2026, 3, 22),
+                    unit="C",
+                    bucket_label="12C to 13C",
+                    bucket_low=12.0,
+                    bucket_high=13.0,
+                    bucket_order=3,
+                    rule_family=None,
+                    resolution_source_url=None,
+                    resolution_precision_scale=0,
+                    neg_risk=False,
+                    active=True,
+                    eligible=True,
+                    eligibility_reason=None,
+                    yes_token_id="yes-3",
+                    no_token_id="no-3",
+                    started_at=datetime(2026, 3, 22, 10, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 3, 22, 18, 0, tzinfo=UTC),
+                    yes_bid=0.45,
+                    yes_ask=0.46,
+                    yes_ask_size=200.0,
+                    no_bid=0.51,
+                    no_ask=0.52,
+                    no_ask_size=10.0,
+                    latest_quote_time=captured_at,
+                ),
+                WeatherBucketMarket(
+                    market_id="mkt-wide",
+                    event_id="event-1",
+                    event_slug="weather-test",
+                    market_slug="weather-test-wide",
+                    question="Wide bucket",
+                    city="Rome",
+                    city_key="rome",
+                    station_code=None,
+                    station_name=None,
+                    lat=None,
+                    lon=None,
+                    timezone="Europe/Rome",
+                    local_date=date(2026, 3, 22),
+                    unit="C",
+                    bucket_label="13C to 14C",
+                    bucket_low=13.0,
+                    bucket_high=14.0,
+                    bucket_order=4,
+                    rule_family=None,
+                    resolution_source_url=None,
+                    resolution_precision_scale=0,
+                    neg_risk=False,
+                    active=True,
+                    eligible=True,
+                    eligibility_reason=None,
+                    yes_token_id="yes-4",
+                    no_token_id="no-4",
+                    started_at=datetime(2026, 3, 22, 10, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 3, 22, 18, 0, tzinfo=UTC),
+                    yes_bid=0.35,
+                    yes_ask=0.45,
+                    yes_ask_size=80.0,
+                    no_bid=0.45,
+                    no_ask=0.54,
+                    no_ask_size=80.0,
+                    latest_quote_time=captured_at,
+                ),
+                WeatherBucketMarket(
+                    market_id="mkt-missing",
+                    event_id="event-1",
+                    event_slug="weather-test",
+                    market_slug="weather-test-missing",
+                    question="Missing pair bucket",
+                    city="Rome",
+                    city_key="rome",
+                    station_code=None,
+                    station_name=None,
+                    lat=None,
+                    lon=None,
+                    timezone="Europe/Rome",
+                    local_date=date(2026, 3, 22),
+                    unit="C",
+                    bucket_label="14C to 15C",
+                    bucket_low=14.0,
+                    bucket_high=15.0,
+                    bucket_order=5,
+                    rule_family=None,
+                    resolution_source_url=None,
+                    resolution_precision_scale=0,
+                    neg_risk=False,
+                    active=True,
+                    eligible=True,
+                    eligibility_reason=None,
+                    yes_token_id="yes-5",
+                    no_token_id="no-5",
+                    started_at=datetime(2026, 3, 22, 10, 0, tzinfo=UTC),
+                    ended_at=datetime(2026, 3, 22, 18, 0, tzinfo=UTC),
+                    yes_ask=0.47,
+                    yes_ask_size=100.0,
+                    no_ask=0.48,
+                    no_ask_size=100.0,
+                    latest_quote_time=captured_at,
+                ),
+            ],
+        )
+        bot_config = {
+            "strategy_name": "coldmath_inventory_rebalancing_merge_v2",
+            "entry_rule": {
+                "complete_set_cost_lte": 0.995,
+                "min_matched_size": 25.0,
+                "require_full_buy_fill_context": True,
+                "min_under_par_buy_fill_ratio": 0.5,
+                "max_worse_buy_fill_ratio": 0.25,
+                "worse_buy_override_complete_set_cost_lte": 0.98,
+            },
+            "inventory_balancing_rule": {
+                "max_inventory_imbalance_ratio": 0.25,
+            },
+            "risk_rule": {
+                "reject_missing_fill_context": True,
+            },
+        }
+
+        async def fake_fetch_active_weather_contexts(*, eligible_only=True):
+            return [context]
+
+        with patch("analysis.wallet_forensics.paper_scan.fetch_active_weather_contexts", fake_fetch_active_weather_contexts):
+            report = asyncio.run(
+                scan_inventory_merge_live_report(
+                    bot_config=bot_config,
+                    captured_at=captured_at,
+                )
+            )
+
+        self.assertEqual(report["candidate_count"], 1)
+        self.assertEqual(report["candidates"][0]["market_id"], "mkt-good")
+        reason_counts = {row["reason"]: row["count"] for row in report["rejection_reason_counts"]}
+        self.assertEqual(reason_counts["stale_quote"], 1)
+        self.assertEqual(reason_counts["inventory_size_imbalance"], 1)
+        self.assertEqual(reason_counts["wide_leg_spread"], 1)
+        self.assertEqual(reason_counts["missing_full_quote_pair"], 1)
+
     def test_paper_scan_markdown_lists_top_candidates(self):
         markdown = build_paper_scan_markdown(
             target={"proxy_wallet": "0xwallet", "profile_name": "ColdMath"},
@@ -1408,6 +1847,143 @@ class WalletForensicsPaperScanTests(unittest.TestCase):
         self.assertIn("Inventory Merge Paper Scan", markdown)
         self.assertIn("Rome", markdown)
         self.assertIn("0.9700", markdown)
+
+    def test_paper_scan_markdown_lists_near_misses_and_runtime_notes(self):
+        markdown = build_paper_scan_markdown(
+            target={"proxy_wallet": "0xwallet", "profile_name": "ColdMath"},
+            bot_config={
+                "strategy_name": "coldmath_inventory_rebalancing_merge_v2",
+                "entry_rule": {
+                    "complete_set_cost_lte": 0.995,
+                    "require_full_buy_fill_context": True,
+                    "preferred_price_history_execution_labels": ["better_than_nearby_trade"],
+                    "max_worse_buy_fill_ratio": 0.25,
+                },
+                "risk_rule": {"reject_missing_fill_context": True},
+                "inventory_balancing_rule": {"max_inventory_imbalance_ratio": 0.25},
+            },
+            candidates=[],
+            scan_report={
+                "live_rules": {
+                    "require_full_quote_pair": True,
+                    "min_matched_size": 10.0,
+                    "max_inventory_imbalance_ratio": 0.25,
+                    "max_quote_age_seconds": 300,
+                    "max_leg_spread": 0.05,
+                    "midpoint_confirmation_required": True,
+                },
+                "near_misses": [
+                    {
+                        "city": "Rome",
+                        "local_date": "2026-03-22",
+                        "bucket_label": "10C to 11C",
+                        "combined_cost": 0.997,
+                        "max_mergeable_size": 80.0,
+                        "inventory_imbalance_ratio": 0.1,
+                        "rejection_reasons": ["complete_set_cost_above_threshold"],
+                    }
+                ],
+                "rejection_reason_counts": [
+                    {"reason": "complete_set_cost_above_threshold", "count": 3}
+                ],
+                "runtime_only_constraints": ["Historical fill-quality labels are approximated live."],
+            },
+        )
+
+        self.assertIn("Near Misses", markdown)
+        self.assertIn("complete_set_cost_above_threshold", markdown)
+        self.assertIn("Runtime Notes", markdown)
+
+    def test_paper_scan_watch_mode_stops_on_candidate_and_records_history(self):
+        with TemporaryDirectory() as tmpdir:
+            output_dir = Path(tmpdir)
+            prepared = {
+                "target": {"proxy_wallet": "0xwallet", "profile_name": None},
+                "output_dir": output_dir,
+                "config_path": output_dir / "bot_config.json",
+                "bot_config": {"strategy_name": "coldmath_inventory_rebalancing_merge_v2"},
+            }
+            results = [
+                {
+                    **prepared,
+                    "output_dir": str(output_dir),
+                    "config_path": str(output_dir / "bot_config.json"),
+                    "candidate_count": 0,
+                    "near_miss_count": 3,
+                    "scan_report": {
+                        "generated_at": "2026-03-23T14:00:00+00:00",
+                        "context_count": 1,
+                        "market_count": 11,
+                        "candidate_count": 0,
+                        "near_misses": [{}, {}, {}],
+                        "rejection_reason_counts": [
+                            {"reason": "complete_set_cost_above_threshold", "count": 11}
+                        ],
+                    },
+                },
+                {
+                    **prepared,
+                    "output_dir": str(output_dir),
+                    "config_path": str(output_dir / "bot_config.json"),
+                    "candidate_count": 1,
+                    "near_miss_count": 1,
+                    "scan_report": {
+                        "generated_at": "2026-03-23T14:01:00+00:00",
+                        "context_count": 1,
+                        "market_count": 11,
+                        "candidate_count": 1,
+                        "near_misses": [{}],
+                        "candidates": [
+                            {
+                                "city": "tel aviv",
+                                "local_date": "2026-03-24",
+                                "bucket_label": "16C",
+                                "combined_cost": 0.994,
+                                "merge_edge": 0.006,
+                                "max_mergeable_size": 25.0,
+                            }
+                        ],
+                        "rejection_reason_counts": [
+                            {"reason": "missing_mergeable_size", "count": 10}
+                        ],
+                    },
+                },
+            ]
+
+            with (
+                patch("analysis.wallet_forensics.paper_scan._prepare_paper_scan", return_value=prepared),
+                patch("analysis.wallet_forensics.paper_scan._run_prepared_paper_scan", side_effect=results),
+                patch("analysis.wallet_forensics.paper_scan.time.sleep") as sleep_mock,
+            ):
+                result = run_paper_scan(
+                    [
+                        "--wallet",
+                        "0xwallet",
+                        "--output-dir",
+                        tmpdir,
+                        "--watch",
+                        "--interval-seconds",
+                        "5",
+                        "--exit-on-candidate",
+                    ]
+                )
+
+            self.assertTrue(result["watch_mode"])
+            self.assertEqual(result["iterations"], 2)
+            self.assertEqual(result["candidate_count"], 1)
+            self.assertEqual(result["stopped_reason"], "candidate_found")
+            sleep_mock.assert_called_once_with(5.0)
+
+            history_path = output_dir / "wallet_inventory_rebalancing_merge_paper_scan_history.jsonl"
+            history_rows = [
+                json.loads(line)
+                for line in history_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(history_rows), 2)
+            self.assertEqual(history_rows[0]["candidate_count"], 0)
+            self.assertEqual(history_rows[1]["candidate_count"], 1)
+            self.assertEqual(history_rows[1]["top_candidate"]["bucket_label"], "16C")
 
 
 class WalletForensicsFillContextTests(unittest.TestCase):

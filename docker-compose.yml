@@ -158,6 +158,33 @@ services:
       polyedge.role: "trading"
       polyedge.update: "safe"
 
+  # ── Trading Weather: Dedicated ColdMath-style merge bot ──────────────
+  trading-weather:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.trading
+    container_name: polyedge-trading-weather
+    platform: linux/amd64
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      WEATHER_MERGE_SEQUENCE_BUDGET_USD: "0"
+      WEATHER_MERGE_MAX_TOTAL_EXPOSURE_USD: "0"
+      WEATHER_MERGE_DAILY_LOSS_LIMIT_USD: "0"
+      WEATHER_MERGE_MAX_CONCURRENT_POSITIONS: "0"
+      WEATHER_MERGE_MAX_ENTRY_ATTEMPTS: "0"
+    command: ["python", "-u", "-m", "trading_weather.main"]
+    volumes:
+      - ./logs/trading-weather:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "trading-weather"
+      polyedge.update: "safe"
+
   # ── Dashboard: Next.js UI for analytics + limited DB controls ─────────
   dashboard:
     build:

@@ -1,42 +1,58 @@
 # Sequence Backtest: inventory_rebalancing_merge
 
 ## Overview
-- Profile: `ColdMath`
+- Profile: `0x594edb9112f526fa6a80b8f858a6379c8a2c1c11`
 - Proxy wallet: `0x594edb9112f526fa6a80b8f858a6379c8a2c1c11`
-- Configs tested: `900`
-- Selected sequences under best config: `13`
+- Configs tested: `24300`
+- Selected sequences under best config: `93`
+- Fill-context-aware mode: `True`
+- Fill-context artifact: `/Users/igol/Documents/repo/polyedge-v2/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_fill_context.csv`
 
 ## Best Config
 - Complete set cost <= `0.995`
 - Inventory imbalance <= `0.491617`
 - Min matched size >= `0.0`
 - Max merge delay minutes: `240.0`
-- Total realized PnL: `352.83`
-- ROI: `2.13%`
+- Require full buy-fill context: `True`
+- Under-par buy-fill ratio >= `0.5`
+- Max worse-than-nearby-buy ratio <= `0.25`
+- Worse-fill override complete-set cost <= `0.98`
+- Total realized PnL: `1683.30`
+- ROI: `2.69%`
 - Win rate: `100.00%`
 - Profit factor: `999.00`
 - Max drawdown: `0.00`
 
+## PnL Attribution
+- Estimated under-par entry edge: `1683.30`
+- Realized via merge/redeem: `2025.83`
+- Realized via sell-side inventory rebalancing: `0.00`
+- Tail/dust residual realized PnL: `-83.08`
+- Other residual realized PnL: `-259.45`
+- Avg under-par buy-fill ratio: `0.802482`
+- Avg worse-than-nearby-buy ratio: `0.161982`
+- Sequences with full buy-fill context: `93`
+
 ## Top Configs
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`0.0` | delay<=`240.0`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`0.0` | delay<=`nan`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`1.0` | delay<=`240.0`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`1.0` | delay<=`nan`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`5.0` | delay<=`240.0`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`5.0` | delay<=`nan`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.5` | matched>=`0.0` | delay<=`240.0`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.5` | matched>=`0.0` | delay<=`nan`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.5` | matched>=`1.0` | delay<=`240.0`
-- score `67.69` | pnl `333.97` | roi `2.43%` | support `9` | cost<=`0.99` | imbalance<=`0.5` | matched>=`1.0` | delay<=`nan`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`0.0` | delay<=`240.0` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`0.0` | delay<=`nan` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`1.0` | delay<=`240.0` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`1.0` | delay<=`nan` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`5.0` | delay<=`240.0` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.491617` | matched>=`5.0` | delay<=`nan` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.5` | matched>=`0.0` | delay<=`240.0` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.5` | matched>=`0.0` | delay<=`nan` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.5` | matched>=`1.0` | delay<=`240.0` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
+- score `80.47` | pnl `1062.76` | roi `4.72%` | support `49` | cost<=`0.99` | imbalance<=`0.5` | matched>=`1.0` | delay<=`nan` | under_par>=`0.5` | worse<=`0.0` | override<=`0.97`
 
 ## Sample Sequences
-- `0x676fbaf23c799c26e0425425d14d3f880b27864545ecc60c6e1c2fda803bb5e3` pnl `0.10`, cost `0.9900001216216449`, matched `10.0`, delay `18.733333`
-- `0x90ed69eebba176d7b22ea939de8804fcf832dd3ee919ed5b74582799b58108b3` pnl `11.76`, cost `0.9934115705188523`, matched `1785.516248`, delay `1.666667`
-- `0xbc3fea313151eaa534f45ee86a4d280b71440be60e0e75ba9a26e693511788cc` pnl `26.05`, cost `0.9597363207819463`, matched `647.04`, delay `170.733333`
-- `0x90151d6d8bc6ad2ce63ca57e7cbc8ac6078143994bf92e302fe0724a1e66a292` pnl `23.42`, cost `0.9535586743487621`, matched `504.222036`, delay `0.3`
-- `0x9dc5b0fc92f3df8b0231aaccae6d6099e13fa4a8613e09bf484d39d846938020` pnl `0.42`, cost `0.9655194581285356`, matched `12.198885`, delay `0.2`
-- `0xcf499b3218dd728700e33f2a33f972fecb5c70e99c3a83dd0bccc46d22e3c441` pnl `13.03`, cost `0.9276231783996913`, matched `179.998063`, delay `0.3`
-- `0xf0cce91a99ec8c26564f519f827b6acbc96be950106bdede06e297d12245977d` pnl `113.82`, cost `0.9687094579817415`, matched `3637.529861`, delay `0.1`
-- `0xf0cce91a99ec8c26564f519f827b6acbc96be950106bdede06e297d12245977d` pnl `89.66`, cost `0.962619331813795`, matched `2398.484156`, delay `3.133333`
-- `0xbcf46994658ed52b8c9c21caceaf06a8d9aaa26ba8934e3e40ad5d7047e19dc5` pnl `50.46`, cost `0.9882442814130303`, matched `4292.594945`, delay `4.766667`
-- `0x51f211ae1ee959910c816567bb8b8aa0a7175479fd040ae661c523ae96adb2b8` pnl `0.91`, cost `0.9833917791088037`, matched `54.7008`, delay `1.033333`
+- `0x413089dc17ed079a4f0634f536ee40d54001716f1aae756db72122049adddcdc` pnl `10.43`, cost `0.7393333333333333`, matched `40.0`, delay `114.666667`, under_par_ratio `1.0`, worse_ratio `0.0`, merge/redeem `10.426667`
+- `0xbce5a54c8eebe220ac1d252383c7945c264d50c5ef910757d8eb048e3628d326` pnl `28.79`, cost `0.7654888478722219`, matched `122.764388`, delay `0.466667`, under_par_ratio `0.6`, worse_ratio `0.4`, merge/redeem `28.789618`
+- `0x6e32c838780b9da439aff54df5b375343144f07fff7561bfc104005b25b4ec39` pnl `0.70`, cost `0.9304152682580948`, matched `10.0`, delay `13.333333`, under_par_ratio `0.5`, worse_ratio `0.5`, merge/redeem `0.695847`
+- `0x0d7b74db994f2e3584012cfeec7e6cded88b42bedc55480e50a468793f4e4c61` pnl `1.13`, cost `0.9932170519887971`, matched `167.3`, delay `59.8`, under_par_ratio `0.75`, worse_ratio `0.25`, merge/redeem `1.134787`
+- `0xcee107c89d3b6b40cb46d4fd3dfed2696ec8474e1f705f51f4668558be6ff607` pnl `10.87`, cost `0.9342859810192583`, matched `165.478975`, delay `0.466667`, under_par_ratio `0.884615`, worse_ratio `0.115385`, merge/redeem `10.874289`
+- `0x2f7aa1eacd665c1c40a9344f8bca6ff3f8a2686ebcc510f42defb058cc580883` pnl `6.34`, cost `0.947140294973499`, matched `119.964157`, delay `0.566667`, under_par_ratio `0.529412`, worse_ratio `0.470588`, merge/redeem `6.34127`
+- `0x8f6b3594824957123da6025938307fc2b51b6df7331828d35ed7bfce595d021d` pnl `6.87`, cost `0.9925383424253772`, matched `920.986499`, delay `1.133333`, under_par_ratio `0.848485`, worse_ratio `0.0`, merge/redeem `6.872086`
+- `0x0679631969df166f3b147723078c968c028a2cb03d0ccbf8466aabc7322ae242` pnl `0.81`, cost `0.9916640741378493`, matched `97.67`, delay `1.333333`, under_par_ratio `0.833333`, worse_ratio `0.166667`, merge/redeem `0.81417`
+- `0x2f7aa1eacd665c1c40a9344f8bca6ff3f8a2686ebcc510f42defb058cc580883` pnl `47.24`, cost `0.9019882216070584`, matched `481.992132`, delay `0.366667`, under_par_ratio `0.700935`, worse_ratio `0.233645`, merge/redeem `47.240906`
+- `0x2f7aa1eacd665c1c40a9344f8bca6ff3f8a2686ebcc510f42defb058cc580883` pnl `2.01`, cost `0.9828877594758952`, matched `117.720605`, delay `0.933333`, under_par_ratio `0.727273`, worse_ratio `0.181818`, merge/redeem `12.608127`

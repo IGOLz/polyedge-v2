@@ -6,6 +6,7 @@ Trading auth, strategy constants, execution config all live here.
 import os
 
 from shared.config import TRADING_AUTH, CHAIN_ID, PROXY_URL
+from shared.http import get_async_http_client, get_sync_http_client as get_shared_sync_http_client
 
 import httpx
 
@@ -53,17 +54,11 @@ STRATEGY_MOMENTUM_ENABLED: bool = os.getenv("STRATEGY_MOMENTUM_ENABLED", "true")
 # ── HTTP helpers ─────────────────────────────────────────────────────────
 
 def get_http_client(**kwargs) -> httpx.AsyncClient:
-    if PROXY_URL:
-        kwargs.setdefault("proxy", PROXY_URL)
-    kwargs.setdefault("timeout", 30.0)
-    return httpx.AsyncClient(**kwargs)
+    return get_async_http_client(**kwargs)
 
 
 def get_sync_http_client(**kwargs) -> httpx.Client:
-    if PROXY_URL:
-        kwargs.setdefault("proxy", PROXY_URL)
-    kwargs.setdefault("timeout", 30.0)
-    return httpx.Client(**kwargs)
+    return get_shared_sync_http_client(**kwargs)
 
 
 def patch_clob_client_proxy(proxy_url: str = "") -> None:
