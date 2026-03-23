@@ -10,6 +10,7 @@ from typing import Any
 from analysis.wallet_forensics.paper_scan import (
     _candidate_sort_key,
     _evaluate_inventory_merge_candidate,
+    _near_miss_sort_key,
     build_inventory_merge_live_rules,
 )
 from analysis.wallet_forensics.utils import safe_float
@@ -97,24 +98,72 @@ def rank_live_candidates(
     captured_at: datetime | None = None,
     excluded_market_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
+    report = scan_live_market_report(
+        contexts,
+        runtime,
+        captured_at=captured_at,
+        excluded_market_ids=excluded_market_ids,
+    )
+    return report["candidates"]
+
+
+def scan_live_market_report(
+    contexts: list[WeatherMarketContext],
+    runtime: WeatherMergeRuntime,
+    *,
+    captured_at: datetime | None = None,
+    excluded_market_ids: set[str] | None = None,
+    near_miss_limit: int = 10,
+) -> dict[str, Any]:
     captured_at = captured_at or datetime.now(UTC)
     excluded_market_ids = excluded_market_ids or set()
-    rows: list[dict[str, Any]] = []
+    candidates: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    market_count = 0
+    rejection_reason_counts: dict[str, int] = {}
+
     for context in contexts:
         for market in context.markets:
+            market_count += 1
             row = _evaluate_inventory_merge_candidate(
                 context=context,
                 market=market,
                 live_rules=runtime.live_rules,
                 captured_at=captured_at,
             )
-            if not row.get("qualifies"):
-                continue
-            if str(row.get("market_id")) in excluded_market_ids:
-                continue
-            rows.append(row)
-    rows.sort(key=_candidate_sort_key, reverse=True)
-    return rows
+            market_id = str(row.get("market_id") or "")
+            if row.get("qualifies"):
+                if market_id not in excluded_market_ids:
+                    candidates.append(row)
+                    continue
+                row = {
+                    **row,
+                    "qualifies": False,
+                    "rejection_reasons": ["market_already_active"],
+                }
+            rejected.append(row)
+            for reason in row.get("rejection_reasons") or []:
+                reason_key = str(reason)
+                rejection_reason_counts[reason_key] = rejection_reason_counts.get(reason_key, 0) + 1
+
+    candidates.sort(key=_candidate_sort_key, reverse=True)
+    rejected.sort(key=_near_miss_sort_key, reverse=True)
+    return {
+        "generated_at": captured_at,
+        "context_count": len(contexts),
+        "market_count": market_count,
+        "candidate_count": len(candidates),
+        "near_miss_count": len(rejected),
+        "candidates": candidates,
+        "near_misses": rejected[: max(0, int(near_miss_limit))],
+        "rejection_reason_counts": [
+            {"reason": reason, "count": count}
+            for reason, count in sorted(
+                rejection_reason_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ],
+    }
 
 
 def plan_entry(

@@ -9,6 +9,7 @@ from trading_weather.strategy import (
     open_position_exposure,
     plan_entry,
     rank_live_candidates,
+    scan_live_market_report,
 )
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
@@ -164,6 +165,42 @@ class TradingWeatherStrategyTests(unittest.TestCase):
         self.assertEqual(candidates[0]["yes_token_id"], "m1-yes")
         self.assertEqual(candidates[0]["no_token_id"], "m1-no")
         self.assertTrue(candidates[0]["neg_risk"])
+
+    def test_scan_live_market_report_tracks_candidates_and_near_misses(self):
+        report = scan_live_market_report(
+            [
+                _context(
+                    [
+                        _market("m1", yes_bid=0.489, yes_ask=0.49, no_bid=0.5, no_ask=0.501, yes_ask_size=12, no_ask_size=18),
+                        _market("m2", yes_bid=0.5, yes_ask=0.501, no_bid=0.5, no_ask=0.502, yes_ask_size=12, no_ask_size=18),
+                    ]
+                )
+            ],
+            self._runtime(),
+            captured_at=self.captured_at,
+            near_miss_limit=3,
+        )
+
+        self.assertEqual(report["candidate_count"], 1)
+        self.assertEqual(report["near_miss_count"], 1)
+        self.assertEqual(report["candidates"][0]["market_id"], "m1")
+        self.assertEqual(report["near_misses"][0]["market_id"], "m2")
+        self.assertEqual(report["rejection_reason_counts"][0]["reason"], "complete_set_cost_above_threshold")
+        self.assertEqual(report["rejection_reason_counts"][0]["count"], 1)
+
+    def test_scan_live_market_report_marks_active_market_exclusions(self):
+        report = scan_live_market_report(
+            [_context([_market("m1", yes_bid=0.489, yes_ask=0.49, no_bid=0.5, no_ask=0.501, yes_ask_size=12, no_ask_size=18)])],
+            self._runtime(),
+            captured_at=self.captured_at,
+            excluded_market_ids={"m1"},
+            near_miss_limit=3,
+        )
+
+        self.assertEqual(report["candidate_count"], 0)
+        self.assertEqual(report["near_miss_count"], 1)
+        self.assertEqual(report["near_misses"][0]["rejection_reasons"], ["market_already_active"])
+        self.assertEqual(report["rejection_reason_counts"][0]["reason"], "market_already_active")
 
     def test_plan_entry_uses_budget_liquidity_and_expected_edge(self):
         candidate = rank_live_candidates(

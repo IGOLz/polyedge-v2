@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import math
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -25,9 +26,20 @@ from trading_weather.strategy import (
     compute_mergeable_shares,
     open_position_exposure,
     plan_entry,
-    rank_live_candidates,
+    scan_live_market_report,
 )
 from weather.storage import fetch_active_weather_contexts
+
+
+@dataclass(slots=True)
+class WeatherMergeTelemetryState:
+    summary_interval_seconds: float
+    history_path: Path
+    iteration: int = 0
+    last_summary_at: datetime | None = None
+    last_candidate_signature: str | None = None
+    last_candidate_brief: dict[str, Any] | None = None
+    last_stand_down_reason: str | None = None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -150,38 +162,283 @@ async def _log_event(log_type: str, message: str, data: dict[str, Any] | None = 
 
 
 def _cycle_status_message(
-    *,
-    balance: float,
-    active_positions: int,
-    active_exposure_usd: float,
-    context_count: int,
-    market_count: int,
-    candidate_count: int,
-    entry_attempts: int,
-    top_candidate: dict[str, Any] | None,
+    report: dict[str, Any],
 ) -> str:
+    balance = safe_float(report.get("balance")) or 0.0
+    active_positions = int(report.get("active_positions") or 0)
+    active_exposure_usd = safe_float(report.get("active_exposure_usd")) or 0.0
+    context_count = int(report.get("context_count") or 0)
+    market_count = int(report.get("market_count") or 0)
+    candidate_count = int(report.get("candidate_count") or 0)
+    near_miss_count = int(report.get("near_miss_count") or 0)
+    entry_attempts = int(report.get("entry_attempts") or 0)
+    daily_realized_pnl = safe_float(report.get("daily_realized_pnl")) or 0.0
+    stand_down_reason = str(report.get("stand_down_reason") or "").strip()
+    top_candidate = report.get("top_candidate")
+    top_near_miss = report.get("top_near_miss")
+    top_rejection_reasons = report.get("top_rejection_reasons") or []
     message = (
-        "[WEATHER-MERGE] Cycle OK | "
+        "[WEATHER-MERGE] Summary | "
         f"balance={balance:.2f} "
+        f"daily_pnl={daily_realized_pnl:.2f} "
         f"active_positions={active_positions} "
         f"exposure={active_exposure_usd:.2f} "
         f"contexts={context_count} "
         f"markets={market_count} "
         f"candidates={candidate_count} "
+        f"near_misses={near_miss_count} "
         f"entries={entry_attempts}"
     )
+    if stand_down_reason:
+        message += f" | stand_down={stand_down_reason}"
     if top_candidate:
         combined_cost = safe_float(top_candidate.get("combined_cost"))
         merge_edge = safe_float(top_candidate.get("merge_edge"))
+        mergeable_size = safe_float(top_candidate.get("max_mergeable_size"))
         message += (
             " | top="
             f"{top_candidate.get('city')} {top_candidate.get('bucket_label')} "
             f"cost={(combined_cost if combined_cost is not None else float('nan')):.4f} "
-            f"edge={(merge_edge if merge_edge is not None else float('nan')):.4f}"
+            f"edge={(merge_edge if merge_edge is not None else float('nan')):.4f} "
+            f"size={(mergeable_size if mergeable_size is not None else float('nan')):.2f} "
+            f"quality={top_candidate.get('quote_quality_label') or 'n/a'}"
         )
-    else:
-        message += " | stand_down=no_qualifying_candidate"
+    elif top_near_miss:
+        combined_cost = safe_float(top_near_miss.get("combined_cost"))
+        reasons = ", ".join((top_near_miss.get("rejection_reasons") or [])[:3]) or "n/a"
+        message += (
+            " | near="
+            f"{top_near_miss.get('city')} {top_near_miss.get('bucket_label')} "
+            f"cost={(combined_cost if combined_cost is not None else float('nan')):.4f} "
+            f"reasons={reasons}"
+        )
+    if top_rejection_reasons:
+        formatted_reasons = ",".join(
+            f"{item.get('reason')}:{item.get('count')}"
+            for item in top_rejection_reasons[:3]
+        )
+        if formatted_reasons:
+            message += f" | rejections={formatted_reasons}"
     return message
+
+
+def _round_value(value: Any, digits: int = 6) -> float | None:
+    number = safe_float(value)
+    if number is None:
+        return None
+    return round(number, digits)
+
+
+def _candidate_brief(candidate: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not candidate:
+        return None
+    return {
+        "market_id": candidate.get("market_id"),
+        "city": candidate.get("city"),
+        "local_date": candidate.get("local_date"),
+        "bucket_label": candidate.get("bucket_label"),
+        "combined_cost": _round_value(candidate.get("combined_cost"), 4),
+        "merge_edge": _round_value(candidate.get("merge_edge"), 4),
+        "max_mergeable_size": _round_value(candidate.get("max_mergeable_size"), 2),
+        "inventory_imbalance_ratio": _round_value(candidate.get("inventory_imbalance_ratio"), 4),
+        "quote_quality_label": candidate.get("quote_quality_label"),
+        "rejection_reasons": list(candidate.get("rejection_reasons") or [])[:3],
+    }
+
+
+def _plan_brief(plan: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not plan:
+        return None
+    return {
+        "market_id": plan.get("market_id"),
+        "city": plan.get("city"),
+        "local_date": plan.get("local_date"),
+        "bucket_label": plan.get("bucket_label"),
+        "target_shares": int(plan.get("target_shares") or 0),
+        "combined_cost": _round_value(plan.get("combined_cost"), 4),
+        "expected_edge_usd": _round_value(plan.get("expected_edge_usd"), 4),
+        "first_side": plan.get("first_side"),
+        "second_side": plan.get("second_side"),
+    }
+
+
+def _report_snapshot(report: dict[str, Any]) -> dict[str, Any]:
+    generated_at = report.get("generated_at")
+    if isinstance(generated_at, datetime):
+        generated_at = generated_at.isoformat()
+    return {
+        "generated_at": generated_at,
+        "dry_run": bool(report.get("dry_run")),
+        "balance": _round_value(report.get("balance"), 2),
+        "daily_realized_pnl": _round_value(report.get("daily_realized_pnl"), 2),
+        "daily_loss": _round_value(report.get("daily_loss"), 2),
+        "daily_loss_limit_usd": _round_value(report.get("daily_loss_limit_usd"), 2),
+        "active_positions": int(report.get("active_positions") or 0),
+        "active_exposure_usd": _round_value(report.get("active_exposure_usd"), 2),
+        "context_count": int(report.get("context_count") or 0),
+        "market_count": int(report.get("market_count") or 0),
+        "candidate_count": int(report.get("candidate_count") or 0),
+        "near_miss_count": int(report.get("near_miss_count") or 0),
+        "entry_attempts": int(report.get("entry_attempts") or 0),
+        "stand_down_reason": report.get("stand_down_reason"),
+        "top_candidate": report.get("top_candidate"),
+        "top_near_miss": report.get("top_near_miss"),
+        "top_rejection_reasons": report.get("top_rejection_reasons") or [],
+        "planned_entries": report.get("planned_entries") or [],
+    }
+
+
+def _candidate_signature(report: dict[str, Any]) -> str | None:
+    candidate = report.get("top_candidate")
+    if not candidate:
+        return None
+    payload = {
+        "candidate_count": int(report.get("candidate_count") or 0),
+        "market_id": candidate.get("market_id"),
+        "combined_cost": _round_value(candidate.get("combined_cost"), 4),
+        "max_mergeable_size": _round_value(candidate.get("max_mergeable_size"), 2),
+        "quote_quality_label": candidate.get("quote_quality_label"),
+    }
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _stand_down_message(report: dict[str, Any]) -> str:
+    reason = str(report.get("stand_down_reason") or "").strip()
+    if reason == "daily_loss_limit_reached":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"daily_loss={(safe_float(report.get('daily_loss')) or 0.0):.2f} "
+            f"limit={(safe_float(report.get('daily_loss_limit_usd')) or 0.0):.2f}"
+        )
+    if reason == "capacity_reached":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"active_positions={int(report.get('active_positions') or 0)} "
+            f"exposure={(safe_float(report.get('active_exposure_usd')) or 0.0):.2f}"
+        )
+    return f"[WEATHER-MERGE] Stand down | reason={reason or 'n/a'}"
+
+
+def _candidate_message(report: dict[str, Any]) -> str:
+    candidate = report.get("top_candidate") or {}
+    planned_entries = report.get("planned_entries") or []
+    top_plan = planned_entries[0] if planned_entries else None
+    message = (
+        "[WEATHER-MERGE] Candidate | "
+        f"{candidate.get('city')} {candidate.get('local_date')} {candidate.get('bucket_label')} "
+        f"cost={(safe_float(candidate.get('combined_cost')) or float('nan')):.4f} "
+        f"edge={(safe_float(candidate.get('merge_edge')) or float('nan')):.4f} "
+        f"size={(safe_float(candidate.get('max_mergeable_size')) or float('nan')):.2f} "
+        f"quality={candidate.get('quote_quality_label') or 'n/a'}"
+    )
+    if top_plan:
+        message += (
+            f" | plan_shares={int(top_plan.get('target_shares') or 0)} "
+            f"plan_edge={(safe_float(top_plan.get('expected_edge_usd')) or 0.0):.4f}"
+        )
+    return message
+
+
+def _candidate_cleared_message(previous: dict[str, Any] | None) -> str:
+    if not previous:
+        return "[WEATHER-MERGE] Candidate cleared"
+    return (
+        "[WEATHER-MERGE] Candidate cleared | "
+        f"{previous.get('city')} {previous.get('local_date')} {previous.get('bucket_label')} "
+        f"cost={(safe_float(previous.get('combined_cost')) or float('nan')):.4f}"
+    )
+
+
+def _append_cycle_history(*, history_path: Path, event_type: str, message: str, report: dict[str, Any]) -> None:
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "event_type": event_type,
+        "message": message,
+        **_report_snapshot(report),
+    }
+    with history_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
+
+
+async def _emit_cycle_event(
+    *,
+    telemetry: WeatherMergeTelemetryState,
+    log_type: str,
+    event_type: str,
+    message: str,
+    report: dict[str, Any],
+) -> None:
+    _append_cycle_history(
+        history_path=telemetry.history_path,
+        event_type=event_type,
+        message=message,
+        report=report,
+    )
+    await _log_event(log_type, message, _report_snapshot(report))
+
+
+async def _emit_cycle_telemetry(
+    report: dict[str, Any],
+    telemetry: WeatherMergeTelemetryState,
+) -> None:
+    now = datetime.now(UTC)
+    telemetry.iteration += 1
+
+    current_candidate_signature = _candidate_signature(report)
+    current_stand_down_reason = str(report.get("stand_down_reason") or "").strip() or None
+
+    if current_candidate_signature and current_candidate_signature != telemetry.last_candidate_signature:
+        await _emit_cycle_event(
+            telemetry=telemetry,
+            log_type="weather_merge_signal",
+            event_type="candidate",
+            message=_candidate_message(report),
+            report=report,
+        )
+    elif not current_candidate_signature and telemetry.last_candidate_signature:
+        await _emit_cycle_event(
+            telemetry=telemetry,
+            log_type="weather_merge_signal_cleared",
+            event_type="candidate_cleared",
+            message=_candidate_cleared_message(telemetry.last_candidate_brief),
+            report=report,
+        )
+
+    if current_stand_down_reason != telemetry.last_stand_down_reason:
+        if current_stand_down_reason:
+            await _emit_cycle_event(
+                telemetry=telemetry,
+                log_type="weather_merge_stand_down",
+                event_type="stand_down",
+                message=_stand_down_message(report),
+                report=report,
+            )
+        elif telemetry.last_stand_down_reason:
+            await _emit_cycle_event(
+                telemetry=telemetry,
+                log_type="weather_merge_resumed",
+                event_type="stand_down_cleared",
+                message="[WEATHER-MERGE] Stand down cleared | entries re-enabled",
+                report=report,
+            )
+
+    if telemetry.last_summary_at is None or (
+        now - telemetry.last_summary_at
+    ).total_seconds() >= telemetry.summary_interval_seconds:
+        await _emit_cycle_event(
+            telemetry=telemetry,
+            log_type="weather_merge_summary",
+            event_type="summary",
+            message=_cycle_status_message(report),
+            report=report,
+        )
+        telemetry.last_summary_at = now
+
+    telemetry.last_candidate_signature = current_candidate_signature
+    telemetry.last_candidate_brief = report.get("top_candidate")
+    telemetry.last_stand_down_reason = current_stand_down_reason
 
 
 async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
@@ -467,7 +724,8 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         await _reconcile_position(clob, position, runtime)
 
 
-async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> None:
+async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+    generated_at = datetime.now(UTC)
     balance = await asyncio.to_thread(_get_usdc_balance, clob)
     runtime = build_runtime_config(
         bot_config,
@@ -484,13 +742,6 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> None
 
     daily_realized_pnl = await weather_db.get_daily_realized_pnl()
     daily_loss = max(0.0, -daily_realized_pnl)
-    if daily_loss >= runtime.daily_loss_limit_usd:
-        await _log_event(
-            "weather_merge_paused",
-            f"[WEATHER-MERGE] Daily loss limit reached ({daily_loss:.2f} / {runtime.daily_loss_limit_usd:.2f})",
-            {"daily_loss": daily_loss, "daily_loss_limit_usd": runtime.daily_loss_limit_usd},
-        )
-        return
 
     positions = await weather_db.get_active_weather_merge_positions()
     for position in positions:
@@ -499,50 +750,69 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> None
     positions = await weather_db.get_active_weather_merge_positions()
     active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
     active_market_ids = {str(position.get("market_id")) for position in positions}
-    if len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
-        log.info(
-            "[WEATHER-MERGE] Cycle OK | balance=%.2f active_positions=%d exposure=%.2f | stand_down=capacity_reached",
-            balance,
-            len(positions),
-            active_exposure_usd,
-        )
-        return
-
     contexts = await fetch_active_weather_contexts(eligible_only=True)
-    market_count = sum(len(context.markets) for context in contexts)
-    candidates = rank_live_candidates(contexts, runtime, excluded_market_ids=active_market_ids)
+    scan_report = scan_live_market_report(
+        contexts,
+        runtime,
+        captured_at=generated_at,
+        excluded_market_ids=active_market_ids,
+        near_miss_limit=config.DEFAULT_NEAR_MISS_LIMIT,
+    )
+
+    stand_down_reason: str | None = None
+    if daily_loss >= runtime.daily_loss_limit_usd:
+        stand_down_reason = "daily_loss_limit_reached"
+    elif len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
+        stand_down_reason = "capacity_reached"
+
+    candidates = list(scan_report.get("candidates") or [])
     entry_limit = config.DEFAULT_MAX_ENTRY_ATTEMPTS if config.DEFAULT_MAX_ENTRY_ATTEMPTS > 0 else None
     entry_attempts = 0
-    for candidate in candidates:
-        positions = await weather_db.get_active_weather_merge_positions()
-        active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
-        active_market_ids = {str(position.get("market_id")) for position in positions}
-        if len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
-            break
-        if entry_limit is not None and entry_attempts >= entry_limit:
-            break
-        if str(candidate.get("market_id")) in active_market_ids:
-            continue
-        plan = plan_entry(candidate, runtime, active_exposure_usd=active_exposure_usd)
-        if plan is None:
-            continue
-        await _attempt_entry(clob, candidate, plan, runtime, dry_run=dry_run)
-        entry_attempts += 1
+    planned_entries: list[dict[str, Any]] = []
+    if stand_down_reason is None:
+        for candidate in candidates:
+            positions = await weather_db.get_active_weather_merge_positions()
+            active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
+            active_market_ids = {str(position.get("market_id")) for position in positions}
+            if len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
+                stand_down_reason = "capacity_reached"
+                break
+            if entry_limit is not None and entry_attempts >= entry_limit:
+                break
+            if str(candidate.get("market_id")) in active_market_ids:
+                continue
+            plan = plan_entry(candidate, runtime, active_exposure_usd=active_exposure_usd)
+            if plan is None:
+                continue
+            planned_entries.append(_plan_brief(plan))
+            entry_attempts += 1
+            if dry_run:
+                continue
+            await _attempt_entry(clob, candidate, plan, runtime, dry_run=False)
 
     final_positions = await weather_db.get_active_weather_merge_positions()
     final_exposure_usd = round(sum(open_position_exposure(position) for position in final_positions), 6)
-    log.info(
-        _cycle_status_message(
-            balance=balance,
-            active_positions=len(final_positions),
-            active_exposure_usd=final_exposure_usd,
-            context_count=len(contexts),
-            market_count=market_count,
-            candidate_count=len(candidates),
-            entry_attempts=entry_attempts,
-            top_candidate=candidates[0] if candidates else None,
-        )
-    )
+    near_misses = scan_report.get("near_misses") or []
+    return {
+        "generated_at": generated_at,
+        "dry_run": dry_run,
+        "balance": round(balance, 6),
+        "daily_realized_pnl": round(daily_realized_pnl, 6),
+        "daily_loss": round(daily_loss, 6),
+        "daily_loss_limit_usd": runtime.daily_loss_limit_usd,
+        "active_positions": len(final_positions),
+        "active_exposure_usd": final_exposure_usd,
+        "context_count": int(scan_report.get("context_count") or 0),
+        "market_count": int(scan_report.get("market_count") or 0),
+        "candidate_count": int(scan_report.get("candidate_count") or 0),
+        "near_miss_count": int(scan_report.get("near_miss_count") or 0),
+        "entry_attempts": entry_attempts,
+        "stand_down_reason": stand_down_reason,
+        "top_candidate": _candidate_brief(candidates[0] if candidates else None),
+        "top_near_miss": _candidate_brief(near_misses[0] if near_misses else None),
+        "top_rejection_reasons": list(scan_report.get("rejection_reason_counts") or [])[:3],
+        "planned_entries": planned_entries[:3],
+    }
 
 
 async def run(*, config_path: str, dry_run: bool, once: bool) -> None:
@@ -554,6 +824,10 @@ async def run(*, config_path: str, dry_run: bool, once: bool) -> None:
 
     bot_config = _load_bot_config(config_path)
     clob = _build_clob_client()
+    telemetry = WeatherMergeTelemetryState(
+        summary_interval_seconds=config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
+        history_path=config.DEFAULT_HISTORY_PATH,
+    )
 
     if not dry_run:
         approval_state = await asyncio.to_thread(ensure_weather_allowances, auto_approve=config.AUTO_APPROVE)
@@ -563,12 +837,19 @@ async def run(*, config_path: str, dry_run: bool, once: bool) -> None:
     await _log_event(
         "weather_merge_start",
         f"[WEATHER-MERGE] Bot started | mode={'DRY RUN' if dry_run else 'LIVE'} | config={config_path}",
-        {"dry_run": dry_run, "config_path": config_path},
+        {
+            "dry_run": dry_run,
+            "config_path": config_path,
+            "loop_interval_seconds": config.DEFAULT_LOOP_INTERVAL_SECONDS,
+            "summary_interval_seconds": config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
+            "history_path": str(config.DEFAULT_HISTORY_PATH),
+        },
     )
 
     while True:
         try:
-            await _run_cycle(clob, bot_config, dry_run=dry_run)
+            report = await _run_cycle(clob, bot_config, dry_run=dry_run)
+            await _emit_cycle_telemetry(report, telemetry)
         except Exception as exc:
             await _log_event(
                 "weather_merge_error",
@@ -586,6 +867,8 @@ def main() -> None:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    for logger_name in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
     try:
         asyncio.run(run(config_path=args.config_path, dry_run=args.dry_run, once=args.once))
     except KeyboardInterrupt:
