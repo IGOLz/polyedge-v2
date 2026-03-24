@@ -44,6 +44,16 @@ import { cn } from "@/lib/utils";
 // Types
 // ---------------------------------------------------------------------------
 
+interface StrategyStatRow {
+	strategy_name: string;
+	trades: number;
+	wins: number;
+	losses: number;
+	pnl: number;
+	avg_pnl: number;
+	win_rate: number;
+}
+
 interface OverviewData {
 	overall: {
 		total_trades: string;
@@ -69,6 +79,17 @@ interface OverviewData {
 		losses_yesterday: string;
 		pnl_yesterday: string | null;
 	} | null;
+	strategyStats: StrategyStatRow[];
+	drawdown: {
+		max_drawdown: number;
+		current_drawdown: number;
+	};
+	streak: {
+		type: string;
+		length: number;
+	};
+	tradesPerDay: number;
+	firstTradeAt: string | null;
 }
 
 interface TradeRow {
@@ -407,9 +428,14 @@ function OverviewCards({ overview }: { overview: OverviewData }) {
 	const STARTING_BALANCE = 199.16;
 	const totalPnl = pf(o?.total_pnl);
 	const currentBalance = STARTING_BALANCE + totalPnl;
+	const roi = (totalPnl / STARTING_BALANCE) * 100;
 	const wins = pf(o?.wins);
 	const losses = pf(o?.losses);
 	const winRate = wins + losses > 0 ? (wins / (wins + losses)) * 100 : 0;
+
+	const { drawdown, streak, tradesPerDay } = overview;
+	const maxDD = drawdown?.max_drawdown ?? 0;
+	const curDD = drawdown?.current_drawdown ?? 0;
 
 	// Today
 	const pnl24h = pf(h?.pnl_24h);
@@ -426,6 +452,11 @@ function OverviewCards({ overview }: { overview: OverviewData }) {
 	const topCards = [
 		{ label: "Total PnL", value: fmtPnl(totalPnl), color: pnlColor(totalPnl) },
 		{
+			label: "ROI",
+			value: wins + losses > 0 ? `${roi >= 0 ? "+" : ""}${roi.toFixed(1)}%` : "—",
+			color: roi > 0 ? "text-emerald-400" : roi < 0 ? "text-red-400" : "text-zinc-50",
+		},
+		{
 			label: "Win Rate",
 			value: wins + losses > 0 ? fmtPercent(winRate) : "—",
 			color:
@@ -438,14 +469,32 @@ function OverviewCards({ overview }: { overview: OverviewData }) {
 							: "text-zinc-50",
 		},
 		{
-			label: "Starting Balance",
-			value: fmtDollar(STARTING_BALANCE),
-			color: "text-zinc-50",
-		},
-		{
 			label: "Current Balance",
 			value: fmtDollar(currentBalance),
 			color: "text-zinc-50",
+		},
+	];
+
+	const bottomCards = [
+		{
+			label: "Max Drawdown",
+			value: fmtPnl(maxDD),
+			color: maxDD < -5 ? "text-red-400" : maxDD < 0 ? "text-yellow-400" : "text-zinc-200",
+		},
+		{
+			label: "Current Drawdown",
+			value: curDD < 0 ? fmtPnl(curDD) : "—",
+			color: curDD < -3 ? "text-red-400" : curDD < 0 ? "text-yellow-400" : "text-zinc-200",
+		},
+		{
+			label: "Streak",
+			value: streak && streak.type !== "none" ? `${streak.length} ${streak.type === "win" ? "W" : "L"}` : "—",
+			color: streak?.type === "win" ? "text-emerald-400" : streak?.type === "loss" ? "text-red-400" : "text-zinc-200",
+		},
+		{
+			label: "Trades / Day",
+			value: tradesPerDay > 0 ? tradesPerDay.toFixed(1) : "—",
+			color: "text-zinc-200",
 		},
 	];
 
@@ -470,6 +519,29 @@ function OverviewCards({ overview }: { overview: OverviewData }) {
 						<p
 							className={cn(
 								"relative mt-2 font-mono text-2xl font-bold tabular-nums",
+								card.color,
+							)}
+						>
+							{card.value}
+						</p>
+					</div>
+				))}
+			</div>
+
+			{/* Secondary row — Drawdown / Streak / Frequency */}
+			<div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-800/20 sm:grid-cols-4">
+				{bottomCards.map((card, i) => (
+					<div
+						key={card.label}
+						className="bg-zinc-950 p-3 md:p-4 animate-slide-up"
+						style={{ animationDelay: `${(i + 4) * 80}ms` }}
+					>
+						<p className="text-xs font-semibold uppercase tracking-[0.15em] text-zinc-500">
+							{card.label}
+						</p>
+						<p
+							className={cn(
+								"mt-1 font-mono text-lg font-bold tabular-nums",
 								card.color,
 							)}
 						>
@@ -564,6 +636,90 @@ function OverviewCards({ overview }: { overview: OverviewData }) {
 						</div>
 					</div>
 				</GlassPanel>
+			</div>
+		</section>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Section 2 — Strategy Breakdown
+// ---------------------------------------------------------------------------
+
+function StrategyBreakdown({ stats }: { stats: StrategyStatRow[] }) {
+	if (!stats || stats.length === 0) return null;
+
+	return (
+		<section className="mb-8 md:mb-14">
+			<SectionHeader
+				title="Strategy Breakdown"
+				description="Performance per trading strategy."
+			/>
+			<div className={cn(
+				"grid gap-4",
+				stats.length === 1 ? "grid-cols-1" : stats.length === 2 ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3",
+			)}>
+				{stats.map((s) => {
+					const style = getStrategyStyle(s.strategy_name);
+					const isPositive = s.pnl > 0;
+					const isNegative = s.pnl < 0;
+					return (
+						<GlassPanel key={s.strategy_name} variant="glow-tl">
+							<div className="relative p-5">
+								<div className={cn(
+									"absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent",
+									style.glow,
+								)} />
+								<div className="flex items-center justify-between mb-4">
+									<span className={cn(
+										"rounded-md px-2 py-0.5 text-xs font-medium border",
+										style.badge,
+									)}>
+										{s.strategy_name}
+									</span>
+									<span className={cn(
+										"font-mono text-lg font-bold tabular-nums",
+										isPositive ? "text-emerald-400" : isNegative ? "text-red-400" : "text-zinc-200",
+									)}>
+										{fmtPnl(s.pnl)}
+									</span>
+								</div>
+								<div className="grid grid-cols-3 gap-4">
+									<div>
+										<p className="text-xs uppercase tracking-wider text-zinc-500">Win Rate</p>
+										<p className={cn(
+											"mt-1 font-mono text-sm font-semibold tabular-nums",
+											s.win_rate > 55 ? "text-emerald-400" : s.win_rate >= 45 ? "text-yellow-400" : s.trades > 0 ? "text-red-400" : "text-zinc-400",
+										)}>
+											{s.trades > 0 ? fmtPercent(s.win_rate) : "—"}
+										</p>
+									</div>
+									<div>
+										<p className="text-xs uppercase tracking-wider text-zinc-500">Trades</p>
+										<p className="mt-1 font-mono text-sm font-semibold tabular-nums text-zinc-200">
+											{s.trades}
+										</p>
+									</div>
+									<div>
+										<p className="text-xs uppercase tracking-wider text-zinc-500">Avg PnL</p>
+										<p className={cn(
+											"mt-1 font-mono text-sm font-semibold tabular-nums",
+											pnlColor(s.avg_pnl),
+										)}>
+											{fmtPnl(s.avg_pnl)}
+										</p>
+									</div>
+								</div>
+								<div className="mt-3 flex items-center gap-4 text-xs text-zinc-500">
+									<span>
+										<span className="text-emerald-400">{s.wins}W</span>
+										{" / "}
+										<span className="text-red-400">{s.losses}L</span>
+									</span>
+								</div>
+							</div>
+						</GlassPanel>
+					);
+				})}
 			</div>
 		</section>
 	);
@@ -1548,12 +1704,20 @@ function LoadingSkeleton() {
 						<div className="h-px flex-1 bg-gradient-to-r from-zinc-800/60 to-transparent" />
 					</div>
 				</div>
-				<div className="relative grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.06] sm:grid-cols-3 lg:grid-cols-6">
+				<div className="relative grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-primary/20 bg-primary/[0.06] sm:grid-cols-4">
 					<div className="absolute inset-x-0 top-0 z-10 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
-					{Array.from({ length: 6 }).map((_, i) => (
+					{Array.from({ length: 4 }).map((_, i) => (
 						<div key={i} className="bg-zinc-950 p-6">
 							<div className="h-2.5 w-16 animate-pulse rounded bg-zinc-800" />
 							<div className="mt-3 h-8 w-20 animate-pulse rounded bg-zinc-800" />
+						</div>
+					))}
+				</div>
+				<div className="mt-2 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-zinc-800/60 bg-zinc-800/20 sm:grid-cols-4">
+					{Array.from({ length: 4 }).map((_, i) => (
+						<div key={i} className="bg-zinc-950 p-4">
+							<div className="h-2.5 w-14 animate-pulse rounded bg-zinc-800" />
+							<div className="mt-2 h-6 w-12 animate-pulse rounded bg-zinc-800" />
 						</div>
 					))}
 				</div>
@@ -1693,6 +1857,7 @@ export function BotMonitor() {
 			) : (
 				<>
 					<OverviewCards overview={overview} />
+					<StrategyBreakdown stats={overview.strategyStats} />
 					<PnlChart />
 					<TradeHistory initialTrades={activity.trades} />
 					<ActivityFeed logs={activity.logs} />

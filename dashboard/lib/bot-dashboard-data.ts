@@ -50,6 +50,26 @@ export interface RecentTradeRow {
   finalOutcome: string | null;
 }
 
+export interface BotStrategyMetrics {
+  strategyName: string;
+  trades: number;
+  wins: number;
+  losses: number;
+  pnl: number;
+  avgPnl: number;
+  winRate: number;
+}
+
+export interface BotDrawdownMetrics {
+  maxDrawdown: number;
+  currentDrawdown: number;
+}
+
+export interface BotStreakMetrics {
+  type: string;
+  length: number;
+}
+
 export interface BotDashboardData {
   connected: boolean;
   error: string | null;
@@ -58,6 +78,10 @@ export interface BotDashboardData {
   previous24Hours: BotWindowMetrics | null;
   activity24Hours: BotActivityPoint[];
   recentTrades: RecentTradeRow[];
+  strategyBreakdown: BotStrategyMetrics[];
+  drawdown: BotDrawdownMetrics;
+  streak: BotStreakMetrics;
+  tradesPerDay: number;
 }
 
 type OverviewRow = {
@@ -95,6 +119,29 @@ type TradeRow = {
   pnl: string | null;
   placed_at: string;
   resolved_at: string | null;
+};
+
+type StrategyRow = {
+  strategy_name: string;
+  trades: string;
+  wins: string;
+  losses: string;
+  pnl: string | null;
+  avg_pnl: string | null;
+};
+
+type DrawdownRow = {
+  max_drawdown: string | null;
+  current_drawdown: string | null;
+};
+
+type StreakRow = {
+  final_outcome: string | null;
+};
+
+type FreqRow = {
+  trading_days: string;
+  total_resolved: string;
 };
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs = 2500) {
@@ -199,6 +246,22 @@ function buildHourlySeries(rows: HourlyRow[]) {
   return points;
 }
 
+function computeStreak(rows: StreakRow[]): BotStreakMetrics {
+  if (rows.length === 0) return { type: "none", length: 0 };
+  const first = rows[0].final_outcome;
+  if (!first) return { type: "none", length: 0 };
+  const isWin = ["win_resolution", "take_profit"].includes(first);
+  let length = 0;
+  for (const row of rows) {
+    const outcome = row.final_outcome;
+    if (!outcome) break;
+    const rowIsWin = ["win_resolution", "take_profit"].includes(outcome);
+    if (rowIsWin === isWin) length++;
+    else break;
+  }
+  return { type: isWin ? "win" : "loss", length };
+}
+
 function deriveExitPrice(finalOutcome: string | null, stopLossPrice: string | null, takeProfitPrice: string | null) {
   if (finalOutcome === "win" || finalOutcome === "win_resolution") {
     return 1;
@@ -229,7 +292,7 @@ function deriveExitPrice(finalOutcome: string | null, stopLossPrice: string | nu
 
 export async function getBotDashboardData(): Promise<BotDashboardData> {
   try {
-    const [overallRows, last24Rows, previous24Rows, hourlyRows, tradeRows] = await Promise.all([
+    const [overallRows, last24Rows, previous24Rows, hourlyRows, tradeRows, strategyRows, drawdownRows, streakRows, freqRows] = await Promise.all([
       withTimeout(
         query<OverviewRow>(`
           SELECT
@@ -320,7 +383,79 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
           LIMIT 18
         `)
       ),
+      withTimeout(
+        query<StrategyRow>(`
+          SELECT
+            strategy_name,
+            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS trades,
+            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit')) AS wins,
+            COUNT(*) FILTER (WHERE final_outcome IN ('loss','stop_loss')) AS losses,
+            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS pnl,
+            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS avg_pnl
+          FROM bot_trades
+          WHERE status = 'filled'
+          GROUP BY strategy_name
+          ORDER BY SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
+        `)
+      ).catch(() => [] as StrategyRow[]),
+      withTimeout(
+        query<DrawdownRow>(`
+          WITH cumulative AS (
+            SELECT
+              placed_at,
+              SUM(${PNL_SQL}) OVER (ORDER BY placed_at) AS running_pnl
+            FROM bot_trades
+            WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
+          ),
+          with_peak AS (
+            SELECT
+              placed_at,
+              running_pnl,
+              MAX(running_pnl) OVER (ORDER BY placed_at) AS peak
+            FROM cumulative
+          ),
+          last_row AS (
+            SELECT running_pnl - peak AS current_drawdown
+            FROM with_peak
+            ORDER BY placed_at DESC
+            LIMIT 1
+          )
+          SELECT
+            MIN(running_pnl - peak) AS max_drawdown,
+            (SELECT current_drawdown FROM last_row) AS current_drawdown
+          FROM with_peak
+        `)
+      ).catch(() => [] as DrawdownRow[]),
+      withTimeout(
+        query<StreakRow>(`
+          SELECT final_outcome
+          FROM bot_trades
+          WHERE status = 'filled' AND final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
+          ORDER BY resolved_at DESC NULLS LAST, placed_at DESC
+          LIMIT 50
+        `)
+      ).catch(() => [] as StreakRow[]),
+      withTimeout(
+        query<FreqRow>(`
+          SELECT
+            COUNT(DISTINCT DATE(placed_at)) AS trading_days,
+            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS total_resolved
+          FROM bot_trades
+          WHERE status = 'filled'
+        `)
+      ).catch(() => [] as FreqRow[]),
     ]);
+
+    const freq = freqRows[0];
+    const tradingDays = freq ? toNumber(freq.trading_days) : 0;
+    const totalResolved = freq ? toNumber(freq.total_resolved) : 0;
+
+    let maxDrawdown = 0;
+    let currentDrawdown = 0;
+    if (drawdownRows.length > 0 && drawdownRows[0].max_drawdown != null) {
+      maxDrawdown = parseFloat(drawdownRows[0].max_drawdown);
+      currentDrawdown = parseFloat(drawdownRows[0].current_drawdown ?? "0");
+    }
 
     return {
       connected: true,
@@ -342,6 +477,25 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
         status: row.status,
         finalOutcome: row.final_outcome,
       })),
+      strategyBreakdown: strategyRows.map((s) => {
+        const trades = toNumber(s.trades);
+        const wins = toNumber(s.wins);
+        return {
+          strategyName: s.strategy_name,
+          trades,
+          wins,
+          losses: toNumber(s.losses),
+          pnl: toNumber(s.pnl),
+          avgPnl: toNumber(s.avg_pnl),
+          winRate: trades > 0 ? (wins / trades) * 100 : 0,
+        };
+      }),
+      drawdown: {
+        maxDrawdown: isNaN(maxDrawdown) ? 0 : maxDrawdown,
+        currentDrawdown: isNaN(currentDrawdown) ? 0 : currentDrawdown,
+      },
+      streak: computeStreak(streakRows),
+      tradesPerDay: tradingDays > 0 ? parseFloat((totalResolved / tradingDays).toFixed(1)) : 0,
     };
   } catch (error) {
     console.error("Failed to load live bot dashboard data:", error);
@@ -353,6 +507,10 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       previous24Hours: null,
       activity24Hours: [],
       recentTrades: [],
+      strategyBreakdown: [],
+      drawdown: { maxDrawdown: 0, currentDrawdown: 0 },
+      streak: { type: "none", length: 0 },
+      tradesPerDay: 0,
     };
   }
 }

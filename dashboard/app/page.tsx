@@ -254,25 +254,39 @@ export default async function DashboardPage() {
                           {
                             label: "Profit Factor",
                             value: overall.profitFactor == null ? "—" : overall.profitFactor.toFixed(2),
+                            tone: "text-zinc-100",
                           },
                           {
                             label: "Avg Trade",
                             value: formatCurrency(overall.avgPnlPerTrade),
+                            tone: overall.avgPnlPerTrade > 0 ? "text-emerald-400" : overall.avgPnlPerTrade < 0 ? "text-red-400" : "text-zinc-100",
                           },
                           {
-                            label: "Resolved Trades",
+                            label: "Max Drawdown",
+                            value: botData.drawdown.maxDrawdown < 0 ? formatCurrency(botData.drawdown.maxDrawdown) : "—",
+                            tone: botData.drawdown.maxDrawdown < -5 ? "text-red-400" : botData.drawdown.maxDrawdown < 0 ? "text-amber-400" : "text-zinc-100",
+                          },
+                          {
+                            label: "Streak",
+                            value: botData.streak.type !== "none" ? `${botData.streak.length} ${botData.streak.type === "win" ? "W" : "L"}` : "—",
+                            tone: botData.streak.type === "win" ? "text-emerald-400" : botData.streak.type === "loss" ? "text-red-400" : "text-zinc-100",
+                          },
+                          {
+                            label: "Trades / Day",
+                            value: botData.tradesPerDay > 0 ? botData.tradesPerDay.toFixed(1) : "—",
+                            tone: "text-zinc-100",
+                          },
+                          {
+                            label: "Resolved",
                             value: overall.resolvedTrades.toLocaleString("en-US"),
-                          },
-                          {
-                            label: "Open Trades",
-                            value: overall.openTrades.toLocaleString("en-US"),
+                            tone: "text-zinc-100",
                           },
                         ].map((item) => (
                           <div key={item.label} className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-4">
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
                               {item.label}
                             </p>
-                            <p className="mt-2 font-mono text-xl text-zinc-100">{item.value}</p>
+                            <p className={cn("mt-2 font-mono text-xl", item.tone)}>{item.value}</p>
                           </div>
                         ))}
                       </div>
@@ -369,6 +383,74 @@ export default async function DashboardPage() {
             </GlassPanel>
           )}
         </section>
+
+        {botData.connected && botData.strategyBreakdown.length > 0 && (
+          <section id="strategy-breakdown" className="mt-10 scroll-mt-24">
+            <SectionHeader title="Live Strategy Breakdown" />
+
+            <div className={cn(
+              "grid gap-5",
+              botData.strategyBreakdown.length <= 2 ? "md:grid-cols-2" : "md:grid-cols-3",
+            )}>
+              {botData.strategyBreakdown.map((s) => (
+                <GlassPanel key={s.strategyName} variant="subtle" className="h-full">
+                  <div className="flex h-full flex-col p-5">
+                    <div className="flex items-center justify-between">
+                      <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+                        {s.strategyName}
+                      </span>
+                      <p
+                        className={cn(
+                          "font-mono text-xl font-bold",
+                          s.pnl > 0 ? "text-emerald-400" : s.pnl < 0 ? "text-red-400" : "text-zinc-100"
+                        )}
+                      >
+                        {formatCurrency(s.pnl)}
+                      </p>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-3 gap-3">
+                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Win Rate
+                        </p>
+                        <p className={cn(
+                          "mt-2 font-mono text-lg",
+                          s.winRate > 55 ? "text-emerald-400" : s.winRate >= 45 ? "text-amber-400" : s.trades > 0 ? "text-red-400" : "text-zinc-100",
+                        )}>
+                          {s.trades > 0 ? formatPercent(s.winRate) : "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Trades
+                        </p>
+                        <p className="mt-2 font-mono text-lg text-zinc-100">{s.trades}</p>
+                      </div>
+                      <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                          Avg PnL
+                        </p>
+                        <p className={cn(
+                          "mt-2 font-mono text-lg",
+                          s.avgPnl > 0 ? "text-emerald-400" : s.avgPnl < 0 ? "text-red-400" : "text-zinc-100",
+                        )}>
+                          {formatCurrency(s.avgPnl)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="mt-3 text-xs text-zinc-500">
+                      <span className="text-emerald-400">{s.wins}W</span>
+                      {" / "}
+                      <span className="text-red-400">{s.losses}L</span>
+                    </p>
+                  </div>
+                </GlassPanel>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section id="strategy-results" className="mt-10 scroll-mt-24">
           <SectionHeader title="Strategy Results" info={strategyResultsInfo} />
