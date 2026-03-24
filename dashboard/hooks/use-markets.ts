@@ -33,6 +33,7 @@ export function useMarkets(initialAsset: string, initialInterval: string, initia
   const [assetFilter, setAssetFilter] = useState(initialAsset);
   const [intervalFilter, setIntervalFilter] = useState(initialInterval);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [selectedDate, setSelectedDate] = useState("today");
   const [customDate, setCustomDate] = useState("");
   const [didAutoSelect, setDidAutoSelect] = useState(false);
@@ -40,8 +41,14 @@ export function useMarkets(initialAsset: string, initialInterval: string, initia
   useEffect(() => {
     fetch("/api/markets")
       .then((r) => r.json())
-      .then((data: Market[]) => {
-        setMarkets(data);
+      .then((data) => {
+        if (!Array.isArray(data)) {
+          setMarkets([]);
+          setFetchError(true);
+          return;
+        }
+        setFetchError(false);
+        setMarkets(data as Market[]);
         // Auto-select market from URL param
         if (initialMarketId && !didAutoSelect) {
           const target = data.find((m) => m.market_id === initialMarketId);
@@ -214,6 +221,7 @@ export function useMarkets(initialAsset: string, initialInterval: string, initia
 
   return {
     loading,
+    fetchError,
     filteredMarkets,
     timeGroups,
     isAllAssets,

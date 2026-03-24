@@ -117,6 +117,7 @@ function MarketsContent() {
 
   const {
     loading,
+    fetchError,
     filteredMarkets,
     timeGroups,
     isAllAssets,
@@ -240,9 +241,11 @@ function MarketsContent() {
             <div className="mb-4">
               {timelineDots.length === 0 ? (
                 <div className="rounded-lg border border-zinc-800/40 bg-zinc-900/40 px-4 py-6 text-center text-sm text-zinc-400">
-                  {selectedDate === "custom" && customDate
-                    ? "No markets found for this date"
-                    : "No markets for this date"}
+                  {fetchError
+                    ? "Market data is currently unavailable."
+                    : selectedDate === "custom" && customDate
+                      ? "No markets found for this date"
+                      : "No markets for this date"}
                 </div>
               ) : (
                 <MiniTimeline
@@ -264,18 +267,22 @@ function MarketsContent() {
                   <MultiMarketChart markets={selectedGroup.markets} />
                 ) : (
                   <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
-                    {timeGroups.length === 0
-                      ? "No markets match this filter"
-                      : "Select a time slot above"}
+                    {fetchError
+                      ? "Market data is currently unavailable."
+                      : timeGroups.length === 0
+                        ? "No markets match this filter"
+                        : "Select a time slot above"}
                   </div>
                 )
               ) : selectedMarket ? (
                 <MarketChart market={selectedMarket} />
               ) : (
                 <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
-                  {filteredMarkets.length === 0
-                    ? "No markets match this filter"
-                    : "Select a market above"}
+                  {fetchError
+                    ? "Market data is currently unavailable."
+                    : filteredMarkets.length === 0
+                      ? "No markets match this filter"
+                      : "Select a market above"}
                 </div>
               )}
             </GlassPanel>
