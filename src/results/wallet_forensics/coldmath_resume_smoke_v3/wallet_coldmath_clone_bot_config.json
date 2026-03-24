@@ -1,0 +1,103 @@
+{
+  "mode": "coldmath_weather_clone",
+  "strategy_name": "coldmath_weather_clone_v1",
+  "execution_mode": "shadow_only",
+  "profile_name": null,
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "playbooks": {
+    "paired_under_par": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": true,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 8.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "synthetic_pair_cost_lte": 0.995,
+      "min_mergeable_size": 0.0,
+      "max_inventory_imbalance_ratio": 0.491617,
+      "max_quote_age_seconds": 120.0,
+      "max_leg_spread": 0.08,
+      "allow_stale_pair_recovery": true,
+      "shadow_requires_full_quote_pair": false,
+      "live_requires_full_quote_pair": false,
+      "midpoint_confirmation_required": false
+    },
+    "tail_bucket_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 5.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "directional_price_lte": 0.05,
+      "profit_take_price": 0.12,
+      "force_flatten_minutes_before_end": 120
+    },
+    "high_prob_bucket_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 5.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "directional_price_gte": 0.95,
+      "directional_price_lte": 0.995,
+      "profit_take_price": 0.985,
+      "force_flatten_minutes_before_end": 120
+    },
+    "inventory_exit_and_closeout": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": true,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 5.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "partial_repair_window_seconds": 30.0,
+      "max_merge_delay_minutes": 240.0,
+      "force_flatten_minutes_before_end": 120,
+      "directional_take_profit_buffer": 0.01
+    }
+  },
+  "runtime": {
+    "loop_interval_seconds": 5.0,
+    "summary_interval_seconds": 60.0,
+    "sequence_budget_usd": 8.0,
+    "max_total_exposure_usd": 24.0,
+    "daily_loss_limit_usd": 12.0,
+    "min_expected_edge_usd": 0.03,
+    "max_concurrent_positions": 2,
+    "min_target_shares": 5
+  },
+  "health": {
+    "require_execution_auth_for_live": true,
+    "allow_shadow_when_auth_unhealthy": true,
+    "direct_quote_fallback_enabled": true,
+    "direct_quote_cache_seconds": 10.0,
+    "direct_quote_max_age_seconds": 20.0,
+    "max_direct_quote_markets_per_cycle": 120,
+    "min_quote_coverage_ratio": 0.4,
+    "persist_all_scans": true,
+    "persist_all_market_rows": true
+  },
+  "parity": {
+    "signal_match_window_seconds": 15.0,
+    "lookback_hours": 24,
+    "high_confidence_playbooks": [
+      "paired_under_par"
+    ],
+    "required_under_par_pair_matches": 21,
+    "enable_live_when_matched_trade_ratio_gte": 0.25
+  }
+}

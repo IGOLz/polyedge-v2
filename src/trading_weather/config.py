@@ -35,13 +35,21 @@ def _env_bool(name: str, default: bool) -> bool:
 
 SRC_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = SRC_ROOT.parent
-DEFAULT_BOT_CONFIG_PATH = (
+DEFAULT_MERGE_BOT_CONFIG_PATH = (
     SRC_ROOT
     / "results"
     / "wallet_forensics"
     / "coldmath_resume_smoke_v3"
     / "wallet_inventory_rebalancing_merge_backtest_bot_config.json"
 )
+DEFAULT_CLONE_BOT_CONFIG_PATH = (
+    SRC_ROOT
+    / "results"
+    / "wallet_forensics"
+    / "coldmath_resume_smoke_v3"
+    / "wallet_coldmath_clone_bot_config.json"
+)
+DEFAULT_BOT_CONFIG_PATH = DEFAULT_CLONE_BOT_CONFIG_PATH if DEFAULT_CLONE_BOT_CONFIG_PATH.exists() else DEFAULT_MERGE_BOT_CONFIG_PATH
 
 DEFAULT_SEQUENCE_BUDGET_USD = _env_float("WEATHER_MERGE_SEQUENCE_BUDGET_USD", 0.0)
 DEFAULT_MAX_TOTAL_EXPOSURE_USD = _env_float("WEATHER_MERGE_MAX_TOTAL_EXPOSURE_USD", 0.0)
@@ -58,6 +66,12 @@ DEFAULT_HISTORY_PATH = Path(
     os.getenv(
         "WEATHER_MERGE_HISTORY_PATH",
         str(REPO_ROOT / "logs" / "trading-weather" / "weather_merge_cycle_history.jsonl"),
+    )
+).expanduser()
+DEFAULT_CLONE_HISTORY_PATH = Path(
+    os.getenv(
+        "WEATHER_CLONE_HISTORY_PATH",
+        str(REPO_ROOT / "logs" / "trading-weather" / "weather_clone_cycle_history.jsonl"),
     )
 ).expanduser()
 AUTO_APPROVE = _env_bool("WEATHER_MERGE_AUTO_APPROVE", True)
