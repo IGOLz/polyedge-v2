@@ -13,17 +13,20 @@ import { GlassPanel } from "@/components/ui/glass-panel";
 import { getBotDashboardData } from "@/lib/bot-dashboard-data";
 import { getStrategySummaries } from "@/lib/strategy-artifacts";
 import { cn } from "@/lib/utils";
+import { getColdmathComparisonData, type ColdmathComparisonData } from "@/lib/wallet-tracker-queries";
 
 const getCachedDashboardData = unstable_cache(
   async () => {
-    const [botData, strategies] = await Promise.all([
+    const [botData, strategies, coldmath] = await Promise.all([
       getBotDashboardData(),
       getStrategySummaries(),
+      getColdmathComparisonData().catch(() => ({ bot: null, trackedUser: null }) as ColdmathComparisonData),
     ]);
 
     return {
       botData,
       strategies,
+      coldmath,
     };
   },
   ["dashboard-single-page-data"],
@@ -138,7 +141,7 @@ function buildStrategyResultsInfo(strategies: Awaited<ReturnType<typeof getStrat
 }
 
 export default async function DashboardPage() {
-  const { botData, strategies } = await getCachedDashboardData();
+  const { botData, strategies, coldmath } = await getCachedDashboardData();
 
   const overall = botData.overall;
   const last24Hours = botData.last24Hours;
@@ -431,6 +434,89 @@ export default async function DashboardPage() {
                   </div>
                 </GlassPanel>
               ))}
+
+              {/* ColdMath copy-trading strategy card */}
+              <GlassPanel variant="glow-br" className="h-full">
+                <div className="flex h-full flex-col p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-primary/25 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+                          ColdMath
+                        </span>
+                        <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-3 py-1 text-[11px] font-medium text-zinc-400">
+                          Copy-Trading
+                        </span>
+                      </div>
+                      <h3 className="mt-4 text-xl font-semibold tracking-tight text-zinc-50">
+                        Weather Merge
+                      </h3>
+                      <p className="mt-2 text-xs text-zinc-500">
+                        Inventory rebalancing from @ColdMath
+                      </p>
+                    </div>
+
+                    {coldmath.bot && (
+                      <div className="text-right">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                          Realized P&L
+                        </p>
+                        <p className={cn(
+                          "mt-2 font-mono text-2xl font-bold",
+                          coldmath.bot.realizedPnl > 0 ? "text-emerald-400" : coldmath.bot.realizedPnl < 0 ? "text-red-400" : "text-zinc-100"
+                        )}>
+                          {formatCurrency(coldmath.bot.realizedPnl)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-5 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        Positions
+                      </p>
+                      <p className="mt-2 font-mono text-lg text-zinc-100">
+                        {coldmath.bot?.totalPositions ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        User Trades
+                      </p>
+                      <p className="mt-2 font-mono text-lg text-zinc-100">
+                        {coldmath.trackedUser?.totalTrades ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        User Merges
+                      </p>
+                      <p className="mt-2 font-mono text-lg text-zinc-100">
+                        {coldmath.trackedUser?.totalMerges ?? 0}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+                        Markets
+                      </p>
+                      <p className="mt-2 font-mono text-lg text-zinc-100">
+                        {coldmath.trackedUser?.distinctMarkets ?? 0}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-auto pt-5">
+                    <Link
+                      href="/strategies/coldmath"
+                      className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-4 py-2 text-sm font-medium text-zinc-200 transition-colors hover:border-primary/35 hover:text-primary"
+                    >
+                      Open detail
+                      <ArrowUpRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </div>
+              </GlassPanel>
             </div>
           ) : (
             <GlassPanel variant="subtle">

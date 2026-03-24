@@ -185,6 +185,29 @@ services:
       polyedge.role: "trading-weather"
       polyedge.update: "safe"
 
+  # ── Wallet Tracker: Periodic activity fetcher for tracked profiles ────
+  wallet-tracker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.wallet_tracker
+    container_name: polyedge-wallet-tracker
+    platform: linux/amd64
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      WALLET_TRACKER_PROFILE: ${WALLET_TRACKER_PROFILE:-ColdMath}
+      WALLET_TRACKER_INTERVAL_SECONDS: ${WALLET_TRACKER_INTERVAL_SECONDS:-1800}
+    volumes:
+      - ./logs/wallet-tracker:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "wallet-tracker"
+      polyedge.update: "safe"
+
   # ── Dashboard: Next.js UI for analytics + limited DB controls ─────────
   dashboard:
     build:
