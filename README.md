@@ -74,6 +74,10 @@ To update core (rare, planned):
 # or: docker compose build core && docker compose up -d core
 ```
 
+For the restricted Codex SSH workflow from the Windows laptop to the LXC, including allowed commands such as `status`, `up trading`, `down trading`, `logs trading`, and `safe-update`, see [docs/codex_lxc_access.md](docs/codex_lxc_access.md).
+
+For local PostgreSQL access on Windows through the soft-gated Codex DB wrapper, including read-only queries, temporary write unlocks, and audit logging, see [docs/codex_db_access.md](docs/codex_db_access.md).
+
 ### Update Live Daily Loss Limit
 
 The trading bot reads `daily_loss_limit` from the `bot_config` table during the

@@ -18,6 +18,27 @@ from shared.db import close_pool, create_weather_tables, init_pool
 from trading import config as trading_config
 from trading import db as trading_db
 from trading.utils import log
+from trading_weather.clone_config import is_clone_bot_config, normalize_clone_bot_config
+from trading_weather.clone_db import (
+    close_clone_position,
+    create_weather_clone_tables,
+    get_open_clone_positions,
+    insert_clone_cycle,
+    insert_clone_market_scans,
+    insert_clone_position,
+    update_clone_position_fill,
+    upsert_clone_sequences,
+)
+from trading_weather.clone_engine import (
+    append_clone_cycle_history,
+    build_clone_cycle_summary,
+    build_clone_runtime,
+    clone_cycle_status_message,
+    evaluate_clone_cycle,
+    plan_paired_entry,
+    preflight_clone_health,
+    refresh_contexts_with_direct_quotes,
+)
 from trading_weather import config
 from trading_weather import db as weather_db
 from trading_weather.safe_ops import ensure_weather_allowances, merge_position, redeem_position
@@ -42,15 +63,30 @@ class WeatherMergeTelemetryState:
     last_stand_down_reason: str | None = None
 
 
+@dataclass(slots=True)
+class WeatherCloneTelemetryState:
+    summary_interval_seconds: float
+    history_path: Path
+    iteration: int = 0
+    last_summary_at: datetime | None = None
+    last_candidate_signature: str | None = None
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="PolyEdge dedicated weather merge bot")
+    parser = argparse.ArgumentParser(description="PolyEdge weather trading bot")
     parser.add_argument("--dry-run", action="store_true", help="Observe candidates without placing live orders")
     parser.add_argument("--once", action="store_true", help="Run a single cycle and exit")
     parser.add_argument(
         "--config-path",
         type=str,
         default=str(config.DEFAULT_BOT_CONFIG_PATH),
-        help="Path to wallet_inventory_rebalancing_merge_backtest_bot_config.json",
+        help="Path to weather bot config json",
+    )
+    parser.add_argument(
+        "--engine",
+        choices=("auto", "merge", "clone"),
+        default="auto",
+        help="Runtime engine selection. auto uses clone for clone configs and merge for legacy configs.",
     )
     parser.add_argument("--verbose", action="store_true", help="Enable info logging")
     return parser
@@ -154,6 +190,12 @@ def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: st
 
 def _load_bot_config(path: str) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _resolve_engine(*, requested: str, raw_config: dict[str, Any]) -> str:
+    if requested in {"merge", "clone"}:
+        return requested
+    return "clone" if is_clone_bot_config(raw_config) else "merge"
 
 
 async def _log_event(log_type: str, message: str, data: dict[str, Any] | None = None) -> None:
@@ -302,6 +344,10 @@ def _candidate_signature(report: dict[str, Any]) -> str | None:
     return json.dumps(payload, sort_keys=True, default=str)
 
 
+def _json_safe_payload(payload: Any) -> Any:
+    return json.loads(json.dumps(payload, default=str))
+
+
 def _stand_down_message(report: dict[str, Any]) -> str:
     reason = str(report.get("stand_down_reason") or "").strip()
     if reason == "daily_loss_limit_reached":
@@ -439,6 +485,192 @@ async def _emit_cycle_telemetry(
     telemetry.last_candidate_signature = current_candidate_signature
     telemetry.last_candidate_brief = report.get("top_candidate")
     telemetry.last_stand_down_reason = current_stand_down_reason
+
+
+def _clone_candidate_signature(report: dict[str, Any]) -> str | None:
+    candidates = report.get("candidates") or []
+    if not candidates:
+        return None
+    top = candidates[0]
+    payload = {
+        "playbook_key": top.get("playbook_key"),
+        "market_id": top.get("market_id"),
+        "side": top.get("side"),
+        "candidate_score": _round_value(top.get("candidate_score"), 6),
+        "combined_cost": _round_value(top.get("combined_cost"), 4),
+        "directional_price": _round_value(top.get("directional_price"), 4),
+    }
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+async def _emit_clone_cycle_telemetry(
+    summary: dict[str, Any],
+    report: dict[str, Any],
+    telemetry: WeatherCloneTelemetryState,
+) -> None:
+    now = datetime.now(UTC)
+    telemetry.iteration += 1
+    signature = _clone_candidate_signature(report)
+    if signature and signature != telemetry.last_candidate_signature:
+        top = (report.get("candidates") or [None])[0] or {}
+        message = (
+            "[WEATHER-CLONE] Candidate | "
+            f"{top.get('playbook_key')} {top.get('city')} {top.get('local_date')} {top.get('bucket_label')} "
+            f"side={top.get('side') or 'paired'} "
+            f"score={(safe_float(top.get('candidate_score')) or float('nan')):.4f}"
+        )
+        await trading_db.log_event("weather_clone_signal", message, _json_safe_payload(top), echo=False)
+        log.info(message)
+    if telemetry.last_summary_at is None or (
+        now - telemetry.last_summary_at
+    ).total_seconds() >= telemetry.summary_interval_seconds:
+        message = clone_cycle_status_message(summary)
+        append_clone_cycle_history(history_path=telemetry.history_path, event_type="summary", payload=summary)
+        await trading_db.log_event("weather_clone_summary", message, _json_safe_payload(summary), echo=False)
+        log.info(message)
+        telemetry.last_summary_at = now
+    telemetry.last_candidate_signature = signature
+
+
+def _clone_active_exposure_usd(positions: list[dict[str, Any]]) -> float:
+    exposure = 0.0
+    for position in positions:
+        if position.get("closed_at") is not None:
+            continue
+        exposure += safe_float(position.get("total_entry_cost")) or 0.0
+    return round(exposure, 6)
+
+
+async def _attempt_clone_paired_entry(
+    clob,
+    plan: dict[str, Any],
+    *,
+    shadow_only: bool,
+) -> None:
+    position_id = await insert_clone_position(
+        strategy_name=plan["strategy_name"],
+        playbook_key=plan["playbook_key"],
+        market_id=plan["market_id"],
+        event_id=plan["event_id"],
+        event_slug=plan["event_slug"],
+        city=plan["city"],
+        local_date=plan.get("local_date"),
+        bucket_label=plan["bucket_label"],
+        side=None,
+        condition_id=plan["condition_id"],
+        neg_risk=bool(plan.get("neg_risk")),
+        yes_token_id=plan.get("yes_token_id"),
+        no_token_id=plan.get("no_token_id"),
+        status="pending_entry",
+        shadow_only=shadow_only,
+        target_shares=float(plan["target_shares"]),
+        signal_score=float(plan.get("signal_score") or 0.0),
+        expected_edge_usd=safe_float(plan.get("expected_edge_usd")),
+        quote_snapshot=plan.get("quote_snapshot") or {},
+        signal_data=plan.get("signal_data") or {},
+        sequence_data=plan.get("sequence_data") or {},
+    )
+    if shadow_only:
+        await close_clone_position(
+            position_id,
+            status="shadow_detected",
+            close_reason="shadow_only",
+            notes="Shadow-mode clone candidate recorded",
+        )
+        await trading_db.log_event(
+            "weather_clone_shadow_entry",
+            (
+                "[WEATHER-CLONE] Shadow entry | "
+                f"{plan['playbook_key']} {plan['city']} {plan['bucket_label']} "
+                f"shares={plan['target_shares']} cost={plan['combined_cost']:.4f}"
+            ),
+            _json_safe_payload({"position_id": position_id, "plan": plan}),
+            echo=False,
+        )
+        return
+
+    first_side = plan["first_side"]
+    second_side = plan["second_side"]
+    first_token = plan["yes_token_id"] if first_side == "yes" else plan["no_token_id"]
+    second_token = plan["yes_token_id"] if second_side == "yes" else plan["no_token_id"]
+    first_price = plan["yes_price"] if first_side == "yes" else plan["no_price"]
+    second_price = plan["yes_price"] if second_side == "yes" else plan["no_price"]
+    target_shares = int(plan["target_shares"])
+    first_fill = await asyncio.to_thread(
+        _place_fok_order,
+        clob,
+        first_token,
+        price=first_price,
+        shares=target_shares,
+        side="BUY",
+    )
+    if not first_fill:
+        await close_clone_position(position_id, status="entry_failed", close_reason="first_leg_no_fill")
+        return
+    total_cost = first_fill["fill_shares"] * first_fill["fill_price"]
+    second_fill = await asyncio.to_thread(
+        _place_fok_order,
+        clob,
+        second_token,
+        price=second_price,
+        shares=first_fill["fill_shares"],
+        side="BUY",
+    )
+    if not second_fill:
+        unwind_token = first_token
+        unwind_price = _best_book_price(clob, unwind_token, side="SELL")
+        unwind_fill = None
+        if unwind_price is not None:
+            unwind_fill = await asyncio.to_thread(
+                _place_fok_order,
+                clob,
+                unwind_token,
+                price=unwind_price,
+                shares=first_fill["fill_shares"],
+                side="SELL",
+            )
+        await update_clone_position_fill(
+            position_id,
+            filled_shares=float(first_fill["fill_shares"]),
+            avg_entry_price=float(first_fill["fill_price"]),
+            total_entry_cost=total_cost,
+            yes_shares=float(first_fill["fill_shares"] if first_side == "yes" else 0.0),
+            no_shares=float(first_fill["fill_shares"] if first_side == "no" else 0.0),
+            status="partial_entry",
+            notes="First leg filled; second leg failed",
+        )
+        await close_clone_position(
+            position_id,
+            status="entry_failed",
+            close_reason="second_leg_no_fill",
+            realized_exit_value_usd=(
+                float(unwind_fill["fill_shares"]) * float(unwind_fill["fill_price"]) if unwind_fill else None
+            ),
+            notes="Second leg failed; attempted immediate unwind",
+        )
+        return
+    total_cost += second_fill["fill_shares"] * second_fill["fill_price"]
+    filled_shares = float(min(first_fill["fill_shares"], second_fill["fill_shares"]))
+    await update_clone_position_fill(
+        position_id,
+        filled_shares=filled_shares,
+        avg_entry_price=float(total_cost / max(filled_shares * 2.0, 1.0)),
+        total_entry_cost=total_cost,
+        yes_shares=float(second_fill["fill_shares"] if second_side == "yes" else first_fill["fill_shares"]),
+        no_shares=float(second_fill["fill_shares"] if second_side == "no" else first_fill["fill_shares"]),
+        status="open_paired",
+        notes="Both legs filled",
+    )
+    await trading_db.log_event(
+        "weather_clone_entry",
+        (
+            "[WEATHER-CLONE] Entered | "
+            f"{plan['city']} {plan['bucket_label']} "
+            f"pairs={filled_shares:.0f} cost={total_cost / max(filled_shares, 1.0):.4f}"
+        ),
+        _json_safe_payload({"position_id": position_id, "plan": plan, "total_cost": round(total_cost, 6)}),
+        echo=False,
+    )
 
 
 async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
@@ -815,14 +1047,196 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict
     }
 
 
-async def run(*, config_path: str, dry_run: bool, once: bool) -> None:
+async def _run_clone_cycle(
+    clob,
+    bot_config: dict[str, Any],
+    *,
+    dry_run: bool,
+    telemetry: WeatherCloneTelemetryState,
+    sequence_state: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    captured_at = datetime.now(UTC)
+    health_state = preflight_clone_health(clob, dry_run=dry_run)
+    balance = None
+    try:
+        balance = await asyncio.to_thread(_get_usdc_balance, clob)
+    except Exception as exc:
+        health_state["execution_auth"] = {
+            "status": "unhealthy" if not dry_run else "shadow_only",
+            "reason": f"{type(exc).__name__}: {exc}",
+            "allowed": dry_run,
+        }
+    runtime = build_clone_runtime(bot_config, dry_run=dry_run)
+    contexts = await fetch_active_weather_contexts(eligible_only=True)
+    direct_quote_result = refresh_contexts_with_direct_quotes(
+        clob,
+        contexts,
+        captured_at=captured_at,
+        health_config=bot_config.get("health") or {},
+    )
+    total_markets = int(direct_quote_result.get("total_markets") or 0)
+    quote_pair_markets = int(direct_quote_result.get("quote_pair_markets") or 0)
+    quote_coverage_ratio = (quote_pair_markets / total_markets) if total_markets > 0 else 0.0
+    min_quote_coverage_ratio = float((bot_config.get("health") or {}).get("min_quote_coverage_ratio") or 0.0)
+    health_state["quote_pair_markets"] = quote_pair_markets
+    health_state["total_markets"] = total_markets
+    health_state["quote_coverage_ratio"] = round(quote_coverage_ratio, 6)
+    health_state["direct_quote_markets"] = int(direct_quote_result.get("direct_quote_markets") or 0)
+    health_state["direct_quote_tokens"] = int(direct_quote_result.get("direct_quote_tokens") or 0)
+    book_errors = list(direct_quote_result.get("book_errors") or [])
+    health_state["market_data"] = {
+        "status": "healthy" if quote_coverage_ratio >= min_quote_coverage_ratio and not book_errors else "degraded",
+        "reason": "ok" if quote_coverage_ratio >= min_quote_coverage_ratio and not book_errors else (
+            "; ".join(book_errors[:3]) or f"quote_coverage_below_threshold:{quote_coverage_ratio:.3f}"
+        ),
+    }
+
+    if dry_run or bot_config.get("execution_mode") != "live_small":
+        health_state["execution_allowed"] = False
+    else:
+        health_state["execution_allowed"] = bool((health_state.get("execution_auth") or {}).get("allowed"))
+        if bool((bot_config.get("health") or {}).get("require_execution_auth_for_live", True)) and not health_state["execution_allowed"]:
+            health_state["execution_allowed"] = False
+
+    active_positions = await get_open_clone_positions()
+    active_market_ids = {str(position.get("market_id") or "") for position in active_positions}
+    report = evaluate_clone_cycle(
+        contexts=contexts,
+        runtime=runtime,
+        captured_at=captured_at,
+        health_state=health_state,
+        sequence_state=sequence_state,
+        active_positions=active_positions,
+        active_market_ids=active_market_ids,
+    )
+
+    entry_attempts = 0
+    if report["candidates"]:
+        for candidate in report["candidates"]:
+            if candidate.get("playbook_key") != "paired_under_par":
+                continue
+            if not (candidate.get("qualifies") and candidate.get("live_eligible")):
+                continue
+            active_positions = await get_open_clone_positions()
+            active_exposure = _clone_active_exposure_usd(active_positions)
+            plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
+            if plan is None:
+                continue
+            entry_attempts += 1
+            await _attempt_clone_paired_entry(
+                clob,
+                plan,
+                shadow_only=not bool(health_state.get("execution_allowed")),
+            )
+            break
+
+    active_positions = await get_open_clone_positions()
+    summary = build_clone_cycle_summary(
+        report=report,
+        health_state=health_state,
+        active_positions=active_positions,
+        entry_attempts=entry_attempts,
+    )
+    cycle_id = await insert_clone_cycle(
+        captured_at=captured_at,
+        strategy_name=runtime.strategy_name,
+        dry_run=dry_run,
+        execution_allowed=bool(health_state.get("execution_allowed")),
+        execution_health=str((health_state.get("execution_auth") or {}).get("status") or ""),
+        market_data_health=str((health_state.get("market_data") or {}).get("status") or ""),
+        quote_coverage_ratio=float(health_state.get("quote_coverage_ratio") or 0.0),
+        context_count=int(report.get("context_count") or 0),
+        market_count=int(report.get("market_count") or 0),
+        candidate_count=int(report.get("candidate_count") or 0),
+        sequence_count=len(report.get("sequence_snapshots") or []),
+        entry_attempt_count=entry_attempts,
+        top_rejection_reasons=report.get("top_rejection_reasons") or [],
+        health_data=health_state,
+        summary_data=summary,
+    )
+    await insert_clone_market_scans(cycle_id, report.get("cycle_rows") or [], captured_at=captured_at)
+    await upsert_clone_sequences(report.get("sequence_snapshots") or [])
+    await _emit_clone_cycle_telemetry(summary, report, telemetry)
+    return {
+        "summary": summary,
+        "report": report,
+        "health_state": health_state,
+        "balance": balance,
+    }
+
+
+async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
+    trading_config.patch_clob_client_proxy(PROXY_URL)
+    await init_pool()
+    await trading_db.create_trading_tables()
+    await create_weather_tables()
+    await create_weather_clone_tables()
+
+    raw_config = _load_bot_config(config_path)
+    bot_config = normalize_clone_bot_config(raw_config)
+    clob = _build_clob_client()
+    telemetry = WeatherCloneTelemetryState(
+        summary_interval_seconds=float((bot_config.get("runtime") or {}).get("summary_interval_seconds") or config.DEFAULT_SUMMARY_INTERVAL_SECONDS),
+        history_path=config.DEFAULT_CLONE_HISTORY_PATH,
+    )
+    sequence_state: dict[str, dict[str, Any]] = {}
+
+    await trading_db.log_event(
+        "weather_clone_start",
+        f"[WEATHER-CLONE] Bot started | mode={'DRY RUN' if dry_run else 'LIVE'} | config={config_path}",
+        {
+            "dry_run": dry_run,
+            "config_path": config_path,
+            "loop_interval_seconds": float((bot_config.get('runtime') or {}).get("loop_interval_seconds") or config.DEFAULT_LOOP_INTERVAL_SECONDS),
+            "summary_interval_seconds": float((bot_config.get('runtime') or {}).get("summary_interval_seconds") or config.DEFAULT_SUMMARY_INTERVAL_SECONDS),
+            "history_path": str(config.DEFAULT_CLONE_HISTORY_PATH),
+            "execution_mode": bot_config.get("execution_mode"),
+        },
+        echo=False,
+    )
+    log.info(
+        "[WEATHER-CLONE] Bot started | mode=%s | config=%s",
+        "DRY RUN" if dry_run else "LIVE",
+        config_path,
+    )
+
+    while True:
+        try:
+            await _run_clone_cycle(
+                clob,
+                bot_config,
+                dry_run=dry_run,
+                telemetry=telemetry,
+                sequence_state=sequence_state,
+            )
+        except Exception as exc:
+            await trading_db.log_event(
+                "weather_clone_error",
+                f"[WEATHER-CLONE] Cycle failed: {type(exc).__name__}: {exc}",
+                {"error": str(exc), "error_type": type(exc).__name__},
+                echo=False,
+            )
+            log.warning("[WEATHER-CLONE] Cycle failed: %s: %s", type(exc).__name__, exc)
+        if once:
+            return
+        loop_interval = float((bot_config.get("runtime") or {}).get("loop_interval_seconds") or config.DEFAULT_LOOP_INTERVAL_SECONDS)
+        await asyncio.sleep(loop_interval)
+
+
+async def run(*, config_path: str, dry_run: bool, once: bool, engine: str) -> None:
+    raw_config = _load_bot_config(config_path)
+    resolved_engine = _resolve_engine(requested=engine, raw_config=raw_config)
+    if resolved_engine == "clone":
+        await run_clone(config_path=config_path, dry_run=dry_run, once=once)
+        return
+
     trading_config.patch_clob_client_proxy(PROXY_URL)
     await init_pool()
     await trading_db.create_trading_tables()
     await create_weather_tables()
     await weather_db.create_weather_merge_tables()
 
-    bot_config = _load_bot_config(config_path)
+    bot_config = raw_config
     clob = _build_clob_client()
     telemetry = WeatherMergeTelemetryState(
         summary_interval_seconds=config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
@@ -870,9 +1284,9 @@ def main() -> None:
     for logger_name in ("httpx", "httpcore", "urllib3"):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
     try:
-        asyncio.run(run(config_path=args.config_path, dry_run=args.dry_run, once=args.once))
+        asyncio.run(run(config_path=args.config_path, dry_run=args.dry_run, once=args.once, engine=args.engine))
     except KeyboardInterrupt:
-        log.info("[WEATHER-MERGE] Stopped by operator")
+        log.info("[TRADING-WEATHER] Stopped by operator")
     finally:
         try:
             asyncio.run(close_pool())
