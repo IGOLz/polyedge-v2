@@ -13,6 +13,7 @@ from trading_weather.clone_engine import (
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
 )
+from trading_weather.main import _normalize_order_price
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -373,6 +374,12 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(plan["side"], "yes")
         self.assertEqual(plan["sequence_budget_usd"], 5.0)
         self.assertEqual(plan["target_shares"], 250)
+
+    def test_normalize_order_price_preserves_low_tick_prices(self):
+        self.assertEqual(_normalize_order_price(0.001), 0.001)
+        self.assertEqual(_normalize_order_price(0.002), 0.002)
+        self.assertEqual(_normalize_order_price(0.0004), 0.001)
+        self.assertEqual(_normalize_order_price(1.0), 0.999)
 
 
 if __name__ == "__main__":

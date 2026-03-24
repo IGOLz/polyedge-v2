@@ -135,6 +135,15 @@ def _parse_fill_from_resp(resp: dict | None, fallback_shares: int, fallback_pric
     return fill_shares, fill_price
 
 
+def _normalize_order_price(price: float) -> float:
+    normalized = round(float(price), 3)
+    if normalized < 0.001:
+        return 0.001
+    if normalized > 0.999:
+        return 0.999
+    return normalized
+
+
 def _best_book_price(clob, token_id: str, *, side: str) -> float | None:
     try:
         book = clob.get_order_book(token_id)
@@ -174,7 +183,12 @@ def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: st
 
     if shares <= 0:
         return None
-    order_args = OrderArgs(token_id=token_id, price=round(price, 2), size=float(shares), side=side)
+    order_args = OrderArgs(
+        token_id=token_id,
+        price=_normalize_order_price(price),
+        size=float(shares),
+        side=side,
+    )
     signed = clob.create_order(order_args)
     resp = clob.post_order(signed, OrderType.FOK)
     status = (resp.get("status") or "").upper() if isinstance(resp, dict) else ""
