@@ -38,6 +38,27 @@ def build_clone_runtime(
     )
 
 
+def _buy_order_size_step(price: float) -> int:
+    mills = abs(int(round(float(price) * 1000)))
+    if mills <= 0:
+        return 1
+    return max(1, 10 // math.gcd(mills, 10))
+
+
+def _normalize_buy_target_shares(price: float, shares: int) -> int:
+    if shares <= 0:
+        return 0
+    step = _buy_order_size_step(price)
+    return shares - (shares % step)
+
+
+def _normalize_pair_target_shares(yes_price: float, no_price: float, shares: int) -> int:
+    if shares <= 0:
+        return 0
+    step = math.lcm(_buy_order_size_step(yes_price), _buy_order_size_step(no_price))
+    return shares - (shares % step)
+
+
 def preflight_clone_health(clob, *, dry_run: bool) -> dict[str, Any]:
     execution_auth = {
         "status": "unknown",
@@ -280,6 +301,7 @@ def plan_paired_entry(
     if budget <= 0:
         return None
     target_shares = min(math.floor(budget / combined_cost), math.floor(min(yes_ask_size, no_ask_size)))
+    target_shares = _normalize_pair_target_shares(yes_ask, no_ask, target_shares)
     min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
     if target_shares < min_target_shares:
         return None
@@ -351,6 +373,7 @@ def plan_directional_entry(
         return None
 
     target_shares = min(math.floor(budget / price), math.floor(available_size))
+    target_shares = _normalize_buy_target_shares(price, target_shares)
     min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
     if target_shares < min_target_shares:
         return None

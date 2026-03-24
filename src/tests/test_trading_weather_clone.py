@@ -7,13 +7,15 @@ from datetime import UTC, date, datetime
 from analysis.coldmath_clone_parity import _match_signals_to_trades
 from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.clone_engine import (
+    _normalize_buy_target_shares,
+    _normalize_pair_target_shares,
     build_clone_runtime,
     evaluate_clone_cycle,
     plan_directional_entry,
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
 )
-from trading_weather.main import _normalize_order_price
+from trading_weather.main import _normalize_buy_order_shares, _normalize_order_price
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -380,6 +382,12 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(_normalize_order_price(0.002), 0.002)
         self.assertEqual(_normalize_order_price(0.0004), 0.001)
         self.assertEqual(_normalize_order_price(1.0), 0.999)
+
+    def test_normalize_buy_shares_respects_cents_precision(self):
+        self.assertEqual(_normalize_buy_target_shares(0.003, 666), 660)
+        self.assertEqual(_normalize_buy_target_shares(0.002, 999), 995)
+        self.assertEqual(_normalize_pair_target_shares(0.499, 0.501, 27), 20)
+        self.assertEqual(_normalize_buy_order_shares(0.999, 9), 0)
 
 
 if __name__ == "__main__":

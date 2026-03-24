@@ -144,6 +144,16 @@ def _normalize_order_price(price: float) -> float:
     return normalized
 
 
+def _normalize_buy_order_shares(price: float, shares: int) -> int:
+    if shares <= 0:
+        return 0
+    mills = abs(int(round(_normalize_order_price(price) * 1000)))
+    if mills <= 0:
+        return shares
+    step = max(1, 10 // math.gcd(mills, 10))
+    return shares - (shares % step)
+
+
 def _best_book_price(clob, token_id: str, *, side: str) -> float | None:
     try:
         book = clob.get_order_book(token_id)
@@ -181,19 +191,22 @@ def _get_usdc_balance(clob) -> float:
 def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: str) -> dict[str, Any] | None:
     from py_clob_client.clob_types import OrderArgs, OrderType
 
-    if shares <= 0:
+    normalized_shares = int(shares)
+    if str(side).upper() == "BUY":
+        normalized_shares = _normalize_buy_order_shares(price, normalized_shares)
+    if normalized_shares <= 0:
         return None
     order_args = OrderArgs(
         token_id=token_id,
         price=_normalize_order_price(price),
-        size=float(shares),
+        size=float(normalized_shares),
         side=side,
     )
     signed = clob.create_order(order_args)
     resp = clob.post_order(signed, OrderType.FOK)
     status = (resp.get("status") or "").upper() if isinstance(resp, dict) else ""
     if status in {"MATCHED", "FILLED"}:
-        fill_shares, fill_price = _parse_fill_from_resp(resp, shares, price)
+        fill_shares, fill_price = _parse_fill_from_resp(resp, normalized_shares, price)
         return {
             "order_id": resp.get("orderID") or resp.get("id"),
             "fill_shares": fill_shares,
