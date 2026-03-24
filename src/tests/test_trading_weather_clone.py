@@ -9,6 +9,7 @@ from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.clone_engine import (
     build_clone_runtime,
     evaluate_clone_cycle,
+    plan_directional_entry,
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
 )
@@ -343,6 +344,35 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(result["summary"]["matched_trade_count"], 1)
         self.assertEqual(result["summary"]["missed_high_confidence_trade_count"], 1)
         self.assertEqual(result["summary"]["top_miss_reasons"][0]["reason"], "missing_full_quote_pair")
+
+    def test_plan_directional_entry_uses_playbook_budget(self):
+        markets = [_market("tail", bucket_order=0, yes_ask=0.02, no_ask=0.98, yes_ask_size=300.0, no_ask_size=10.0)]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=self.runtime,
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+        candidate = next(
+            row for row in report["candidates"]
+            if row["playbook_key"] == "tail_bucket_accumulation" and row["side"] == "yes"
+        )
+
+        plan = plan_directional_entry(candidate, build_clone_runtime(self.config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["playbook_key"], "tail_bucket_accumulation")
+        self.assertEqual(plan["side"], "yes")
+        self.assertEqual(plan["sequence_budget_usd"], 5.0)
+        self.assertEqual(plan["target_shares"], 250)
 
 
 if __name__ == "__main__":

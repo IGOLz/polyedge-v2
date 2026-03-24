@@ -35,6 +35,7 @@ from trading_weather.clone_engine import (
     build_clone_runtime,
     clone_cycle_status_message,
     evaluate_clone_cycle,
+    plan_directional_entry,
     plan_paired_entry,
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
@@ -673,6 +674,148 @@ async def _attempt_clone_paired_entry(
     )
 
 
+async def _attempt_clone_directional_entry(
+    clob,
+    plan: dict[str, Any],
+    *,
+    shadow_only: bool,
+) -> None:
+    position_id = await insert_clone_position(
+        strategy_name=plan["strategy_name"],
+        playbook_key=plan["playbook_key"],
+        market_id=plan["market_id"],
+        event_id=plan["event_id"],
+        event_slug=plan["event_slug"],
+        city=plan["city"],
+        local_date=plan.get("local_date"),
+        bucket_label=plan["bucket_label"],
+        side=plan["side"],
+        condition_id=plan["condition_id"],
+        neg_risk=bool(plan.get("neg_risk")),
+        yes_token_id=plan.get("yes_token_id"),
+        no_token_id=plan.get("no_token_id"),
+        status="pending_entry",
+        shadow_only=shadow_only,
+        target_shares=float(plan["target_shares"]),
+        signal_score=float(plan.get("signal_score") or 0.0),
+        expected_edge_usd=safe_float(plan.get("expected_edge_usd")),
+        quote_snapshot=plan.get("quote_snapshot") or {},
+        signal_data=plan.get("signal_data") or {},
+        sequence_data=plan.get("sequence_data") or {},
+    )
+    if shadow_only:
+        await close_clone_position(
+            position_id,
+            status="shadow_detected",
+            close_reason="shadow_only",
+            notes="Shadow-mode clone directional candidate recorded",
+        )
+        await trading_db.log_event(
+            "weather_clone_shadow_entry",
+            (
+                "[WEATHER-CLONE] Shadow entry | "
+                f"{plan['playbook_key']} {plan['city']} {plan['bucket_label']} {plan['side']} "
+                f"shares={plan['target_shares']} price={plan['price']:.4f}"
+            ),
+            _json_safe_payload({"position_id": position_id, "plan": plan}),
+            echo=False,
+        )
+        return
+
+    fill = await asyncio.to_thread(
+        _place_fok_order,
+        clob,
+        plan["token_id"],
+        price=plan["price"],
+        shares=int(plan["target_shares"]),
+        side="BUY",
+    )
+    if not fill:
+        await close_clone_position(position_id, status="entry_failed", close_reason="directional_no_fill")
+        return
+
+    total_cost = float(fill["fill_shares"]) * float(fill["fill_price"])
+    await update_clone_position_fill(
+        position_id,
+        filled_shares=float(fill["fill_shares"]),
+        avg_entry_price=float(fill["fill_price"]),
+        total_entry_cost=total_cost,
+        yes_shares=float(fill["fill_shares"] if plan["side"] == "yes" else 0.0),
+        no_shares=float(fill["fill_shares"] if plan["side"] == "no" else 0.0),
+        status="open_directional",
+        notes=f"Directional {plan['side']} leg filled",
+    )
+    await trading_db.log_event(
+        "weather_clone_entry",
+        (
+            "[WEATHER-CLONE] Entered | "
+            f"{plan['playbook_key']} {plan['city']} {plan['bucket_label']} {plan['side']} "
+            f"shares={fill['fill_shares']} price={fill['fill_price']:.4f}"
+        ),
+        _json_safe_payload({"position_id": position_id, "plan": plan, "total_cost": round(total_cost, 6)}),
+        echo=False,
+    )
+
+
+async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> None:
+    for position in positions:
+        status = str(position.get("status") or "")
+        market_id = str(position.get("market_id") or "")
+        yes_token_id = position.get("yes_token_id")
+        no_token_id = position.get("no_token_id")
+        yes_balance = await asyncio.to_thread(_get_token_balance, clob, yes_token_id) if yes_token_id else 0.0
+        no_balance = await asyncio.to_thread(_get_token_balance, clob, no_token_id) if no_token_id else 0.0
+        resolution = await weather_db.get_market_resolution(market_id)
+        resolved = bool((resolution or {}).get("resolved"))
+
+        if status == "open_paired":
+            mergeable = min(yes_balance, no_balance)
+            if mergeable > 0:
+                result = await asyncio.to_thread(
+                    merge_position,
+                    position["condition_id"],
+                    neg_risk=bool(position.get("neg_risk")),
+                    shares=mergeable,
+                )
+                await close_clone_position(
+                    int(position["id"]),
+                    status="merged_closed",
+                    close_reason="merged",
+                    realized_exit_value_usd=float(mergeable),
+                    notes=f"Merged via {result.mode}",
+                )
+                await trading_db.log_event(
+                    "weather_clone_exit",
+                    f"[WEATHER-CLONE] Exit | merged {position.get('city')} {position.get('bucket_label')} shares={mergeable:.0f}",
+                    _json_safe_payload({"position_id": position.get("id"), "mode": result.mode, "shares": mergeable}),
+                    echo=False,
+                )
+                continue
+
+        if resolved and (yes_balance > 0 or no_balance > 0):
+            result = await asyncio.to_thread(
+                redeem_position,
+                position["condition_id"],
+                neg_risk=bool(position.get("neg_risk")),
+                yes_shares=yes_balance,
+                no_shares=no_balance,
+            )
+            redeemed_amount = max(yes_balance, no_balance)
+            await close_clone_position(
+                int(position["id"]),
+                status="redeemed_closed",
+                close_reason="redeemed",
+                realized_exit_value_usd=float(redeemed_amount),
+                notes=f"Redeemed via {result.mode}",
+            )
+            await trading_db.log_event(
+                "weather_clone_exit",
+                f"[WEATHER-CLONE] Exit | redeemed {position.get('city')} {position.get('bucket_label')} amount={redeemed_amount:.0f}",
+                _json_safe_payload({"position_id": position.get("id"), "mode": result.mode, "amount": redeemed_amount}),
+                echo=False,
+            )
+
+
 async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
     yes_shares = safe_float(position.get("yes_shares")) or 0.0
     no_shares = safe_float(position.get("no_shares")) or 0.0
@@ -1099,6 +1242,8 @@ async def _run_clone_cycle(
             health_state["execution_allowed"] = False
 
     active_positions = await get_open_clone_positions()
+    await _reconcile_clone_positions(clob, active_positions)
+    active_positions = await get_open_clone_positions()
     active_market_ids = {str(position.get("market_id") or "") for position in active_positions}
     report = evaluate_clone_cycle(
         contexts=contexts,
@@ -1113,21 +1258,30 @@ async def _run_clone_cycle(
     entry_attempts = 0
     if report["candidates"]:
         for candidate in report["candidates"]:
-            if candidate.get("playbook_key") != "paired_under_par":
-                continue
             if not (candidate.get("qualifies") and candidate.get("live_eligible")):
                 continue
             active_positions = await get_open_clone_positions()
             active_exposure = _clone_active_exposure_usd(active_positions)
-            plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
+            plan = None
+            if candidate.get("playbook_key") == "paired_under_par":
+                plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
+            else:
+                plan = plan_directional_entry(candidate, runtime, active_exposure_usd=active_exposure)
             if plan is None:
                 continue
             entry_attempts += 1
-            await _attempt_clone_paired_entry(
-                clob,
-                plan,
-                shadow_only=not bool(health_state.get("execution_allowed")),
-            )
+            if candidate.get("playbook_key") == "paired_under_par":
+                await _attempt_clone_paired_entry(
+                    clob,
+                    plan,
+                    shadow_only=not bool(health_state.get("execution_allowed")),
+                )
+            else:
+                await _attempt_clone_directional_entry(
+                    clob,
+                    plan,
+                    shadow_only=not bool(health_state.get("execution_allowed")),
+                )
             break
 
     active_positions = await get_open_clone_positions()

@@ -319,6 +319,79 @@ def plan_paired_entry(
     }
 
 
+def plan_directional_entry(
+    candidate: dict[str, Any],
+    runtime: CloneRuntime,
+    *,
+    active_exposure_usd: float,
+) -> dict[str, Any] | None:
+    playbook_key = str(candidate.get("playbook_key") or "")
+    if playbook_key not in {"tail_bucket_accumulation", "high_prob_bucket_accumulation"}:
+        return None
+    side = str(candidate.get("side") or "").lower()
+    if side not in {"yes", "no"}:
+        return None
+
+    quote_snapshot = candidate.get("quote_snapshot") or {}
+    price = safe_float(candidate.get("directional_price"))
+    if price is None or price <= 0:
+        return None
+    token_id = candidate.get("yes_token_id") if side == "yes" else candidate.get("no_token_id")
+    available_size = safe_float(
+        quote_snapshot.get("yes_ask_size") if side == "yes" else quote_snapshot.get("no_ask_size")
+    )
+    if available_size is None or available_size <= 0:
+        return None
+
+    playbook = ((runtime.config.get("playbooks") or {}).get(playbook_key) or {})
+    playbook_budget = float(playbook.get("sequence_budget_usd") or runtime.runtime.get("sequence_budget_usd") or 0.0)
+    available_budget = max(0.0, float(runtime.runtime.get("max_total_exposure_usd") or 0.0) - active_exposure_usd)
+    budget = max(0.0, min(playbook_budget, available_budget))
+    if budget <= 0:
+        return None
+
+    target_shares = min(math.floor(budget / price), math.floor(available_size))
+    min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
+    if target_shares < min_target_shares:
+        return None
+
+    profit_take_price = safe_float(playbook.get("profit_take_price"))
+    expected_edge_usd = 0.0
+    if profit_take_price is not None and profit_take_price > price:
+        expected_edge_usd = round((profit_take_price - price) * target_shares, 6)
+    else:
+        expected_edge_usd = round(price * target_shares * 0.1, 6)
+    if expected_edge_usd < float(runtime.runtime.get("min_expected_edge_usd") or 0.0):
+        return None
+
+    return {
+        "playbook_key": playbook_key,
+        "strategy_name": runtime.strategy_name,
+        "market_id": candidate["market_id"],
+        "event_id": candidate["event_id"],
+        "event_slug": candidate["event_slug"],
+        "city": candidate["city"],
+        "local_date": candidate.get("local_date"),
+        "bucket_label": candidate["bucket_label"],
+        "condition_id": candidate["market_id"],
+        "neg_risk": bool(candidate.get("neg_risk")),
+        "yes_token_id": candidate.get("yes_token_id"),
+        "no_token_id": candidate.get("no_token_id"),
+        "side": side,
+        "token_id": token_id,
+        "price": round(price, 4),
+        "available_size": available_size,
+        "target_shares": target_shares,
+        "expected_edge_usd": expected_edge_usd,
+        "signal_score": safe_float(candidate.get("candidate_score")) or 0.0,
+        "sequence_budget_usd": round(budget, 2),
+        "profit_take_price": profit_take_price,
+        "signal_data": candidate.get("signal_data") or {},
+        "sequence_data": candidate.get("sequence_data") or {},
+        "quote_snapshot": quote_snapshot,
+    }
+
+
 def build_clone_cycle_summary(
     *,
     report: dict[str, Any],
@@ -657,12 +730,14 @@ def _evaluate_directional_playbook(
                 "market_id": market.market_id,
                 "market_slug": market.market_slug,
                 "bucket_label": market.bucket_label,
+                "question": market.question,
                 "yes_token_id": market.yes_token_id,
                 "no_token_id": market.no_token_id,
                 "neg_risk": bool(market.neg_risk),
                 "playbook_key": playbook_key,
                 "side": side,
                 "directional_price": directional_price,
+                "available_size": safe_float(market.yes_ask_size if side == "yes" else market.no_ask_size),
                 "quote_age_seconds": quote_age_seconds,
                 "qualifies": qualifies,
                 "live_eligible": (
