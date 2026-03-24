@@ -154,6 +154,19 @@ def _normalize_buy_order_shares(price: float, shares: int) -> int:
     return shares - (shares % step)
 
 
+def _minimum_buy_order_shares(price: float) -> int:
+    normalized_price = _normalize_order_price(price)
+    minimum = max(1, math.ceil(1.0 / normalized_price))
+    mills = abs(int(round(normalized_price * 1000)))
+    if mills <= 0:
+        return minimum
+    step = max(1, 10 // math.gcd(mills, 10))
+    remainder = minimum % step
+    if remainder == 0:
+        return minimum
+    return minimum + (step - remainder)
+
+
 def _best_book_price(clob, token_id: str, *, side: str) -> float | None:
     try:
         book = clob.get_order_book(token_id)
@@ -192,13 +205,16 @@ def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: st
     from py_clob_client.clob_types import OrderArgs, OrderType
 
     normalized_shares = int(shares)
+    normalized_price = _normalize_order_price(price)
     if str(side).upper() == "BUY":
-        normalized_shares = _normalize_buy_order_shares(price, normalized_shares)
+        normalized_shares = _normalize_buy_order_shares(normalized_price, normalized_shares)
+        if normalized_shares < _minimum_buy_order_shares(normalized_price):
+            return None
     if normalized_shares <= 0:
         return None
     order_args = OrderArgs(
         token_id=token_id,
-        price=_normalize_order_price(price),
+        price=normalized_price,
         size=float(normalized_shares),
         side=side,
     )
@@ -206,7 +222,7 @@ def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: st
     resp = clob.post_order(signed, OrderType.FOK)
     status = (resp.get("status") or "").upper() if isinstance(resp, dict) else ""
     if status in {"MATCHED", "FILLED"}:
-        fill_shares, fill_price = _parse_fill_from_resp(resp, normalized_shares, price)
+        fill_shares, fill_price = _parse_fill_from_resp(resp, normalized_shares, normalized_price)
         return {
             "order_id": resp.get("orderID") or resp.get("id"),
             "fill_shares": fill_shares,

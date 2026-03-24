@@ -52,11 +52,29 @@ def _normalize_buy_target_shares(price: float, shares: int) -> int:
     return shares - (shares % step)
 
 
+def _minimum_buy_target_shares(price: float) -> int:
+    step = _buy_order_size_step(price)
+    minimum = max(1, math.ceil(1.0 / float(price)))
+    remainder = minimum % step
+    if remainder == 0:
+        return minimum
+    return minimum + (step - remainder)
+
+
 def _normalize_pair_target_shares(yes_price: float, no_price: float, shares: int) -> int:
     if shares <= 0:
         return 0
     step = math.lcm(_buy_order_size_step(yes_price), _buy_order_size_step(no_price))
     return shares - (shares % step)
+
+
+def _minimum_pair_target_shares(yes_price: float, no_price: float) -> int:
+    step = math.lcm(_buy_order_size_step(yes_price), _buy_order_size_step(no_price))
+    minimum = max(_minimum_buy_target_shares(yes_price), _minimum_buy_target_shares(no_price))
+    remainder = minimum % step
+    if remainder == 0:
+        return minimum
+    return minimum + (step - remainder)
 
 
 def preflight_clone_health(clob, *, dry_run: bool) -> dict[str, Any]:
@@ -302,7 +320,11 @@ def plan_paired_entry(
         return None
     target_shares = min(math.floor(budget / combined_cost), math.floor(min(yes_ask_size, no_ask_size)))
     target_shares = _normalize_pair_target_shares(yes_ask, no_ask, target_shares)
-    min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
+    min_target_shares = max(
+        1,
+        int(runtime.runtime.get("min_target_shares") or 1),
+        _minimum_pair_target_shares(yes_ask, no_ask),
+    )
     if target_shares < min_target_shares:
         return None
     edge_per_share = 1.0 - combined_cost
@@ -374,7 +396,11 @@ def plan_directional_entry(
 
     target_shares = min(math.floor(budget / price), math.floor(available_size))
     target_shares = _normalize_buy_target_shares(price, target_shares)
-    min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
+    min_target_shares = max(
+        1,
+        int(runtime.runtime.get("min_target_shares") or 1),
+        _minimum_buy_target_shares(price),
+    )
     if target_shares < min_target_shares:
         return None
 
