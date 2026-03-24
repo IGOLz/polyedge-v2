@@ -808,8 +808,31 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
         no_token_id = position.get("no_token_id")
         yes_balance = await asyncio.to_thread(_get_token_balance, clob, yes_token_id) if yes_token_id else 0.0
         no_balance = await asyncio.to_thread(_get_token_balance, clob, no_token_id) if no_token_id else 0.0
+        opened_at = position.get("opened_at")
+        age_seconds = None
+        if isinstance(opened_at, datetime):
+            opened_at_utc = opened_at.astimezone(UTC) if opened_at.tzinfo else opened_at.replace(tzinfo=UTC)
+            age_seconds = (datetime.now(UTC) - opened_at_utc).total_seconds()
         resolution = await weather_db.get_market_resolution(market_id)
         resolved = bool((resolution or {}).get("resolved"))
+
+        if status == "pending_entry" and age_seconds is not None and age_seconds >= 60 and yes_balance <= 0 and no_balance <= 0:
+            await close_clone_position(
+                int(position["id"]),
+                status="entry_failed",
+                close_reason="stale_pending_entry",
+                notes="No balances detected for pending clone entry after 60 seconds",
+            )
+            await trading_db.log_event(
+                "weather_clone_cleanup",
+                (
+                    "[WEATHER-CLONE] Cleanup | "
+                    f"closed stale pending entry {position.get('city')} {position.get('bucket_label')}"
+                ),
+                _json_safe_payload({"position_id": position.get("id"), "status": status, "age_seconds": round(age_seconds, 2)}),
+                echo=False,
+            )
+            continue
 
         if status == "open_paired":
             mergeable = min(yes_balance, no_balance)
