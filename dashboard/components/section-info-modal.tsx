@@ -32,12 +32,15 @@ const SECTION_INFO: Record<string, SectionInfo> = {
         heading: "How to read it",
         content: "Each row represents a specific combination of market, time window, and price bucket where an edge was detected.",
         bullets: [
-          "Market — The asset and interval (e.g., BTC 5m)",
-          "Time — How far into the market window the snapshot was taken (e.g., 30s, 1m, 2m30s)",
-          "Price — The contract price bucket at that moment (e.g., 35\u00a2)",
-          "Implied Prob — What the market price suggests the probability is (35\u00a2 = 35%)",
-          "Actual Win Rate — What historically happened at that price level",
-          "Edge — The difference: Actual Win Rate minus Implied Probability",
+          "Market Type \u2014 The asset and interval (e.g., BTC 5m)",
+          "Checkpoint \u2014 How far into the market window the snapshot was taken (e.g., @ 30s, @ 60s)",
+          "Price Bucket \u2014 The contract price bucket at that moment (e.g., 35\u00a2)",
+          "Implied Prob \u2014 What the market price suggests the probability is (35\u00a2 = 35%)",
+          "Actual Win Rate \u2014 What historically happened at that price level",
+          "Edge \u2014 The difference: Actual Win Rate minus Implied Probability",
+          "Strength \u2014 Edge size label: Strong (\u226515%), Moderate (10\u201315%), or Slight (<10%)",
+          "Samples \u2014 Number of historical observations backing this edge. More samples = more reliable",
+          "Action \u2014 Suggested direction: Bet Up (positive edge) or Bet Down (negative edge)",
         ],
       },
       {
@@ -162,28 +165,25 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       {
         heading: "What is this?",
         content:
-          "Cross-Asset Correlation measures how often pairs of crypto assets move in the same direction within the same time window. When one asset resolves Up, does the other also resolve Up? This helps understand whether markets are moving together or independently.",
+          "Cross-Asset Correlation measures how often pairs of crypto assets resolve Up simultaneously within the same time window. It answers: when one asset goes Up, does the other also go Up?",
       },
       {
         heading: "How to read it",
-        content: "Each card shows one pair of assets (e.g., BTC \u00d7 ETH):",
+        content: "The section displays a 4\u00d74 matrix (BTC, ETH, SOL, XRP). Each cell shows the percentage of windows where both assets resolved Up at the same time.",
         bullets: [
-          "Correlation % \u2014 How often both assets resolve in the same direction (both Up or both Down)",
-          "Both Up \u2014 Number and percentage of times both went Up",
-          "Both Down \u2014 Number and percentage of times both went Down",
-          "Opposite \u2014 Times one went Up while the other went Down",
-          "Color bar \u2014 Visual breakdown of green (both Up), red (both Down), and gray (opposite)",
+          "Rows and columns \u2014 The four tracked assets",
+          "Cell value \u2014 Percentage of windows where both assets resolved Up simultaneously",
+          "Diagonal (\u2014) \u2014 Self-comparison cells are empty",
+          "Interval filter \u2014 Toggle between 5-minute and 15-minute market windows at the top",
         ],
       },
       {
-        heading: "Correlation strength",
-        content: "The percentage is color-coded:",
+        heading: "Color coding",
+        content: "Cell values are color-coded by strength:",
         bullets: [
-          "Strongly correlated (\u226570%) \u2014 Assets almost always move together",
-          "Moderately correlated (60\u201370%) \u2014 Strong tendency to move together",
-          "Weakly correlated (55\u201360%) \u2014 Slight tendency to move together",
-          "Independent (45\u201355%) \u2014 No meaningful relationship",
-          "Inversely correlated (<45%) \u2014 Assets tend to move in opposite directions",
+          "Green (>70%) \u2014 Assets move Up together very frequently",
+          "Yellow (60\u201370%) \u2014 Moderate tendency to move Up together",
+          "Neutral (\u226460%) \u2014 Weak or no co-movement",
         ],
       },
       {
@@ -267,10 +267,11 @@ const SECTION_INFO: Record<string, SectionInfo> = {
         heading: "How to read it",
         content: "Each row represents a price bucket at a specific time checkpoint:",
         bullets: [
-          "Price Bucket \u2014 The contract price range (e.g., 47.5\u00a2 means contracts trading around 47.5%)",
-          "Expected Win Rate \u2014 What the market price implies (same as the bucket center)",
-          "Actual Win Rate \u2014 What historically happened at that price level",
-          "Deviation \u2014 The gap between expected and actual. Positive = Up wins more than priced, Negative = Up wins less",
+          "Price Bucket \u2014 The contract price range (e.g., 47\u00a2 means contracts trading around 47%)",
+          "Samples \u2014 Number of historical observations for this bucket. Higher counts are more reliable",
+          "Expected \u2014 What the market price implies the win rate should be (same as the bucket center)",
+          "Actual \u2014 What historically happened at that price level, shown with a progress bar",
+          "Deviation \u2014 The gap between expected and actual. Positive (green) = Up wins more than priced, Negative (red) = Up wins less",
           "Significant \u2014 Whether the deviation is statistically significant (p < 0.05)",
         ],
       },
@@ -333,11 +334,10 @@ const SECTION_INFO: Record<string, SectionInfo> = {
         heading: "How to read it",
         content: "Each bar represents one hour of the day:",
         bullets: [
-          "Green bars (above 60%) \u2014 Up wins significantly more often during this hour",
-          "Red bars (below 40%) \u2014 Down wins significantly more often during this hour",
-          "Grey bars (40\u201360%) \u2014 No clear directional bias",
+          "Green bars (above 50%) \u2014 Up wins more often during this hour",
+          "Red bars (at or below 50%) \u2014 Down wins more often during this hour",
           "Dashed line at 50% \u2014 The baseline of no edge",
-          "Greyed-out bars \u2014 Hours with fewer than 10 samples, insufficient data",
+          "Faded bars \u2014 Hours with fewer than 10 samples, shown at low opacity as data is insufficient",
         ],
       },
       {
@@ -365,15 +365,16 @@ const SECTION_INFO: Record<string, SectionInfo> = {
         content: "Each row represents a specific outcome pattern:",
         bullets: [
           "Pattern \u2014 The preceding sequence of outcomes (green arrows = Up, red arrows = Down)",
-          "Sample Count \u2014 How many times this exact sequence occurred",
-          "Next Up Win Rate \u2014 Probability that the next market resolves Up after this pattern",
+          "Samples \u2014 How many times this exact sequence occurred",
+          "Next Up Rate \u2014 Probability that the next market resolves Up after this pattern, shown with a progress bar",
           "Edge \u2014 Deviation from 50%. Positive = Up is more likely next, Negative = Down is more likely",
+          "Strength \u2014 Edge size label: Strong Up/Down (\u226515%), Moderate Up/Down (8\u201315%), Slight Up/Down (<8%)",
         ],
       },
       {
         heading: "Sorting and filtering",
         content:
-          "Rows are sorted by absolute edge (largest deviations first) and filtered to show only patterns with at least 15 samples. This ensures you see the most actionable patterns with reasonable statistical backing.",
+          "Rows are sorted by absolute edge (largest deviations first) and filtered to show only patterns with at least 15 samples. Use the market type filter at the top to switch between assets.",
       },
       {
         heading: "Gambler's fallacy warning",
@@ -418,33 +419,6 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       },
     ],
   },
-  "Best Configuration": {
-    title: "Best Configuration",
-    sections: [
-      {
-        heading: "What is this?",
-        content:
-          "The single parameter combination with highest total PnL across all 15-minute markets, requiring a minimum of 20 trades to qualify.",
-      },
-      {
-        heading: "How to read it",
-        content: "The stat cards show the performance of this specific configuration:",
-        bullets: [
-          "Total PnL \u2014 Net profit/loss after all trades and 2% fees",
-          "ROI \u2014 Return on investment as a percentage",
-          "Win Rate \u2014 Percentage of trades that were profitable",
-          "Wins / Stop Losses / Losses \u2014 Breakdown of trade outcomes",
-          "Avg Entry Price \u2014 Average contract price at entry",
-          "Avg Coin Delta \u2014 Average price movement from window open at entry",
-        ],
-      },
-      {
-        heading: "Configuration badges",
-        content:
-          "The badges below the cards show the exact parameter values: Trigger Point, Stop-Loss, Min Minute, and Min Delta. These are the settings that produced the best overall result.",
-      },
-    ],
-  },
   "Top Configurations by PnL": {
     title: "Top Configurations by PnL",
     sections: [
@@ -458,11 +432,16 @@ const SECTION_INFO: Record<string, SectionInfo> = {
         content: "Each row represents a unique parameter combination:",
         bullets: [
           "Market \u2014 Which market type (All, BTC 15m, etc.)",
-          "Trigger / Stop-Loss \u2014 The entry and exit price thresholds",
-          "Win Rate \u2014 Color-coded: green >70%, yellow 60-70%, red <60%",
-          "W / SL / L \u2014 Wins, stop-loss exits, and full losses",
+          "Trigger \u2014 The entry price threshold for opening a trade",
+          "Stop-Loss \u2014 The exit price threshold for cutting losses",
+          "Min Min \u2014 Minimum minutes into the market window before a trade can trigger",
+          "Min Delta \u2014 Minimum coin price movement from window open required before entry",
+          "Trades \u2014 Total number of trades taken by this combination",
+          "Win Rate \u2014 Color-coded: green \u226570%, yellow 60\u201370%, red <60%",
+          "W / SL \u2014 Number of wins and stop-loss exits",
           "Total PnL \u2014 Net profit/loss after fees",
           "ROI \u2014 Return on investment percentage",
+          "Avg PnL \u2014 Average profit or loss per trade",
         ],
       },
       {
@@ -583,17 +562,40 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       {
         heading: "What is this?",
         content:
-          "This section summarizes how the live trading bot is performing right now using the current bot trade database. The headline metrics focus on realized P&L and exit behavior, so the dashboard reflects how the bot is actually trading rather than treating it like a simple win-loss betting counter.",
+          "This section summarizes how the live trading bot is performing right now using the current bot trade database. The headline metrics focus on realized P&L, risk, and exit behavior.",
       },
       {
-        heading: "Exit profile",
-        content:
-          "Take Profit counts profitable exits, Stop Loss counts trades closed early at the protective stop, and Held to Expiry Losses counts positions that were carried through resolution and finished negative. Those three outcomes are the key trading signals on this page.",
+        heading: "Main metrics",
+        content: "The primary stat cards show:",
+        bullets: [
+          "Net Realized P&L \u2014 Total profit or loss after all resolved trades and fees",
+          "Take Profit \u2014 Number of trades closed at a profit target",
+          "Stop Loss \u2014 Number of trades closed early at the protective stop",
+          "Held to Expiry \u2014 Positions carried through resolution that finished negative",
+          "Profit Factor \u2014 Gross profit divided by gross loss. Above 1.0 means profits outweigh losses",
+          "Avg Trade \u2014 Average P&L per resolved trade",
+          "Max Drawdown \u2014 Largest peak-to-trough equity decline observed",
+          "Streak \u2014 Current consecutive win (W) or loss (L) streak length",
+          "Trades / Day \u2014 Average number of resolved trades per calendar day",
+          "Resolved \u2014 Total number of trades that have been settled",
+        ],
       },
       {
         heading: "Last 24 Hours",
         content:
-          "The activity block isolates the most recent 24 hours so short-term changes stand out from the full-history numbers. It shows realized P&L, recent take-profit and stop-loss behavior, and an hourly activity chart for the latest trading window.",
+          "The activity block isolates the most recent 24 hours so short-term changes stand out from the full-history numbers.",
+        bullets: [
+          "P&L \u2014 Realized profit or loss in the last 24 hours",
+          "Take Profit \u2014 Profitable exits in the last 24 hours",
+          "Stop Loss \u2014 Stop-loss exits in the last 24 hours",
+          "TP Rate \u2014 Percentage of resolved trades that exited at take-profit in the last 24 hours",
+          "vs prior 24h \u2014 Comparison badge showing the P&L change relative to the preceding 24-hour window",
+        ],
+      },
+      {
+        heading: "Activity chart",
+        content:
+          "The hourly bar chart at the bottom of the 24-hour block shows trading activity distribution across the most recent window, making it easy to spot active and quiet periods.",
       },
     ],
   },
@@ -618,12 +620,101 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       {
         heading: "What is this?",
         content:
-          "This table shows the most recent live bot trades from the existing trade history source. Exit prices use the actual settlement convention already present in the project: winners resolve at $1, losing contracts at $0, and stop-loss exits use the stored stop-loss execution price.",
+          "This table shows the most recent live bot trades from the existing trade history source. It provides a per-trade view that grounds the aggregate bot overview in real individual trades.",
+      },
+      {
+        heading: "How to read it",
+        content: "Each row represents one trade:",
+        bullets: [
+          "Date / Time \u2014 When the trade was placed and when it was resolved (or \u201cOpen\u201d if still active)",
+          "Symbol / Pair \u2014 The market type and interval (e.g., BTC 15m)",
+          "Strategy \u2014 Which strategy placed this trade",
+          "Side \u2014 Whether the bot bet Up or Down, shown with a colored arrow",
+          "Entry Price \u2014 The contract price at entry, displayed in cents",
+          "Exit Price \u2014 The settlement or stop-loss exit price. Winners settle at $1, losers at $0, stop-loss exits at the stored execution price",
+          "P&L \u2014 Realized profit or loss for this trade, green for profit and red for loss",
+        ],
       },
       {
         heading: "Why it matters",
         content:
-          "The table helps verify that the bot overview is grounded in real individual trades instead of only aggregate stats. It also lets you spot which markets, strategies, and directions are driving recent P&L.",
+          "The table helps verify that the bot overview is grounded in real individual trades instead of only aggregate stats. It lets you spot which markets, strategies, and directions are driving recent P&L.",
+      },
+    ],
+  },
+  "Live Copy-Trading Comparison": {
+    title: "Live Copy-Trading Comparison",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "Side-by-side comparison of our bot\u2019s copy-trading performance versus the tracked user (@ColdMath) whose on-chain activity we replicate. Both cards pull from live data.",
+      },
+      {
+        heading: "Our Bot card",
+        content: "Shows the bot\u2019s inventory-rebalancing merge strategy results:",
+        bullets: [
+          "Realized P&L \u2014 Net profit or loss from closed positions",
+          "Invested \u2014 Total entry cost across all positions",
+          "Open \u2014 Number of positions still active",
+          "Avg P&L \u2014 Average profit or loss per closed position",
+          "Merged \u2014 Total USDC recovered through merge operations",
+          "Redeemed \u2014 Total USDC recovered through redemptions",
+          "Unwind \u2014 Total USDC recovered through position unwinds",
+        ],
+      },
+      {
+        heading: "Tracked User card",
+        content: "Shows the tracked user\u2019s on-chain activity:",
+        bullets: [
+          "Net P&L \u2014 Total spent minus total returned (sold + merged + redeemed)",
+          "Buys \u2014 Number of buy transactions",
+          "Sells \u2014 Number of sell transactions",
+          "Merges \u2014 Number of merge operations (pairing YES + NO shares)",
+          "Redeems \u2014 Number of redemption transactions",
+          "Markets \u2014 Number of distinct markets traded",
+          "Avg Trade \u2014 Average trade size in USDC",
+        ],
+      },
+    ],
+  },
+  "Bot Details": {
+    title: "Bot Details",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "Configuration details for the ColdMath copy-trading bot. These cards show the static parameters the bot operates with.",
+      },
+      {
+        heading: "Fields",
+        content: "The detail cards display:",
+        bullets: [
+          "Strategy \u2014 The internal strategy identifier used by the bot",
+          "Mechanism \u2014 How the bot generates returns (buy YES + NO, then merge paired shares for the spread)",
+          "Market Type \u2014 The category of Polymarket markets the bot targets (weather temperature predictions)",
+        ],
+      },
+    ],
+  },
+  "Live Strategy Breakdown": {
+    title: "Live Strategy Breakdown",
+    sections: [
+      {
+        heading: "What is this?",
+        content:
+          "Performance breakdown by active strategy. Each card shows how one strategy is performing in the live bot right now.",
+      },
+      {
+        heading: "How to read it",
+        content: "Each strategy card displays:",
+        bullets: [
+          "P&L \u2014 Total realized profit or loss for trades placed by this strategy",
+          "Win Rate \u2014 Percentage of resolved trades that were profitable",
+          "Trades \u2014 Total number of resolved trades for this strategy",
+          "Avg PnL \u2014 Average profit or loss per trade",
+          "W / L \u2014 Number of wins and losses shown at the bottom of the card",
+        ],
       },
     ],
   },
