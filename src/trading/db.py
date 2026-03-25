@@ -340,6 +340,122 @@ async def insert_bot_trade(*, market_id, market_type, strategy_name, direction,
     return row["id"]
 
 
+async def update_bot_trade_lifecycle(
+    trade_id: int,
+    *,
+    status: str | None = None,
+    order_id: str | None = None,
+    notes: str | None = None,
+    execution_stage: str | None = None,
+    shares: float | None = None,
+    entry_price: float | None = None,
+    bet_size_usd: float | None = None,
+    token_id: str | None = None,
+    condition_id: str | None = None,
+    signal_data_patch: dict[str, Any] | None = None,
+) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE bot_trades
+            SET status = COALESCE($2, status),
+                order_id = COALESCE($3, order_id),
+                notes = COALESCE($4, notes),
+                execution_stage = COALESCE($5, execution_stage),
+                shares = COALESCE($6, shares),
+                entry_price = COALESCE($7, entry_price),
+                bet_size_usd = COALESCE($8, bet_size_usd),
+                token_id = COALESCE($9, token_id),
+                condition_id = COALESCE($10, condition_id),
+                signal_data = CASE
+                    WHEN $11::jsonb IS NULL THEN signal_data
+                    ELSE COALESCE(signal_data, '{}'::jsonb) || $11::jsonb
+                END
+            WHERE id = $1
+            """,
+            trade_id,
+            status,
+            order_id,
+            notes,
+            execution_stage,
+            Decimal(str(round(shares, 4))) if shares is not None else None,
+            Decimal(str(round(entry_price, 6))) if entry_price is not None else None,
+            Decimal(str(round(bet_size_usd, 2))) if bet_size_usd is not None else None,
+            token_id,
+            condition_id,
+            json.dumps(signal_data_patch) if signal_data_patch else None,
+        )
+
+
+async def resolve_bot_trade(
+    trade_id: int,
+    *,
+    final_outcome: str,
+    pnl: float,
+    status: str = "filled",
+    notes: str | None = None,
+    resolved_at: datetime | None = None,
+    redeemed: bool | None = None,
+    take_profit_price: float | None = None,
+    stop_loss_price: float | None = None,
+    redemption_mode: str | None = None,
+    redemption_transaction_id: str | None = None,
+    redemption_tx_hash: str | None = None,
+    redemption_state: str | None = None,
+    redemption_error: str | None = None,
+    amount_redeemed: float | None = None,
+    signal_data_patch: dict[str, Any] | None = None,
+) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE bot_trades
+            SET status = $2,
+                final_outcome = $3,
+                pnl = $4,
+                notes = COALESCE($5, notes),
+                resolved_at = COALESCE($6, NOW()),
+                redeemed = COALESCE($7, redeemed),
+                take_profit_price = COALESCE($8, take_profit_price),
+                stop_loss_price = COALESCE($9, stop_loss_price),
+                redemption_mode = COALESCE($10, redemption_mode),
+                redemption_transaction_id = COALESCE($11, redemption_transaction_id),
+                redemption_tx_hash = COALESCE($12, redemption_tx_hash),
+                redemption_state = COALESCE($13, redemption_state),
+                redemption_attempted_at = CASE
+                    WHEN $10 IS NULL AND $11 IS NULL AND $12 IS NULL AND $13 IS NULL AND $14 IS NULL AND $15 IS NULL
+                        THEN redemption_attempted_at
+                    ELSE NOW()
+                END,
+                redemption_error = COALESCE($14, redemption_error),
+                amount_redeemed = COALESCE($15, amount_redeemed),
+                signal_data = CASE
+                    WHEN $16::jsonb IS NULL THEN signal_data
+                    ELSE COALESCE(signal_data, '{}'::jsonb) || $16::jsonb
+                END
+            WHERE id = $1
+            """,
+            trade_id,
+            status,
+            final_outcome,
+            Decimal(str(round(pnl, 6))),
+            notes,
+            resolved_at,
+            redeemed,
+            Decimal(str(round(take_profit_price, 4))) if take_profit_price is not None else None,
+            Decimal(str(round(stop_loss_price, 4))) if stop_loss_price is not None else None,
+            redemption_mode,
+            redemption_transaction_id,
+            redemption_tx_hash,
+            redemption_state,
+            redemption_error,
+            Decimal(str(round(amount_redeemed, 6))) if amount_redeemed is not None else None,
+            json.dumps(signal_data_patch) if signal_data_patch else None,
+        )
+
+
 async def update_exit_targets(
     trade_id: int,
     *,

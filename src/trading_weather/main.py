@@ -297,6 +297,92 @@ async def _log_event(log_type: str, message: str, data: dict[str, Any] | None = 
     log.info(message)
 
 
+def _weather_trade_signal_payload(
+    *,
+    position_id: int,
+    candidate: dict[str, Any] | None,
+    plan: dict[str, Any],
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "engine": "weather_merge",
+        "weather_position_id": position_id,
+        "event_id": plan.get("event_id"),
+        "event_slug": plan.get("event_slug"),
+        "city": plan.get("city"),
+        "local_date": plan.get("local_date"),
+        "bucket_label": plan.get("bucket_label"),
+        "question": plan.get("question"),
+        "condition_id": plan.get("condition_id"),
+        "yes_token_id": plan.get("yes_token_id"),
+        "no_token_id": plan.get("no_token_id"),
+        "first_side": plan.get("first_side"),
+        "second_side": plan.get("second_side"),
+        "planned_target_shares": int(plan.get("target_shares") or 0),
+        "planned_complete_set_cost": _round_value(plan.get("combined_cost"), 6),
+        "planned_expected_edge_usd": _round_value(plan.get("expected_edge_usd"), 6),
+        "candidate": _candidate_brief(candidate),
+        "plan": _plan_brief(plan),
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _sequence_realized_pnl(position: dict[str, Any]) -> float:
+    total_entry_cost = safe_float(position.get("total_entry_cost")) or 0.0
+    unwind_value = safe_float(position.get("unwind_collateral_usdc")) or 0.0
+    merged_value = safe_float(position.get("merged_collateral_usdc")) or 0.0
+    redeemed_value = safe_float(position.get("redeemed_collateral_usdc")) or 0.0
+    return round(unwind_value + merged_value + redeemed_value - total_entry_cost, 6)
+
+
+def _sequence_final_outcome(position: dict[str, Any]) -> str:
+    pnl = _sequence_realized_pnl(position)
+    status = str(position.get("status") or "")
+    if status in {"merged_closed", "redeemed_closed"}:
+        return "take_profit" if pnl >= 0 else "loss"
+    if status in {"partial_unwound", "entry_failed"}:
+        return "loss" if pnl <= 0 else "take_profit"
+    return "take_profit" if pnl >= 0 else "loss"
+
+
+async def _create_weather_sequence_trade(
+    *,
+    position_id: int,
+    candidate: dict[str, Any],
+    plan: dict[str, Any],
+) -> int:
+    planned_cost = round((safe_float(plan.get("combined_cost")) or 0.0) * int(plan.get("target_shares") or 0), 6)
+    trade_id = await trading_db.insert_bot_trade(
+        market_id=plan["market_id"],
+        market_type=str(candidate.get("market_type") or "weather_merge"),
+        strategy_name=plan["strategy_name"],
+        direction="PAIR",
+        entry_price=safe_float(plan.get("combined_cost")) or 0.0,
+        bet_size_usd=planned_cost,
+        shares=int(plan.get("target_shares") or 0),
+        condition_id=plan.get("condition_id"),
+        status="pending_entry",
+        notes="Weather merge sequence planned",
+        signal_data=_weather_trade_signal_payload(position_id=position_id, candidate=candidate, plan=plan),
+        execution_stage="weather_merge_planned",
+    )
+    await weather_db.attach_bot_trade(position_id, trade_id)
+    await weather_db.insert_weather_merge_event(
+        position_id,
+        bot_trade_id=trade_id,
+        event_type="entry_planned",
+        event_status="pending_entry",
+        shares=float(int(plan.get("target_shares") or 0)),
+        price=safe_float(plan.get("combined_cost")) or 0.0,
+        value_usdc=planned_cost,
+        notes="Weather merge sequence planned",
+        data=_weather_trade_signal_payload(position_id=position_id, candidate=candidate, plan=plan),
+    )
+    return trade_id
+
+
 def _cycle_status_message(
     report: dict[str, Any],
 ) -> str:
@@ -1066,14 +1152,15 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
             )
 
 
-async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
+async def _handle_partial_unwind(clob, position: dict[str, Any]) -> dict[str, Any]:
     yes_shares = safe_float(position.get("yes_shares")) or 0.0
     no_shares = safe_float(position.get("no_shares")) or 0.0
+    bot_trade_id = int(position.get("bot_trade_id") or 0) or None
     side = "yes" if yes_shares > no_shares else "no"
     token_id = position["yes_token_id"] if side == "yes" else position["no_token_id"]
     shares = math.floor(abs(yes_shares - no_shares))
     if shares <= 0:
-        return
+        return {"closed": False, "status": "no_unwind_needed", "realized_value_usdc": 0.0}
 
     sell_price = _best_book_price(clob, token_id, side="SELL")
     if sell_price is None:
@@ -1082,7 +1169,29 @@ async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
             status="partial_orphaned",
             notes="Could not find sell liquidity for unmatched inventory",
         )
-        return
+        if bot_trade_id is not None:
+            await trading_db.update_bot_trade_lifecycle(
+                bot_trade_id,
+                status="open_partial",
+                notes="Could not find sell liquidity for unmatched inventory",
+                execution_stage="weather_merge_partial_orphaned",
+                signal_data_patch={"open_state": "partial_orphaned"},
+            )
+        await weather_db.insert_weather_merge_event(
+            position["id"],
+            bot_trade_id=bot_trade_id,
+            event_type="unwind_blocked",
+            event_status="partial_orphaned",
+            side=side,
+            shares=float(shares),
+            notes="Could not find sell liquidity for unmatched inventory",
+        )
+        await _log_event(
+            "weather_merge_unwind_blocked",
+            f"[WEATHER-MERGE] Unwind blocked | position_id={position['id']} side={side} reason=no_sell_liquidity",
+            {"position_id": position["id"], "bot_trade_id": bot_trade_id, "side": side, "shares": shares},
+        )
+        return {"closed": False, "status": "partial_orphaned", "realized_value_usdc": 0.0}
 
     fill = await asyncio.to_thread(
         _place_fok_order,
@@ -1098,7 +1207,30 @@ async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
             status="partial_orphaned",
             notes="Unwind sell did not fill",
         )
-        return
+        if bot_trade_id is not None:
+            await trading_db.update_bot_trade_lifecycle(
+                bot_trade_id,
+                status="open_partial",
+                notes="Unwind sell did not fill",
+                execution_stage="weather_merge_partial_orphaned",
+                signal_data_patch={"open_state": "partial_orphaned"},
+            )
+        await weather_db.insert_weather_merge_event(
+            position["id"],
+            bot_trade_id=bot_trade_id,
+            event_type="unwind_failed",
+            event_status="partial_orphaned",
+            side=side,
+            shares=float(shares),
+            price=sell_price,
+            notes="Unwind sell did not fill",
+        )
+        await _log_event(
+            "weather_merge_unwind_failed",
+            f"[WEATHER-MERGE] Unwind failed | position_id={position['id']} side={side} shares={shares}",
+            {"position_id": position["id"], "bot_trade_id": bot_trade_id, "side": side, "shares": shares, "price": sell_price},
+        )
+        return {"closed": False, "status": "partial_orphaned", "realized_value_usdc": 0.0}
 
     remaining_yes = max(0.0, yes_shares - (fill["fill_shares"] if side == "yes" else 0.0))
     remaining_no = max(0.0, no_shares - (fill["fill_shares"] if side == "no" else 0.0))
@@ -1118,17 +1250,98 @@ async def _handle_partial_unwind(clob, position: dict[str, Any]) -> None:
         status="partial_unwound" if remaining_yes == 0 and remaining_no == 0 else "open_partial",
         notes=f"Unwound unmatched {side} inventory at {fill['fill_price']:.4f}",
     )
+    await weather_db.insert_weather_merge_event(
+        position["id"],
+        bot_trade_id=bot_trade_id,
+        event_type="unwind_fill",
+        event_status="partial_unwound" if remaining_yes == 0 and remaining_no == 0 else "open_partial",
+        side=side,
+        order_id=fill.get("order_id"),
+        shares=float(fill["fill_shares"]),
+        price=float(fill["fill_price"]),
+        value_usdc=unwind_value,
+        notes=f"Unwound unmatched {side} inventory",
+        data={
+            "remaining_yes_shares": round(remaining_yes, 6),
+            "remaining_no_shares": round(remaining_no, 6),
+            "paired_shares": int(paired),
+        },
+    )
+    await _log_event(
+        "weather_merge_unwind",
+        (
+            "[WEATHER-MERGE] Unwind | "
+            f"position_id={position['id']} side={side} shares={fill['fill_shares']} "
+            f"price={fill['fill_price']:.4f} value={unwind_value:.4f}"
+        ),
+        {
+            "position_id": position["id"],
+            "bot_trade_id": bot_trade_id,
+            "side": side,
+            "shares": fill["fill_shares"],
+            "price": round(fill["fill_price"], 6),
+            "value_usdc": unwind_value,
+            "remaining_yes_shares": round(remaining_yes, 6),
+            "remaining_no_shares": round(remaining_no, 6),
+        },
+    )
     if remaining_yes == 0 and remaining_no == 0:
         await weather_db.close_weather_merge_position(
             position["id"],
             status="partial_unwound",
             notes=f"Unwound unmatched {side} inventory at {fill['fill_price']:.4f}",
         )
+        if bot_trade_id is not None:
+            closing_position = {
+                **position,
+                "status": "partial_unwound",
+                "total_entry_cost": position.get("total_entry_cost"),
+                "unwind_collateral_usdc": (safe_float(position.get("unwind_collateral_usdc")) or 0.0) + unwind_value,
+                "merged_collateral_usdc": position.get("merged_collateral_usdc"),
+                "redeemed_collateral_usdc": position.get("redeemed_collateral_usdc"),
+            }
+            await trading_db.resolve_bot_trade(
+                bot_trade_id,
+                final_outcome=_sequence_final_outcome(closing_position),
+                pnl=_sequence_realized_pnl(closing_position),
+                notes=f"Unwound unmatched {side} inventory at {fill['fill_price']:.4f}",
+                signal_data_patch={
+                    "close_reason": "partial_unwound",
+                    "realized_exit_value_usd": round(unwind_value, 6),
+                },
+            )
+        return {
+            "closed": True,
+            "status": "partial_unwound",
+            "realized_value_usdc": unwind_value,
+            "remaining_yes_shares": remaining_yes,
+            "remaining_no_shares": remaining_no,
+        }
+    if bot_trade_id is not None:
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="filled",
+            notes=f"Unwound unmatched {side} inventory at {fill['fill_price']:.4f}",
+            execution_stage="weather_merge_partial_open",
+            signal_data_patch={
+                "open_state": "open_partial",
+                "remaining_yes_shares": round(remaining_yes, 6),
+                "remaining_no_shares": round(remaining_no, 6),
+            },
+        )
+    return {
+        "closed": False,
+        "status": "open_partial",
+        "realized_value_usdc": unwind_value,
+        "remaining_yes_shares": remaining_yes,
+        "remaining_no_shares": remaining_no,
+    }
 
 
 async def _reconcile_position(clob, position: dict[str, Any], runtime) -> None:
     yes_balance = await asyncio.to_thread(_get_token_balance, clob, position["yes_token_id"])
     no_balance = await asyncio.to_thread(_get_token_balance, clob, position["no_token_id"])
+    bot_trade_id = int(position.get("bot_trade_id") or 0) or None
     mergeable = compute_mergeable_shares(yes_shares=yes_balance, no_shares=no_balance)
     current_status = "open_paired" if mergeable > 0 else ("open_partial" if yes_balance > 0 or no_balance > 0 else "closed")
     await weather_db.refresh_weather_position_balances(
@@ -1159,6 +1372,31 @@ async def _reconcile_position(clob, position: dict[str, Any], runtime) -> None:
             state=result.state,
             status="merged",
         )
+        await weather_db.insert_weather_merge_event(
+            position["id"],
+            bot_trade_id=bot_trade_id,
+            event_type="merge",
+            event_status="merged",
+            tx_hash=result.transaction_hash,
+            tx_mode=result.mode,
+            tx_state=result.state,
+            shares=float(merged_shares),
+            value_usdc=float(merged_shares),
+            notes="Merged matched inventory",
+        )
+        await _log_event(
+            "weather_merge_exit",
+            f"[WEATHER-MERGE] Merge | position_id={position['id']} shares={merged_shares} mode={result.mode}",
+            {
+                "position_id": position["id"],
+                "bot_trade_id": bot_trade_id,
+                "shares": merged_shares,
+                "value_usdc": round(float(merged_shares), 6),
+                "mode": result.mode,
+                "transaction_hash": result.transaction_hash,
+                "state": result.state,
+            },
+        )
         yes_balance = await asyncio.to_thread(_get_token_balance, clob, position["yes_token_id"])
         no_balance = await asyncio.to_thread(_get_token_balance, clob, position["no_token_id"])
         mergeable = compute_mergeable_shares(yes_shares=yes_balance, no_shares=no_balance)
@@ -1175,7 +1413,42 @@ async def _reconcile_position(clob, position: dict[str, Any], runtime) -> None:
                 status="merged_closed",
                 notes=f"Merged {merged_shares} matched shares",
             )
+            if bot_trade_id is not None:
+                closed_position = {
+                    **position,
+                    "status": "merged_closed",
+                    "merged_collateral_usdc": (safe_float(position.get("merged_collateral_usdc")) or 0.0) + float(merged_shares),
+                    "unwind_collateral_usdc": position.get("unwind_collateral_usdc"),
+                    "redeemed_collateral_usdc": position.get("redeemed_collateral_usdc"),
+                }
+                await trading_db.resolve_bot_trade(
+                    bot_trade_id,
+                    final_outcome=_sequence_final_outcome(closed_position),
+                    pnl=_sequence_realized_pnl(closed_position),
+                    notes=f"Merged {merged_shares} matched shares",
+                    take_profit_price=1.0,
+                    signal_data_patch={
+                        "close_reason": "merged",
+                        "merged_shares": int(merged_shares),
+                        "merge_mode": result.mode,
+                        "merge_tx_hash": result.transaction_hash,
+                        "merge_state": result.state,
+                    },
+                )
             return
+        if bot_trade_id is not None:
+            await trading_db.update_bot_trade_lifecycle(
+                bot_trade_id,
+                status="filled",
+                notes=f"Merged {merged_shares} shares; remaining inventory still open",
+                execution_stage="weather_merge_partial_open",
+                signal_data_patch={
+                    "open_state": "open_partial",
+                    "merged_shares": int(merged_shares),
+                    "merge_mode": result.mode,
+                    "merge_tx_hash": result.transaction_hash,
+                },
+            )
 
     if resolved and (yes_balance > 0 or no_balance > 0):
         result = await asyncio.to_thread(
@@ -1194,11 +1467,59 @@ async def _reconcile_position(clob, position: dict[str, Any], runtime) -> None:
             state=result.state,
             status="redeemed",
         )
+        await weather_db.insert_weather_merge_event(
+            position["id"],
+            bot_trade_id=bot_trade_id,
+            event_type="redeem",
+            event_status="redeemed",
+            tx_hash=result.transaction_hash,
+            tx_mode=result.mode,
+            tx_state=result.state,
+            shares=float(winning_shares),
+            value_usdc=float(winning_shares),
+            notes="Redeemed resolved inventory",
+        )
         await weather_db.close_weather_merge_position(
             position["id"],
             status="redeemed_closed",
             notes="Redeemed remaining resolved inventory",
         )
+        await _log_event(
+            "weather_merge_exit",
+            f"[WEATHER-MERGE] Redeem | position_id={position['id']} amount={winning_shares:.0f} mode={result.mode}",
+            {
+                "position_id": position["id"],
+                "bot_trade_id": bot_trade_id,
+                "amount_redeemed": round(float(winning_shares), 6),
+                "mode": result.mode,
+                "transaction_hash": result.transaction_hash,
+                "state": result.state,
+            },
+        )
+        if bot_trade_id is not None:
+            closed_position = {
+                **position,
+                "status": "redeemed_closed",
+                "redeemed_collateral_usdc": (safe_float(position.get("redeemed_collateral_usdc")) or 0.0) + float(winning_shares),
+                "merged_collateral_usdc": position.get("merged_collateral_usdc"),
+                "unwind_collateral_usdc": position.get("unwind_collateral_usdc"),
+            }
+            await trading_db.resolve_bot_trade(
+                bot_trade_id,
+                final_outcome=_sequence_final_outcome(closed_position),
+                pnl=_sequence_realized_pnl(closed_position),
+                notes="Redeemed remaining resolved inventory",
+                redeemed=True,
+                take_profit_price=1.0,
+                redemption_mode=result.mode,
+                redemption_tx_hash=result.transaction_hash,
+                redemption_state=result.state,
+                amount_redeemed=float(winning_shares),
+                signal_data_patch={
+                    "close_reason": "redeemed",
+                    "redeemed_amount": round(float(winning_shares), 6),
+                },
+            )
         return
 
     if mergeable == 0 and (yes_balance > 0 or no_balance > 0):
@@ -1215,6 +1536,7 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         max_complete_set_cost=runtime.live_rules["complete_set_cost_lte"],
         max_inventory_imbalance_ratio=runtime.live_rules.get("max_inventory_imbalance_ratio"),
     )
+    bot_trade_id = await _create_weather_sequence_trade(position_id=position_id, candidate=candidate, plan=plan)
     await _log_event(
         "weather_merge_entry_planned",
         (
@@ -1234,6 +1556,21 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             status="entry_rejected",
             notes=f"Rejected by entry invariant: {invariant_error}",
         )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="entry_rejected",
+            notes=f"Rejected by entry invariant: {invariant_error}",
+            execution_stage="weather_merge_entry_rejected",
+            signal_data_patch={"entry_rejection_reason": invariant_error},
+        )
+        await weather_db.insert_weather_merge_event(
+            position_id,
+            bot_trade_id=bot_trade_id,
+            event_type="entry_rejected",
+            event_status="entry_rejected",
+            notes=f"Rejected by entry invariant: {invariant_error}",
+            data={"reason": invariant_error},
+        )
         await _log_event(
             "weather_merge_entry_rejected",
             (
@@ -1252,6 +1589,19 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             status="dry_run",
             notes="Dry-run candidate only",
         )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="dry_run",
+            notes="Dry-run candidate only",
+            execution_stage="weather_merge_dry_run",
+        )
+        await weather_db.insert_weather_merge_event(
+            position_id,
+            bot_trade_id=bot_trade_id,
+            event_type="dry_run",
+            event_status="dry_run",
+            notes="Dry-run candidate only",
+        )
         await _log_event(
             "weather_merge_dry_run",
             f"[WEATHER-MERGE] Dry run candidate {plan['city']} {plan['bucket_label']} | cost {plan['combined_cost']:.4f}",
@@ -1265,6 +1615,29 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             position_id,
             status="entry_blocked",
             notes="Weather approvals are not ready",
+        )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="entry_blocked",
+            notes="Weather approvals are not ready",
+            execution_stage="weather_merge_entry_blocked",
+            signal_data_patch={
+                "approval_ready": approval_state.ready,
+                "missing_usdc_spenders": approval_state.missing_usdc_spenders,
+                "missing_ctf_operators": approval_state.missing_ctf_operators,
+            },
+        )
+        await weather_db.insert_weather_merge_event(
+            position_id,
+            bot_trade_id=bot_trade_id,
+            event_type="entry_blocked",
+            event_status="entry_blocked",
+            notes="Weather approvals are not ready",
+            data={
+                "ready": approval_state.ready,
+                "missing_usdc_spenders": approval_state.missing_usdc_spenders,
+                "missing_ctf_operators": approval_state.missing_ctf_operators,
+            },
         )
         await _log_event(
             "weather_merge_entry_blocked",
@@ -1304,6 +1677,23 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             status="entry_failed",
             notes=f"First {first_side} leg did not fill",
         )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="entry_failed",
+            notes=f"First {first_side} leg did not fill",
+            execution_stage="weather_merge_first_leg_no_fill",
+            signal_data_patch={"entry_failure_reason": f"first_{first_side}_leg_no_fill"},
+        )
+        await weather_db.insert_weather_merge_event(
+            position_id,
+            bot_trade_id=bot_trade_id,
+            event_type="entry_failed",
+            event_status="entry_failed",
+            side=first_side,
+            price=first_price,
+            shares=float(target_shares),
+            notes=f"First {first_side} leg did not fill",
+        )
         await _log_event(
             "weather_merge_entry_failed",
             f"[WEATHER-MERGE] Entry failed | first_{first_side}_leg_no_fill | market_id={plan['market_id']}",
@@ -1322,23 +1712,82 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         status="entry_first_leg_filled",
         notes=f"Filled {first_side} leg first",
     )
+    await trading_db.update_bot_trade_lifecycle(
+        bot_trade_id,
+        status="partial_fill",
+        notes=f"Filled {first_side} leg first",
+        execution_stage="weather_merge_first_leg_filled",
+        shares=float(first_fill["fill_shares"]),
+        bet_size_usd=total_cost,
+        signal_data_patch={
+            "first_fill_side": first_side,
+            "first_fill_shares": int(first_fill["fill_shares"]),
+            "first_fill_price": round(float(first_fill["fill_price"]), 6),
+            "first_order_id": first_fill.get("order_id"),
+        },
+    )
+    await weather_db.insert_weather_merge_event(
+        position_id,
+        bot_trade_id=bot_trade_id,
+        event_type="entry_leg_fill",
+        event_status="entry_first_leg_filled",
+        side=first_side,
+        order_id=first_fill.get("order_id"),
+        shares=float(first_fill["fill_shares"]),
+        price=float(first_fill["fill_price"]),
+        value_usdc=total_cost,
+        notes=f"Filled {first_side} leg first",
+    )
 
     max_second_leg_price = runtime.live_rules["complete_set_cost_lte"] - first_fill["fill_price"]
     if second_price > max_second_leg_price + 1e-9:
-        await _handle_partial_unwind(
+        unwind_result = await _handle_partial_unwind(
             clob,
             {
                 "id": position_id,
+                "bot_trade_id": bot_trade_id,
                 "yes_token_id": plan["yes_token_id"],
                 "no_token_id": plan["no_token_id"],
                 "yes_shares": first_fill["fill_shares"] if first_side == "yes" else 0.0,
                 "no_shares": first_fill["fill_shares"] if first_side == "no" else 0.0,
+                "total_entry_cost": total_cost,
+                "merged_collateral_usdc": 0.0,
+                "redeemed_collateral_usdc": 0.0,
             },
         )
-        await weather_db.close_weather_merge_position(
+        if unwind_result.get("closed"):
+            await weather_db.update_weather_merge_status(
+                position_id,
+                status="entry_failed",
+                notes="Second leg moved above complete-set threshold",
+            )
+        else:
+            await weather_db.update_weather_merge_status(
+                position_id,
+                status=str(unwind_result.get("status") or "partial_orphaned"),
+                notes="Second leg moved above complete-set threshold; unmatched inventory remains",
+            )
+        await weather_db.insert_weather_merge_event(
             position_id,
-            status="entry_failed",
+            bot_trade_id=bot_trade_id,
+            event_type="entry_failed",
+            event_status=str(unwind_result.get("status") or "entry_failed"),
+            side=second_side,
+            price=second_price,
+            shares=float(first_fill["fill_shares"]),
             notes="Second leg moved above complete-set threshold",
+            data={"max_second_leg_price": round(max_second_leg_price, 6)},
+        )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="filled" if unwind_result.get("closed") else "open_partial",
+            notes="Second leg moved above complete-set threshold",
+            execution_stage="weather_merge_second_leg_repriced",
+            signal_data_patch={
+                "entry_failure_reason": "second_leg_above_complete_set_threshold",
+                "max_second_leg_price": round(max_second_leg_price, 6),
+                "unwind_status": unwind_result.get("status"),
+            },
         )
         await _log_event(
             "weather_merge_entry_failed",
@@ -1356,20 +1805,51 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         side="BUY",
     )
     if not second_fill:
-        await _handle_partial_unwind(
+        unwind_result = await _handle_partial_unwind(
             clob,
             {
                 "id": position_id,
+                "bot_trade_id": bot_trade_id,
                 "yes_token_id": plan["yes_token_id"],
                 "no_token_id": plan["no_token_id"],
                 "yes_shares": first_fill["fill_shares"] if first_side == "yes" else 0.0,
                 "no_shares": first_fill["fill_shares"] if first_side == "no" else 0.0,
+                "total_entry_cost": total_cost,
+                "merged_collateral_usdc": 0.0,
+                "redeemed_collateral_usdc": 0.0,
             },
         )
-        await weather_db.close_weather_merge_position(
+        if unwind_result.get("closed"):
+            await weather_db.update_weather_merge_status(
+                position_id,
+                status="entry_failed",
+                notes=f"Second {second_side} leg did not fill",
+            )
+        else:
+            await weather_db.update_weather_merge_status(
+                position_id,
+                status=str(unwind_result.get("status") or "partial_orphaned"),
+                notes=f"Second {second_side} leg did not fill; unmatched inventory remains",
+            )
+        await weather_db.insert_weather_merge_event(
             position_id,
-            status="entry_failed",
+            bot_trade_id=bot_trade_id,
+            event_type="entry_failed",
+            event_status=str(unwind_result.get("status") or "entry_failed"),
+            side=second_side,
+            price=second_price,
+            shares=float(first_fill["fill_shares"]),
             notes=f"Second {second_side} leg did not fill",
+        )
+        await trading_db.update_bot_trade_lifecycle(
+            bot_trade_id,
+            status="filled" if unwind_result.get("closed") else "open_partial",
+            notes=f"Second {second_side} leg did not fill",
+            execution_stage="weather_merge_second_leg_no_fill",
+            signal_data_patch={
+                "entry_failure_reason": f"second_{second_side}_leg_no_fill",
+                "unwind_status": unwind_result.get("status"),
+            },
         )
         await _log_event(
             "weather_merge_entry_failed",
@@ -1389,6 +1869,18 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         status="open_paired",
         notes="Both legs filled",
     )
+    await weather_db.insert_weather_merge_event(
+        position_id,
+        bot_trade_id=bot_trade_id,
+        event_type="entry_leg_fill",
+        event_status="open_paired",
+        side=second_side,
+        order_id=second_fill.get("order_id"),
+        shares=float(second_fill["fill_shares"]),
+        price=float(second_fill["fill_price"]),
+        value_usdc=float(second_fill["fill_shares"] * second_fill["fill_price"]),
+        notes=f"Filled {second_side} leg second",
+    )
     await weather_db.refresh_weather_position_balances(
         position_id,
         yes_shares=second_fill["fill_shares"] if second_side == "yes" else first_fill["fill_shares"],
@@ -1396,16 +1888,50 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         paired_shares=min(first_fill["fill_shares"], second_fill["fill_shares"]),
         status="open_paired",
     )
+    completed_pairs = min(first_fill["fill_shares"], second_fill["fill_shares"])
+    average_pair_cost = total_cost / max(completed_pairs, 1)
+    await trading_db.update_bot_trade_lifecycle(
+        bot_trade_id,
+        status="filled",
+        notes="Both legs filled",
+        execution_stage="weather_merge_open_paired",
+        shares=float(completed_pairs),
+        entry_price=average_pair_cost,
+        bet_size_usd=total_cost,
+        condition_id=plan["condition_id"],
+        signal_data_patch={
+            "first_fill_side": first_side,
+            "second_fill_side": second_side,
+            "completed_pairs": int(completed_pairs),
+            "average_pair_cost": round(average_pair_cost, 6),
+            "yes_entry_price": round(float(second_fill["fill_price"] if second_side == "yes" else first_fill["fill_price"]), 6),
+            "no_entry_price": round(float(second_fill["fill_price"] if second_side == "no" else first_fill["fill_price"]), 6),
+            "yes_order_id": second_fill.get("order_id") if second_side == "yes" else first_fill.get("order_id"),
+            "no_order_id": second_fill.get("order_id") if second_side == "no" else first_fill.get("order_id"),
+        },
+    )
+    await weather_db.insert_weather_merge_event(
+        position_id,
+        bot_trade_id=bot_trade_id,
+        event_type="entry_open",
+        event_status="open_paired",
+        shares=float(completed_pairs),
+        price=float(round(average_pair_cost, 6)),
+        value_usdc=float(round(total_cost, 6)),
+        notes="Both legs filled",
+        data={"completed_pairs": int(completed_pairs)},
+    )
     await _log_event(
         "weather_merge_entry",
         f"[WEATHER-MERGE] Entered {plan['city']} {plan['bucket_label']} | {first_fill['fill_shares']} pairs @ {total_cost / max(first_fill['fill_shares'], 1):.4f}",
-        {"position_id": position_id, "plan": plan, "total_cost": round(total_cost, 4)},
+        {"position_id": position_id, "bot_trade_id": bot_trade_id, "plan": plan, "total_cost": round(total_cost, 4)},
     )
 
     if runtime.auto_merge:
         await asyncio.sleep(config.SETTLEMENT_WAIT_SECONDS)
         position = {
             "id": position_id,
+            "bot_trade_id": bot_trade_id,
             "market_id": plan["market_id"],
             "condition_id": plan["condition_id"],
             "neg_risk": plan["neg_risk"],
@@ -1413,6 +1939,10 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             "no_token_id": plan["no_token_id"],
             "opened_at": datetime.now(UTC),
             "status": "open_paired",
+            "total_entry_cost": total_cost,
+            "merged_collateral_usdc": 0.0,
+            "redeemed_collateral_usdc": 0.0,
+            "unwind_collateral_usdc": 0.0,
         }
         await _reconcile_position(clob, position, runtime)
 
