@@ -83,6 +83,7 @@ export interface RecentTradeRow {
   side: string;
   entryPrice: number;
   exitPrice: number | null;
+  betSize: number;
   pnl: number | null;
   placedAt: string;
   resolvedAt: string | null;
@@ -152,6 +153,7 @@ type TradeRow = {
   strategy_name: string;
   direction: string;
   entry_price: string;
+  bet_size_usd: string;
   stop_loss_price: string | null;
   take_profit_price: string | null;
   status: string;
@@ -416,6 +418,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
             strategy_name,
             direction,
             entry_price,
+            bet_size_usd,
             stop_loss_price,
             take_profit_price,
             status,
@@ -426,7 +429,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
           FROM bot_trades
           WHERE strategy_name NOT LIKE 'momentum%'
           ORDER BY placed_at DESC
-          LIMIT 18
+          LIMIT 50
         `)
       ),
       withTimeout(
@@ -521,6 +524,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
         side: row.direction,
         entryPrice: toNumber(row.entry_price),
         exitPrice: deriveExitPrice(row.final_outcome, row.stop_loss_price, row.take_profit_price),
+        betSize: toNumber(row.bet_size_usd),
         pnl: row.pnl == null ? null : toNumber(row.pnl),
         placedAt: row.placed_at,
         resolvedAt: row.resolved_at,

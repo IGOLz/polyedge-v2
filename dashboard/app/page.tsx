@@ -2,13 +2,14 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
-import { ArrowDownRight, ArrowUpRight, Clock3 } from "lucide-react";
+import { ArrowUpRight, Clock3 } from "lucide-react";
 
 import { DashboardActivityChart } from "@/components/dashboard-activity-chart";
 import { Footer } from "@/components/footer";
 import { Navbar } from "@/components/navbar";
 import type { SectionInfo } from "@/components/section-info-modal";
 import { SectionHeader } from "@/components/section-header";
+import { TradeHistoryTable } from "@/components/trade-history-table";
 import { GlassPanel } from "@/components/ui/glass-panel";
 import { getBotDashboardData } from "@/lib/bot-dashboard-data";
 import { getStrategySummaries } from "@/lib/strategy-artifacts";
@@ -61,23 +62,6 @@ function formatTimestamp(value: string | null) {
   });
 }
 
-function formatMarketType(value: string) {
-  const [asset, interval] = value.split("_");
-  if (!asset || !interval) {
-    return value;
-  }
-  return `${asset.toUpperCase()} ${interval}`;
-}
-
-function formatTradePrice(value: number | null) {
-  if (value == null) {
-    return "—";
-  }
-  if (value <= 1) {
-    return `${(value * 100).toFixed(1)}¢`;
-  }
-  return `$${value.toFixed(2)}`;
-}
 
 function metricToneClass(tone: "positive" | "negative" | "neutral") {
   if (tone === "positive") {
@@ -630,103 +614,15 @@ export default async function DashboardPage() {
           <SectionHeader title="Trade History" />
 
           <GlassPanel variant="glow-wide">
-            <div className="overflow-x-auto">
-              {botData.recentTrades.length > 0 ? (
-                <div className="min-w-[900px]">
-                  <table className="w-full table-fixed">
-                    <thead className="bg-zinc-950">
-                      <tr className="border-b border-zinc-800/40">
-                        <th className="w-44 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Date / Time
-                        </th>
-                        <th className="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Symbol / Pair
-                        </th>
-                        <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Strategy
-                        </th>
-                        <th className="w-20 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Side
-                        </th>
-                        <th className="w-24 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Entry Price
-                        </th>
-                        <th className="w-24 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          Exit Price
-                        </th>
-                        <th className="w-24 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                          P&amp;L
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                    {botData.recentTrades.map((trade) => (
-                      <tr
-                        key={trade.id}
-                        className="border-b border-zinc-800/20 transition-colors hover:bg-zinc-800/20 even:bg-zinc-900/30"
-                      >
-                        <td className="px-4 py-3 text-sm text-zinc-300">
-                          <div className="font-medium text-zinc-100">{formatTimestamp(trade.placedAt)}</div>
-                          <div className="text-xs text-zinc-500">
-                            {trade.resolvedAt ? `Resolved ${formatTimestamp(trade.resolvedAt)}` : "Open"}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-sm text-zinc-300">
-                          {formatMarketType(trade.marketType)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="inline-flex max-w-full truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                            {trade.strategyName}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 text-sm",
-                              trade.side.toLowerCase() === "up" ? "text-emerald-400" : "text-red-400"
-                            )}
-                          >
-                            {trade.side.toLowerCase() === "up" ? (
-                              <ArrowUpRight className="h-3.5 w-3.5" />
-                            ) : (
-                              <ArrowDownRight className="h-3.5 w-3.5" />
-                            )}
-                            {trade.side}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-sm tabular-nums text-zinc-200">
-                          {formatTradePrice(trade.entryPrice)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-mono text-sm tabular-nums text-zinc-200">
-                          {trade.exitPrice == null ? "Open" : formatTradePrice(trade.exitPrice)}
-                        </td>
-                        <td
-                          className={cn(
-                            "px-4 py-3 text-right font-mono text-sm font-semibold tabular-nums",
-                            trade.pnl == null
-                              ? "text-zinc-500"
-                              : trade.pnl > 0
-                                ? "text-emerald-400"
-                                : trade.pnl < 0
-                                  ? "text-red-400"
-                                  : "text-zinc-100"
-                          )}
-                        >
-                          {trade.pnl == null ? "—" : formatCurrency(trade.pnl)}
-                        </td>
-                      </tr>
-                    ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-6 text-sm leading-7 text-zinc-400">
-                  {botData.connected
-                    ? "No recent trades are available yet."
-                    : "Trade history is hidden because the live trade database is currently unavailable."}
-                </div>
-              )}
-            </div>
+            {botData.recentTrades.length > 0 ? (
+              <TradeHistoryTable initialTrades={botData.recentTrades} />
+            ) : (
+              <div className="p-6 text-sm leading-7 text-zinc-400">
+                {botData.connected
+                  ? "No recent trades are available yet."
+                  : "Trade history is hidden because the live trade database is currently unavailable."}
+              </div>
+            )}
           </GlassPanel>
         </section>
       </main>
