@@ -292,36 +292,6 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       },
     ],
   },
-  "Price Trajectory": {
-    title: "Price Trajectory \u2014 Momentum Analysis",
-    sections: [
-      {
-        heading: "What is this?",
-        content:
-          "Price Trajectory examines whether the direction of price movement in the first 60 seconds of a market window predicts the final outcome. If the price is rising at the 60-second mark, does Up end up winning more often?",
-      },
-      {
-        heading: "How to read it",
-        content: "Each card represents one market type:",
-        bullets: [
-          "Rising at 60s \u2192 Up wins X% \u2014 When the price is trending upward at the 60-second mark, how often does Up win",
-          "Sample count \u2014 Number of markets where this pattern was observed",
-          "Reversal cases \u2014 Markets where the price direction reversed after 60 seconds, and what percentage still resolved Up",
-          "Colored dot \u2014 Green = momentum > 60%, Red = momentum < 50%, Yellow = neutral",
-        ],
-      },
-      {
-        heading: "Summary banner",
-        content:
-          "The banner at the top shows how many of the 8 market types exhibit a momentum effect (Up win rate > 60% when rising at 60s). Green = strong momentum across markets, Yellow = moderate, Red = weak or no momentum effect.",
-      },
-      {
-        heading: "Practical use",
-        content:
-          "If momentum is strong, it suggests that early price movement carries predictive power. This could mean that informed participants set direction early. If reversals are common, it suggests mean reversion \u2014 early moves often get corrected.",
-      },
-    ],
-  },
   "Time of Day Patterns": {
     title: "Time of Day Patterns",
     sections: [
@@ -379,7 +349,7 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       {
         heading: "Gambler's fallacy warning",
         content:
-          "In truly random 50/50 outcomes, the previous results have no influence on the next one. However, prediction markets may not be perfectly random \u2014 participant behavior, momentum effects, and sentiment can create sequential dependencies. Always verify with sample size before acting on streak patterns.",
+          "In truly random 50/50 outcomes, the previous results have no influence on the next one. However, prediction markets may not be perfectly random \u2014 participant behavior and sentiment can create sequential dependencies. Always verify with sample size before acting on streak patterns.",
       },
     ],
   },
@@ -546,11 +516,10 @@ const SECTION_INFO: Record<string, SectionInfo> = {
       },
       {
         heading: "Strategies",
-        content: "Four strategies are backtested:",
+        content: "Three strategies are backtested:",
         bullets: [
           "S1 Farming — Trigger/exit point based entries",
           "S2 Calibration — Entry price range based entries",
-          "S3 Momentum — Minimum momentum threshold entries",
           "S4 Streak Reversal — Streak length based reversal entries",
         ],
       },

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useSession } from "next-auth/react";
-import { BarChart3, LayoutDashboard, Settings } from "lucide-react";
+
+import { BarChart3, LayoutDashboard } from "lucide-react";
 
 import { DownloadButton } from "@/components/download-button";
 import { useLiveClock } from "@/hooks/use-live-clock";
@@ -45,12 +45,11 @@ function DesktopLinks() {
 
 function MobileBottomNav() {
   const pathname = usePathname();
-  const { data: session } = useSession();
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 md:hidden">
       <nav className="safe-bottom border-t border-zinc-800/60 bg-zinc-950/90 backdrop-blur-2xl">
-        <div className={cn("grid items-center", session ? "grid-cols-3" : "grid-cols-2")}>
+        <div className="grid grid-cols-2 items-center">
           {TAB_ITEMS.map(({ href, label, icon: Icon }) => {
             const active = pathname === href;
             return (
@@ -71,23 +70,6 @@ function MobileBottomNav() {
               </Link>
             );
           })}
-
-          {session && (
-            <Link
-              href="/control"
-              className={cn(
-                "relative flex flex-col items-center gap-0.5 py-2 transition-colors duration-200",
-                pathname === "/control" ? "text-primary" : "text-zinc-500 active:text-zinc-300"
-              )}
-            >
-              <Settings
-                className={cn("h-5 w-5", pathname === "/control" && "drop-shadow-[0_0_6px_hsl(var(--primary)/0.5)]")}
-                strokeWidth={pathname === "/control" ? 2.2 : 1.5}
-              />
-              <span className="text-[10px] font-medium leading-none">Control</span>
-              {pathname === "/control" && <span className="absolute top-0 h-0.5 w-8 rounded-b-full bg-primary" />}
-            </Link>
-          )}
         </div>
       </nav>
     </div>
@@ -97,8 +79,6 @@ function MobileBottomNav() {
 export function Navbar() {
   const pathname = usePathname();
   const time = useLiveClock();
-  const { data: session } = useSession();
-
   return (
     <>
       <nav className="sticky top-0 z-50 border-b border-zinc-800/40 bg-zinc-950/70 backdrop-blur-2xl">
@@ -116,20 +96,6 @@ export function Navbar() {
 
             <div className="hidden items-center gap-1 md:flex">
               <DesktopLinks />
-              {session && (
-                <Link
-                  href="/control"
-                  className={cn(
-                    "relative px-2.5 py-3 text-sm font-medium transition-colors duration-200 md:px-3 md:py-4",
-                    pathname === "/control" ? "text-primary" : "text-zinc-500 hover:text-zinc-200"
-                  )}
-                >
-                  Control
-                  {pathname === "/control" && (
-                    <span className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-primary" />
-                  )}
-                </Link>
-              )}
             </div>
           </div>
 

@@ -5,6 +5,40 @@ import { unstable_cache } from "next/cache";
 import { query } from "@/lib/db";
 import { PNL_SQL } from "@/lib/pnl";
 
+const ALL_TRADES_CTE = `all_trades AS (
+  SELECT
+    placed_at,
+    resolved_at,
+    status,
+    final_outcome,
+    (${PNL_SQL}) AS pnl_calc,
+    bet_size_usd,
+    strategy_name
+  FROM bot_trades
+  UNION ALL
+  SELECT
+    opened_at        AS placed_at,
+    closed_at        AS resolved_at,
+    'filled'::text   AS status,
+    CASE
+      WHEN wcp.status = 'redeemed_closed'
+           AND realized_exit_value_usd >= total_entry_cost THEN 'take_profit'
+      WHEN wcp.status = 'redeemed_closed' THEN 'loss'
+      ELSE NULL
+    END              AS final_outcome,
+    CASE
+      WHEN wcp.status = 'redeemed_closed'
+        THEN realized_exit_value_usd - total_entry_cost
+      ELSE NULL
+    END              AS pnl_calc,
+    total_entry_cost AS bet_size_usd,
+    strategy_name
+  FROM weather_clone_positions wcp
+  WHERE NOT shadow_only
+    AND wcp.status IN ('open_directional', 'redeemed_closed')
+    AND total_entry_cost > 0
+)`;
+
 type OverallStats = {
   total_trades: string;
   wins: string;
@@ -80,6 +114,7 @@ async function fetchBotOverview() {
   try {
     const [overall, last24h, yesterday, strategyStats, drawdownRows, streakRows, frequencyRows] = await Promise.all([
       query<OverallStats>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT
           COUNT(*) FILTER (WHERE status = 'filled') as total_trades,
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) as wins,
@@ -87,50 +122,54 @@ async function fetchBotOverview() {
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) as pending,
           COUNT(*) FILTER (WHERE status = 'fok_no_fill') as no_fills,
           COUNT(*) FILTER (WHERE status LIKE 'skipped%') as skipped,
-          SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as total_pnl,
+          SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as total_pnl,
           SUM(bet_size_usd) FILTER (WHERE status = 'filled') as total_bet,
-          AVG(${PNL_SQL}) FILTER (WHERE final_outcome IS NOT NULL) as avg_pnl_per_trade
-        FROM bot_trades
+          AVG(pnl_calc) FILTER (WHERE final_outcome IS NOT NULL) as avg_pnl_per_trade
+        FROM all_trades
       `),
       query<Last24hStats>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT
           COUNT(*) FILTER (WHERE status = 'filled') as trades_24h,
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) as wins_24h,
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') as losses_24h,
-          SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl_24h,
+          SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl_24h,
           SUM(bet_size_usd) FILTER (WHERE status = 'filled') as bet_24h
-        FROM bot_trades
+        FROM all_trades
         WHERE placed_at > NOW() - INTERVAL '24 hours'
       `),
       query<YesterdayStats>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT
           COUNT(*) FILTER (WHERE status = 'filled') as trades_yesterday,
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit')) as wins_yesterday,
           COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') as losses_yesterday,
-          SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl_yesterday
-        FROM bot_trades
+          SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl_yesterday
+        FROM all_trades
         WHERE placed_at > NOW() - INTERVAL '48 hours'
           AND placed_at <= NOW() - INTERVAL '24 hours'
       `),
       query<StrategyStats>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT
           strategy_name,
           COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as trades,
           COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit')) as wins,
           COUNT(*) FILTER (WHERE final_outcome IN ('loss','stop_loss')) as losses,
-          SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl,
-          AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as avg_pnl
-        FROM bot_trades
+          SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as pnl,
+          AVG(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as avg_pnl
+        FROM all_trades
         WHERE status = 'filled'
+          AND strategy_name NOT LIKE 'momentum%'
         GROUP BY strategy_name
-        ORDER BY SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
+        ORDER BY SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
       `),
       query<DrawdownRow>(`
-        WITH cumulative AS (
+        WITH ${ALL_TRADES_CTE}, cumulative AS (
           SELECT
             placed_at,
-            SUM(${PNL_SQL}) OVER (ORDER BY placed_at) as running_pnl
-          FROM bot_trades
+            SUM(pnl_calc) OVER (ORDER BY placed_at) as running_pnl
+          FROM all_trades
           WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
         ),
         with_peak AS (
@@ -153,18 +192,20 @@ async function fetchBotOverview() {
         FROM with_peak
       `).catch(() => [] as DrawdownRow[]),
       query<StreakRow>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT final_outcome
-        FROM bot_trades
+        FROM all_trades
         WHERE status = 'filled' AND final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
         ORDER BY resolved_at DESC NULLS LAST, placed_at DESC
         LIMIT 50
       `),
       query<FrequencyRow>(`
+        WITH ${ALL_TRADES_CTE}
         SELECT
           MIN(placed_at) as first_trade_at,
           COUNT(DISTINCT DATE(placed_at)) as trading_days,
           COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as total_resolved
-        FROM bot_trades
+        FROM all_trades
         WHERE status = 'filled'
       `),
     ]);

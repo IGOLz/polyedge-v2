@@ -13,7 +13,6 @@ const STRATEGIES_ROOT = path.join(REPO_ROOT, "src", "shared", "strategies");
 const LEGACY_STRATEGY_ROUTES: Record<string, string> = {
   S1: "/strategy",
   S2: "/strategy2",
-  S3: "/strategy3",
   S4: "/strategy4",
 };
 

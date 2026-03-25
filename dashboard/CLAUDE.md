@@ -25,12 +25,12 @@ No test framework is configured.
 - **UI**: shadcn/ui (Radix primitives) in `components/ui/`
 - **Charts**: TradingView Lightweight Charts + Recharts
 - **Database**: PostgreSQL via `pg` (connection pool in `lib/db.ts`)
-- **Auth**: next-auth (session provider wraps the app in `layout.tsx`)
+
 - **Fonts**: Geist Sans + Mono
 
 ### Data Flow
 
-Server Components and API routes query PostgreSQL directly through `lib/db.ts` (a shared connection pool with 5s statement timeout). Query functions live in `lib/queries.ts` and domain-specific query files (`lib/calibration-queries.ts`, `lib/momentum-queries.ts`, etc.). The homepage uses `force-dynamic` + Suspense boundaries for streaming server-rendered sections.
+Server Components and API routes query PostgreSQL directly through `lib/db.ts` (a shared connection pool with 5s statement timeout). Query functions live in `lib/queries.ts` and domain-specific query files (`lib/calibration-queries.ts`, etc.). The homepage uses `force-dynamic` + Suspense boundaries for streaming server-rendered sections.
 
 Client components fetch data from `/api/*` routes via custom hooks in `hooks/` (notably `use-polling-fetch.ts` for auto-refresh).
 
@@ -43,8 +43,8 @@ Client components fetch data from `/api/*` routes via custom hooks in `hooks/` (
 
 - `/` — Dashboard homepage (Server Component with Suspense streaming)
 - `/markets` — Market browser with chart visualization
-- `/analysis`, `/momentum-analytics`, `/bot`, `/control` — Feature pages
-- `/strategy`, `/strategy2`, `/strategy3`, `/strategy4` — Strategy pages
+- `/analysis`, `/bot` — Feature pages
+- `/strategy`, `/strategy2`, `/strategy4` — Strategy pages
 - `/api/*` — ~20 API routes for data fetching and export
 
 ### Environment

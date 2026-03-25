@@ -33,6 +33,7 @@ export async function GET() {
     const trades = await query<BotTrade>(
       `SELECT id, market_type, strategy_name, direction, entry_price, bet_size_usd, status, final_outcome, ${PNL_SQL} as pnl, placed_at, resolved_at, signal_data
        FROM bot_trades
+       WHERE strategy_name NOT LIKE 'momentum%'
        ORDER BY placed_at DESC`
     );
 
@@ -46,9 +47,6 @@ export async function GET() {
       // M3 spike reversion
       "spike_direction", "spike_price", "spike_tick", "reversion_target",
       "reversion_tick", "reversion_ticks_elapsed",
-      // Legacy momentum
-      "price_a_seconds", "price_b_seconds", "price_a", "price_b", "price_open",
-      "momentum_value",
     ] as const;
 
     const headers = [
