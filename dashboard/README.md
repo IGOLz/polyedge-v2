@@ -56,6 +56,9 @@ POSTGRES_PASSWORD=polymarket_secret
 POSTGRES_DB=polymarket_tracker
 POSTGRES_HOST=192.168.8.164
 POSTGRES_PORT=5432
+NEXTAUTH_SECRET=replace-me
+DASHBOARD_PASSWORD=replace-me
+STREAMDECK_READ_TOKEN=replace-me
 ```
 
 ### Development
@@ -110,6 +113,17 @@ The dashboard expects two tables:
 | `market_type` | TEXT      | Asset + interval                     |
 | `time`        | TIMESTAMP | Tick timestamp                       |
 | `up_price`    | NUMERIC   | "Up" outcome price (0.0 to 1.0)     |
+
+## Stream Deck Summary API
+
+The dashboard exposes a compact read-only summary endpoint for the custom Stream Deck plugin:
+
+- `GET /api/streamdeck/summary`
+- Requires `Authorization: Bearer <STREAMDECK_READ_TOKEN>`
+- Returns one versioned JSON payload covering collector health, trading heartbeat, weather merge status, weather clone status, and normalized alerts
+- Uses `Cache-Control: no-store` and `revalidate = 0` so the Stream Deck poller always sees fresh data
+
+The matching plugin package lives in [../streamdeck-plugin/README.md](../streamdeck-plugin/README.md). It polls this endpoint once for all visible keys, caches the last good payload, and renders live SVG tiles on-device.
 
 ## Project Structure
 

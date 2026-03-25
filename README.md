@@ -49,6 +49,14 @@ dashboard/           # Next.js dashboard (analytics + limited DB controls)
 ├── components/      # UI building blocks and charts
 ├── lib/             # Database access + dashboard queries
 └── package.json     # Dashboard scripts and dependencies
+
+streamdeck-plugin/   # Elgato Stream Deck plugin for live monitoring tiles
+├── src/             # Shared polling, rendering, and action logic
+├── com.polyedge.streamdeck.sdPlugin/
+│   ├── manifest.json
+│   ├── ui/          # Property inspector
+│   └── imgs/        # Plugin/action assets + bundled profile
+└── package.json     # Plugin build scripts and dependencies
 ```
 
 ## Docker Services
@@ -163,6 +171,14 @@ manual Binance import.
 
 Dashboard auth uses `DASHBOARD_PASSWORD` and `NEXTAUTH_SECRET` from `.env`.
 The dashboard connects to the same PostgreSQL database as the Python services.
+
+### Stream Deck Monitoring
+
+The repo now includes a local Stream Deck plugin package in [streamdeck-plugin/README.md](streamdeck-plugin/README.md).
+
+The plugin does not connect to PostgreSQL directly. It polls the dashboard summary endpoint at `GET /api/streamdeck/summary` using a read-only bearer token stored in `STREAMDECK_READ_TOKEN`, then renders live SVG key images locally on the Stream Deck machine.
+
+Set `STREAMDECK_READ_TOKEN` in both the root `.env` and the dashboard runtime environment before using the plugin.
 
 ### Trading Only With External Core/DB
 
