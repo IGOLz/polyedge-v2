@@ -1,18 +1,19 @@
 #!/bin/bash
 # update.sh — Safe update script for PolyEdge
 #
-# This script updates analysis + trading WITHOUT touching core.
+# This script updates analysis + trading services WITHOUT touching core.
 # Core keeps running 24/7 uninterrupted.
 #
 # Usage:
-#   ./update.sh           # Update analysis + trading
+#   ./update.sh                    # Update analysis + trading + trading-weather
 #   ./update.sh trading   # Update only trading
 #   ./update.sh analysis  # Update only analysis
+#   ./update.sh trading-weather    # Update only trading-weather
 #   ./update.sh all       # Update everything INCLUDING core (rare!)
 
 set -e
 
-SERVICES="${1:-analysis trading}"
+SERVICES="${1:-analysis trading trading-weather}"
 
 if [ "$1" = "all" ]; then
     echo "⚠️  WARNING: This will restart ALL services including CORE!"
@@ -23,7 +24,7 @@ if [ "$1" = "all" ]; then
         echo "Aborted."
         exit 1
     fi
-    SERVICES="core analysis trading"
+    SERVICES="core analysis trading trading-weather"
 fi
 
 echo "🔄 Pulling latest code..."

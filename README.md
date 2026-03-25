@@ -25,16 +25,24 @@ src/
 │   ├── strategies/  # Strategy backtests (momentum, calibration, streak, farming)
 │   └── backtest/    # Backtesting framework (engine, data loader, modules)
 │
-└── trading/         # Live trading bot — can restart independently
-    ├── main.py      # Bot main loop, outcome tracking, stop-loss monitoring
-    ├── config.py    # Trading-specific config (auth, bet sizing)
-    ├── constants.py # Strategy parameters (M3, M4, bet sizing, execution)
-    ├── db.py        # Trading-specific tables (bot_trades, bot_logs, bot_config)
-    ├── strategies.py # M3 (spike reversion) + M4 (volatility) strategies
-    ├── executor.py  # 3-stage hybrid order execution
-    ├── balance.py   # USDC balance checker
-    ├── redeemer.py  # On-chain position redemption via Safe
-    └── utils.py     # Colored logging for trading
+├── trading/         # Live trading bot — can restart independently
+│   ├── main.py      # Bot main loop, outcome tracking, stop-loss monitoring
+│   ├── config.py    # Trading-specific config (auth, bet sizing)
+│   ├── constants.py # Strategy parameters (M3, M4, bet sizing, execution)
+│   ├── db.py        # Trading-specific tables (bot_trades, bot_logs, bot_config)
+│   ├── strategies.py # M3 (spike reversion) + M4 (volatility) strategies
+│   ├── executor.py  # 3-stage hybrid order execution
+│   ├── balance.py   # USDC balance checker
+│   ├── redeemer.py  # On-chain position redemption via Safe
+│   └── utils.py     # Colored logging for trading
+│
+└── trading_weather/ # Dedicated ColdMath-style weather merge bot
+    ├── main.py      # Guarded live loop, audit checks, entry execution
+    ├── config.py    # Runtime caps + wallet guard configuration
+    ├── db.py        # weather_merge_positions table helpers
+    ├── safe_ops.py  # Safe approvals, merge, redeem helpers
+    ├── strategy.py  # Candidate ranking + paired-entry planning
+    └── wallet_guard.py # Public-wallet contamination checks
 
 dashboard/           # Next.js dashboard (analytics + limited DB controls)
 ├── app/             # App Router pages and API routes
@@ -52,6 +60,7 @@ dashboard/           # Next.js dashboard (analytics + limited DB controls)
 | `core-debug` | polyedge-core-debug | Dry-run validation, no DB writes | On-demand |
 | `analysis` | polyedge-analysis | Strategy backtests | On-demand |
 | `trading` | polyedge-trading | Live trading bot | Safe to restart |
+| `trading-weather` | polyedge-trading-weather | Dedicated weather merge bot | Safe to restart |
 | `dashboard` | polyedge-dashboard | Next.js UI for monitoring + light control actions | Safe to restart |
 
 ## Update Workflow (on LXC)
@@ -62,8 +71,8 @@ dashboard/           # Next.js dashboard (analytics + limited DB controls)
 
 # Or manually:
 git pull
-docker compose build analysis trading
-docker compose up -d analysis trading
+docker compose build analysis trading trading-weather
+docker compose up -d analysis trading trading-weather
 
 # Core keeps running uninterrupted!
 ```
@@ -73,6 +82,21 @@ To update core (rare, planned):
 ./update.sh all
 # or: docker compose build core && docker compose up -d core
 ```
+
+### Dedicated Weather Rollout (shared wallet)
+
+Use this path when deploying `trading-weather` on the LXC. The weather bot assumes it is the only process using the configured `PROXY_WALLET`.
+
+```bash
+git pull
+docker compose stop trading
+# ensure no external process is using the same PROXY_WALLET
+docker compose build weather trading-weather
+docker compose up -d weather trading-weather
+docker compose logs -f trading-weather
+```
+
+Do not rely on `./update.sh trading` for this service. Either run `./update.sh trading-weather` or use the explicit rollout above.
 
 For the restricted Codex SSH workflow from the Windows laptop to the LXC, including allowed commands such as `status`, `up trading`, `down trading`, `logs trading`, and `safe-update`, see [docs/codex_lxc_access.md](docs/codex_lxc_access.md).
 

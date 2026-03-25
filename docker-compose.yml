@@ -5,12 +5,13 @@
 #   - core:        Data collector — runs 24/7, NEVER restarted on code updates
 #   - analysis:    Strategy research — run on-demand, restarts are safe
 #   - trading:     Live trading bot — can be restarted independently
+#   - trading-weather: Dedicated weather merge bot — can be restarted independently
 #   - dashboard:   Next.js dashboard for monitoring + light control actions
 #
 # Update workflow (on LXC):
 #   1. git pull
-#   2. docker compose build analysis trading dashboard
-#   3. docker compose up -d analysis trading dashboard
+#   2. docker compose build analysis trading trading-weather dashboard
+#   3. docker compose up -d analysis trading trading-weather dashboard
 #   # Core keeps running untouched!
 #
 # To update core (rare, planned downtime):
@@ -170,12 +171,28 @@ services:
     environment:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
-      WEATHER_MERGE_SEQUENCE_BUDGET_USD: "0"
-      WEATHER_MERGE_MAX_TOTAL_EXPOSURE_USD: "0"
-      WEATHER_MERGE_DAILY_LOSS_LIMIT_USD: "0"
-      WEATHER_MERGE_MAX_CONCURRENT_POSITIONS: "0"
-      WEATHER_MERGE_MAX_ENTRY_ATTEMPTS: "0"
-    command: ["python", "-u", "-m", "trading_weather.main"]
+      WEATHER_MERGE_SEQUENCE_BUDGET_USD: "5"
+      WEATHER_MERGE_MAX_TOTAL_EXPOSURE_USD: "10"
+      WEATHER_MERGE_DAILY_LOSS_LIMIT_USD: "5"
+      WEATHER_MERGE_MAX_CONCURRENT_POSITIONS: "1"
+      WEATHER_MERGE_MAX_ENTRY_ATTEMPTS: "1"
+      WEATHER_MERGE_LOOP_INTERVAL_SECONDS: "30"
+      WEATHER_MERGE_SUMMARY_INTERVAL_SECONDS: "60"
+      WEATHER_MERGE_REQUIRE_CLEAN_WALLET: "true"
+      WEATHER_MERGE_ACTIVITY_LOOKBACK_MINUTES: "60"
+      WEATHER_MERGE_ALLOW_ORPHANED_POSITIONS: "false"
+      WEATHER_CLONE_ENABLE_LIVE: "false"
+    command:
+      [
+        "python",
+        "-u",
+        "-m",
+        "trading_weather.main",
+        "--engine",
+        "merge",
+        "--config-path",
+        "/app/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_inventory_rebalancing_merge_backtest_bot_config.json"
+      ]
     volumes:
       - ./logs/trading-weather:/app/logs
     restart: unless-stopped
