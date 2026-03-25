@@ -168,7 +168,7 @@ export function StrategyDetailPage({ detail }: { detail: StrategyDetail }) {
                 </h2>
                 <SectionInfoButton sectionTitle="Current Parameters" info={CURRENT_PARAMETERS_INFO} />
               </div>
-              <div className="mt-5 grid grid-cols-2 gap-3">
+              <div className="mt-5 grid grid-cols-3 gap-3">
                 {detail.parameterChips.map((chip) => (
                   <div
                     key={chip.key}
@@ -181,7 +181,7 @@ export function StrategyDetailPage({ detail }: { detail: StrategyDetail }) {
                   </div>
                 ))}
                 {detail.parameterChips.length === 0 && (
-                  <p className="col-span-2 text-sm text-zinc-500">No parameter metadata was found for this strategy.</p>
+                  <p className="col-span-3 text-sm text-zinc-500">No parameter metadata was found for this strategy.</p>
                 )}
               </div>
 

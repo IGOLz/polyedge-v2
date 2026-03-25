@@ -663,11 +663,11 @@ function StrategyBreakdown({ stats }: { stats: StrategyStatRow[] }) {
 									"absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent to-transparent",
 									style.glow,
 								)} />
-								<div className="flex items-center justify-between mb-4">
+								<div className="flex items-center justify-between mb-4 gap-2">
 									<span className={cn(
-										"rounded-md px-2 py-0.5 text-xs font-medium border",
+										"inline-block rounded-md px-2 py-0.5 text-xs font-medium border truncate max-w-[60%] min-w-0",
 										style.badge,
-									)}>
+									)} title={s.strategy_name}>
 										{s.strategy_name}
 									</span>
 									<span className={cn(

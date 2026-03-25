@@ -299,7 +299,7 @@ function NeighborImpactChart({ points }: { points: StrategyNeighborPoint[] }) {
             formatter={(value: number) => [formatPnl(value), "Delta P&L"]}
           />
           <ReferenceLine x={0} stroke="#3f3f46" strokeDasharray="4 4" />
-          <Bar dataKey="deltaTotalPnl" fill="rgba(96, 165, 250, 0.65)" radius={[0, 8, 8, 0]} />
+          <Bar dataKey="deltaTotalPnl" fill="rgba(228, 246, 0, 0.55)" radius={[0, 8, 8, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </ChartPanel>
