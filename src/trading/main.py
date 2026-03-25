@@ -110,9 +110,14 @@ async def verify_proxy() -> None:
 
 async def heartbeat_loop() -> None:
     while True:
-        log.info(
-            "[HEARTBEAT] Bot alive - %s",
-            datetime.now(timezone.utc).strftime("%H:%M:%S"),
+        now = datetime.now(timezone.utc)
+        message = f"[HEARTBEAT] Bot alive - {now.strftime('%H:%M:%S')}"
+        log.info(message)
+        await db.log_event(
+            "trading_heartbeat",
+            message,
+            {"heartbeat_at": now.isoformat()},
+            echo=False,
         )
         await asyncio.sleep(60)
 
@@ -628,8 +633,6 @@ async def strategy_report_loop() -> None:
 
 
 async def run() -> None:
-    _spawn_background_task(heartbeat_loop(), name="heartbeat")
-
     await verify_proxy()
     config.patch_clob_client_proxy(PROXY_URL)
 
@@ -698,6 +701,7 @@ async def run() -> None:
         },
     )
 
+    _spawn_background_task(heartbeat_loop(), name="heartbeat")
     _spawn_background_task(outcome_tracker_loop(clob), name="outcome-tracker")
     if not config.DRY_RUN:
         _spawn_background_task(redemption_loop(), name="redemption-loop")
