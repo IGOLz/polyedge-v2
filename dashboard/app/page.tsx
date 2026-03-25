@@ -346,11 +346,17 @@ export default async function DashboardPage() {
                           value: last24Hours?.stopLosses.toLocaleString("en-US") ?? "0",
                           tone: "text-amber-400",
                         },
-                        {
-                          label: "TP Rate",
-                          value: formatPercent(last24TakeProfitRate),
-                          tone: "text-zinc-100",
-                        },
+                        (last24Hours?.openTrades ?? 0) > 0
+                          ? {
+                              label: "Open",
+                              value: last24Hours!.openTrades.toLocaleString("en-US"),
+                              tone: "text-sky-400",
+                            }
+                          : {
+                              label: "TP Rate",
+                              value: formatPercent(last24TakeProfitRate),
+                              tone: "text-zinc-100",
+                            },
                       ].map((item) => (
                         <div key={item.label} className="rounded-2xl border border-zinc-800/70 bg-zinc-900/70 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">
@@ -366,7 +372,9 @@ export default async function DashboardPage() {
                         ? `${last24Hours.trades.toLocaleString("en-US")} resolved trades in the last 24 hours with an average of ${formatCurrency(
                             last24Hours.avgPnlPerTrade
                           )} per trade.`
-                        : "No resolved trades in the last 24 hours yet."}
+                        : last24Hours && last24Hours.openTrades > 0
+                          ? `${last24Hours.openTrades} open trade${last24Hours.openTrades !== 1 ? "s" : ""} in the last 24 hours (awaiting resolution).`
+                          : "No resolved trades in the last 24 hours yet."}
                     </p>
 
                     <div className="mt-5">

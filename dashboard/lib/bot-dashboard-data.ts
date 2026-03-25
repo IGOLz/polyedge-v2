@@ -3,6 +3,45 @@ import "server-only";
 import { query } from "@/lib/db";
 import { PNL_SQL } from "@/lib/pnl";
 
+/**
+ * CTE that unions bot_trades with weather_clone_positions so the dashboard
+ * shows data from both trading systems.  Weather positions are mapped to the
+ * same column set used by the metrics queries (pnl_calc replaces inline PNL_SQL).
+ */
+const ALL_TRADES_CTE = `all_trades AS (
+  SELECT
+    placed_at,
+    resolved_at,
+    status,
+    final_outcome,
+    (${PNL_SQL}) AS pnl_calc,
+    strategy_name,
+    market_type
+  FROM bot_trades
+  UNION ALL
+  SELECT
+    opened_at        AS placed_at,
+    closed_at        AS resolved_at,
+    'filled'::text   AS status,
+    CASE
+      WHEN wcp.status = 'redeemed_closed'
+           AND realized_exit_value_usd >= total_entry_cost THEN 'take_profit'
+      WHEN wcp.status = 'redeemed_closed' THEN 'loss'
+      ELSE NULL
+    END              AS final_outcome,
+    CASE
+      WHEN wcp.status = 'redeemed_closed'
+        THEN realized_exit_value_usd - total_entry_cost
+      ELSE NULL
+    END              AS pnl_calc,
+    strategy_name,
+    city || ' ' || bucket_label AS market_type
+  FROM weather_clone_positions wcp
+  WHERE NOT shadow_only
+    AND wcp.status IN ('open_directional', 'redeemed_closed')
+    AND total_entry_cost > 0
+)`;
+
 export interface BotOverviewMetrics {
   resolvedTrades: number;
   wins: number;
@@ -24,6 +63,7 @@ export interface BotWindowMetrics {
   takeProfits: number;
   heldToExpiryLosses: number;
   stopLosses: number;
+  openTrades: number;
   totalPnl: number;
   avgPnlPerTrade: number;
   profitFactor: number | null;
@@ -210,6 +250,7 @@ function mapWindow(row: OverviewRow | undefined | null): BotWindowMetrics | null
     takeProfits: toNumber(row.take_profits),
     heldToExpiryLosses: toNumber(row.held_to_expiry_losses),
     stopLosses: toNumber(row.stop_losses),
+    openTrades: toNumber(row.open_trades),
     totalPnl: toNumber(row.total_pnl),
     avgPnlPerTrade: toNumber(row.avg_pnl_per_trade),
     profitFactor: toProfitFactor(row.gross_profit, row.gross_loss),
@@ -295,69 +336,73 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
     const [overallRows, last24Rows, previous24Rows, hourlyRows, tradeRows, strategyRows, drawdownRows, streakRows, freqRows] = await Promise.all([
       withTimeout(
         query<OverviewRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) > 0) AS wins,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) < 0) AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc > 0) AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc < 0) AS losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS held_to_expiry_losses,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
-            SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
-            ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
+            SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(CASE WHEN pnl_calc > 0 THEN pnl_calc ELSE 0 END) AS gross_profit,
+            ABS(SUM(CASE WHEN pnl_calc < 0 THEN pnl_calc ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
-          FROM bot_trades
+          FROM all_trades
         `)
       ),
       withTimeout(
         query<OverviewRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) > 0) AS wins,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) < 0) AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc > 0) AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc < 0) AS losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS held_to_expiry_losses,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
-            SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
-            ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
+            SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(CASE WHEN pnl_calc > 0 THEN pnl_calc ELSE 0 END) AS gross_profit,
+            ABS(SUM(CASE WHEN pnl_calc < 0 THEN pnl_calc ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
-          FROM bot_trades
+          FROM all_trades
           WHERE placed_at > NOW() - INTERVAL '24 hours'
         `)
       ),
       withTimeout(
         query<OverviewRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS resolved_trades,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) > 0) AS wins,
-            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) < 0) AS losses,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc > 0) AS wins,
+            COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc < 0) AS losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'take_profit') AS take_profits,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome = 'loss') AS held_to_expiry_losses,
             COUNT(*) FILTER (WHERE final_outcome = 'stop_loss') AS stop_losses,
             COUNT(*) FILTER (WHERE status = 'filled' AND final_outcome IS NULL) AS open_trades,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
-            SUM(CASE WHEN (${PNL_SQL}) > 0 THEN (${PNL_SQL}) ELSE 0 END) AS gross_profit,
-            ABS(SUM(CASE WHEN (${PNL_SQL}) < 0 THEN (${PNL_SQL}) ELSE 0 END)) AS gross_loss,
+            SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS total_pnl,
+            AVG(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS avg_pnl_per_trade,
+            SUM(CASE WHEN pnl_calc > 0 THEN pnl_calc ELSE 0 END) AS gross_profit,
+            ABS(SUM(CASE WHEN pnl_calc < 0 THEN pnl_calc ELSE 0 END)) AS gross_loss,
             MAX(placed_at) AS last_trade_at
-          FROM bot_trades
+          FROM all_trades
           WHERE placed_at > NOW() - INTERVAL '48 hours'
             AND placed_at <= NOW() - INTERVAL '24 hours'
         `)
       ),
       withTimeout(
         query<HourlyRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             date_trunc('hour', placed_at) AS hour_bucket,
             COUNT(*) FILTER (WHERE status = 'filled') AS trades,
-            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND (${PNL_SQL}) > 0) AS wins,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS pnl
-          FROM bot_trades
+            COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss') AND pnl_calc > 0) AS wins,
+            SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution', 'take_profit', 'loss', 'stop_loss')) AS pnl
+          FROM all_trades
           WHERE placed_at > NOW() - INTERVAL '24 hours'
           GROUP BY 1
           ORDER BY 1
@@ -386,27 +431,28 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       ),
       withTimeout(
         query<StrategyRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             strategy_name,
             COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS trades,
             COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit')) AS wins,
             COUNT(*) FILTER (WHERE final_outcome IN ('loss','stop_loss')) AS losses,
-            SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS pnl,
-            AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS avg_pnl
-          FROM bot_trades
+            SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS pnl,
+            AVG(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS avg_pnl
+          FROM all_trades
           WHERE status = 'filled'
             AND strategy_name NOT LIKE 'momentum%'
           GROUP BY strategy_name
-          ORDER BY SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
+          ORDER BY SUM(pnl_calc) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
         `)
       ).catch(() => [] as StrategyRow[]),
       withTimeout(
         query<DrawdownRow>(`
-          WITH cumulative AS (
+          WITH ${ALL_TRADES_CTE}, cumulative AS (
             SELECT
               placed_at,
-              SUM(${PNL_SQL}) OVER (ORDER BY placed_at) AS running_pnl
-            FROM bot_trades
+              SUM(pnl_calc) OVER (ORDER BY placed_at) AS running_pnl
+            FROM all_trades
             WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
           ),
           with_peak AS (
@@ -430,8 +476,9 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       ).catch(() => [] as DrawdownRow[]),
       withTimeout(
         query<StreakRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT final_outcome
-          FROM bot_trades
+          FROM all_trades
           WHERE status = 'filled' AND final_outcome IN ('win_resolution','take_profit','loss','stop_loss')
           ORDER BY resolved_at DESC NULLS LAST, placed_at DESC
           LIMIT 50
@@ -439,10 +486,11 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
       ).catch(() => [] as StreakRow[]),
       withTimeout(
         query<FreqRow>(`
+          WITH ${ALL_TRADES_CTE}
           SELECT
             COUNT(DISTINCT DATE(placed_at)) AS trading_days,
             COUNT(*) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS total_resolved
-          FROM bot_trades
+          FROM all_trades
           WHERE status = 'filled'
         `)
       ).catch(() => [] as FreqRow[]),
