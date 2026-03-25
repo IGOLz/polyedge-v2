@@ -301,7 +301,7 @@ export default async function DashboardPage() {
                   </div>
                 </GlassPanel>
 
-                <GlassPanel variant="subtle">
+                <GlassPanel variant="glow-wide" className="h-full">
                   <div className="p-6 md:p-7">
                     <div className="flex items-center justify-between gap-3">
                       <div>
