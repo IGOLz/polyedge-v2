@@ -146,7 +146,14 @@ export default async function DashboardPage() {
   const overall = botData.overall;
   const last24Hours = botData.last24Hours;
   const previous24Hours = botData.previous24Hours;
-  const strategyResultsInfo = buildStrategyResultsInfo(strategies);
+
+  // Only show strategies the bot actually traded (match strategyId prefix in bot strategy names)
+  const botStrategyIds = new Set(
+    botData.strategyBreakdown.map((s) => s.strategyName.split("_")[0].toUpperCase())
+  );
+  const botTestedStrategies = strategies.filter((s) => botStrategyIds.has(s.strategyId));
+
+  const strategyResultsInfo = buildStrategyResultsInfo(botTestedStrategies);
 
   const overallTakeProfitRate =
     overall && overall.takeProfits + overall.heldToExpiryLosses + overall.stopLosses > 0
@@ -455,9 +462,9 @@ export default async function DashboardPage() {
         <section id="strategy-results" className="mt-10 scroll-mt-24">
           <SectionHeader title="Strategy Results" info={strategyResultsInfo} />
 
-          {strategies.length > 0 ? (
+          {(botTestedStrategies.length > 0 || coldmath.bot) ? (
             <div className="grid items-stretch gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {strategies.map((strategy) => (
+              {botTestedStrategies.map((strategy) => (
                 <GlassPanel key={strategy.strategyId} variant="subtle" className="h-full">
                   <div className="flex h-full flex-col p-5">
                     <div className="flex items-start justify-between gap-3">
