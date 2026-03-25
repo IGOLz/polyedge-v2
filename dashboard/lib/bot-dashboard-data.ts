@@ -4,9 +4,9 @@ import { query } from "@/lib/db";
 import { PNL_SQL } from "@/lib/pnl";
 
 /**
- * CTE that unions bot_trades with weather_clone_positions so the dashboard
- * shows data from both trading systems.  Weather positions are mapped to the
- * same column set used by the metrics queries (pnl_calc replaces inline PNL_SQL).
+ * Weather merge now writes directly into bot_trades. The legacy clone runtime
+ * still uses weather_clone_positions, so the dashboard keeps a temporary union
+ * until clone data is fully retired.
  */
 const ALL_TRADES_CTE = `all_trades AS (
   SELECT

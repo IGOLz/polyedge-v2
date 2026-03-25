@@ -3,7 +3,15 @@ from __future__ import annotations
 import unittest
 
 from trading_weather import config as weather_config
-from trading_weather.main import _cycle_status_message, _entry_invariant_failure, build_startup_telemetry
+from trading_weather.main import (
+    _candidate_brief,
+    _cycle_status_message,
+    _entry_invariant_failure,
+    _sequence_final_outcome,
+    _sequence_realized_pnl,
+    _weather_trade_signal_payload,
+    build_startup_telemetry,
+)
 from trading_weather.wallet_guard import audit_wallet_integrity
 
 
@@ -66,6 +74,66 @@ def _crypto_position() -> dict:
 
 
 class TradingWeatherGuardTests(unittest.TestCase):
+    def test_weather_trade_signal_payload_includes_position_and_plan(self):
+        plan = {
+            "event_id": "282550",
+            "event_slug": "highest-temperature-in-rome-on-march-26-2026",
+            "city": "rome",
+            "local_date": "2026-03-26",
+            "bucket_label": "16C or higher",
+            "question": "Will the highest temperature in Rome be 16C or higher?",
+            "condition_id": "weather-1",
+            "yes_token_id": "yes-token",
+            "no_token_id": "no-token",
+            "first_side": "yes",
+            "second_side": "no",
+            "target_shares": 10,
+            "combined_cost": 0.992,
+            "expected_edge_usd": 0.08,
+        }
+        candidate = {
+            "market_id": "weather-1",
+            "city": "rome",
+            "local_date": "2026-03-26",
+            "bucket_label": "16C or higher",
+            "combined_cost": 0.992,
+            "merge_edge": 0.008,
+            "max_mergeable_size": 25,
+            "inventory_imbalance_ratio": 0.1,
+            "quote_quality_label": "better_than_nearby_trade",
+        }
+
+        payload = _weather_trade_signal_payload(position_id=42, candidate=candidate, plan=plan)
+
+        self.assertEqual(payload["weather_position_id"], 42)
+        self.assertEqual(payload["city"], "rome")
+        self.assertEqual(payload["planned_target_shares"], 10)
+        self.assertEqual(payload["candidate"], _candidate_brief(candidate))
+
+    def test_sequence_pnl_and_outcome_use_realized_components(self):
+        position = {
+            "status": "merged_closed",
+            "total_entry_cost": 9.92,
+            "merged_collateral_usdc": 10.0,
+            "redeemed_collateral_usdc": 0.0,
+            "unwind_collateral_usdc": 0.0,
+        }
+
+        self.assertAlmostEqual(_sequence_realized_pnl(position), 0.08)
+        self.assertEqual(_sequence_final_outcome(position), "take_profit")
+
+    def test_sequence_loss_maps_to_loss_outcome(self):
+        position = {
+            "status": "partial_unwound",
+            "total_entry_cost": 5.00,
+            "merged_collateral_usdc": 0.0,
+            "redeemed_collateral_usdc": 0.0,
+            "unwind_collateral_usdc": 4.65,
+        }
+
+        self.assertAlmostEqual(_sequence_realized_pnl(position), -0.35)
+        self.assertEqual(_sequence_final_outcome(position), "loss")
+
     def test_wallet_guard_blocks_foreign_activity_in_lookback(self):
         report = audit_wallet_integrity(
             activity_rows=[_weather_activity(), _crypto_activity()],
@@ -144,6 +212,7 @@ class TradingWeatherGuardTests(unittest.TestCase):
         self.assertEqual(telemetry["sequence_budget_usd"], weather_config.DEFAULT_SEQUENCE_BUDGET_USD)
         self.assertEqual(telemetry["max_total_exposure_usd"], weather_config.DEFAULT_MAX_TOTAL_EXPOSURE_USD)
         self.assertEqual(telemetry["daily_loss_limit_usd"], weather_config.DEFAULT_DAILY_LOSS_LIMIT_USD)
+        self.assertEqual(telemetry["total_spend_limit_usd"], weather_config.DEFAULT_TOTAL_SPEND_LIMIT_USD)
         self.assertEqual(telemetry["require_clean_wallet"], weather_config.REQUIRE_CLEAN_WALLET)
         self.assertEqual(telemetry["allow_orphaned_positions"], weather_config.ALLOW_ORPHANED_POSITIONS)
         self.assertTrue(telemetry["code_fingerprint"])
@@ -154,6 +223,8 @@ class TradingWeatherGuardTests(unittest.TestCase):
             {
                 "balance": 10,
                 "daily_realized_pnl": 0,
+                "total_spent_usd": 12.5,
+                "total_spend_limit_usd": 30,
                 "active_positions": 0,
                 "active_exposure_usd": 0,
                 "context_count": 1,
@@ -175,6 +246,7 @@ class TradingWeatherGuardTests(unittest.TestCase):
         )
 
         self.assertIn("guard=blocked:foreign_open_positions_detected", message)
+        self.assertIn("spent=12.50/30.00", message)
         self.assertIn("foreign_positions=2", message)
         self.assertIn("foreign_activity=7", message)
         self.assertIn("orphaned_weather=1", message)

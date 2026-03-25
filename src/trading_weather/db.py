@@ -52,6 +52,7 @@ async def create_weather_merge_tables() -> None:
                 sequence_budget_usd NUMERIC(18,6),
                 max_complete_set_cost NUMERIC(12,6),
                 max_inventory_imbalance_ratio NUMERIC(12,6),
+                bot_trade_id INTEGER,
                 yes_order_id TEXT,
                 no_order_id TEXT,
                 notes TEXT,
@@ -81,8 +82,42 @@ async def create_weather_merge_tables() -> None:
         )
         await conn.execute(
             """
+            ALTER TABLE weather_merge_positions
+            ADD COLUMN IF NOT EXISTS bot_trade_id INTEGER
+            """
+        )
+        await conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_weather_merge_positions_active
             ON weather_merge_positions (status, market_id, opened_at DESC)
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_merge_position_events (
+                id SERIAL PRIMARY KEY,
+                position_id INTEGER NOT NULL REFERENCES weather_merge_positions(id) ON DELETE CASCADE,
+                bot_trade_id INTEGER,
+                event_type TEXT NOT NULL,
+                event_status TEXT,
+                side TEXT,
+                order_id TEXT,
+                tx_hash TEXT,
+                tx_mode TEXT,
+                tx_state TEXT,
+                shares NUMERIC(18,6),
+                price NUMERIC(12,6),
+                value_usdc NUMERIC(18,6),
+                notes TEXT,
+                data JSONB,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_merge_position_events_position
+            ON weather_merge_position_events (position_id, occurred_at DESC)
             """
         )
 
@@ -123,11 +158,12 @@ async def insert_weather_merge_position(
                 sequence_budget_usd,
                 max_complete_set_cost,
                 max_inventory_imbalance_ratio,
+                bot_trade_id,
                 signal_data,
                 entry_detected_at
             )
             VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
             )
             RETURNING id
             """,
@@ -155,10 +191,84 @@ async def insert_weather_merge_position(
             Decimal(str(plan["sequence_budget_usd"])),
             Decimal(str(max_complete_set_cost)),
             Decimal(str(max_inventory_imbalance_ratio)) if max_inventory_imbalance_ratio is not None else None,
+            None,
             json.dumps(plan.get("signal_data") or {}),
             datetime.now(timezone.utc),
         )
     return int(row["id"])
+
+
+async def attach_bot_trade(position_id: int, bot_trade_id: int) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE weather_merge_positions
+            SET bot_trade_id = $2,
+                last_checked_at = NOW()
+            WHERE id = $1
+            """,
+            position_id,
+            int(bot_trade_id),
+        )
+
+
+async def insert_weather_merge_event(
+    position_id: int,
+    *,
+    event_type: str,
+    bot_trade_id: int | None = None,
+    event_status: str | None = None,
+    side: str | None = None,
+    order_id: str | None = None,
+    tx_hash: str | None = None,
+    tx_mode: str | None = None,
+    tx_state: str | None = None,
+    shares: float | None = None,
+    price: float | None = None,
+    value_usdc: float | None = None,
+    notes: str | None = None,
+    data: dict[str, Any] | None = None,
+) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO weather_merge_position_events (
+                position_id,
+                bot_trade_id,
+                event_type,
+                event_status,
+                side,
+                order_id,
+                tx_hash,
+                tx_mode,
+                tx_state,
+                shares,
+                price,
+                value_usdc,
+                notes,
+                data
+            )
+            VALUES (
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14
+            )
+            """,
+            position_id,
+            int(bot_trade_id) if bot_trade_id is not None else None,
+            event_type,
+            event_status,
+            side,
+            order_id,
+            tx_hash,
+            tx_mode,
+            tx_state,
+            Decimal(str(round(shares, 6))) if shares is not None else None,
+            Decimal(str(round(price, 6))) if price is not None else None,
+            Decimal(str(round(value_usdc, 6))) if value_usdc is not None else None,
+            notes,
+            json.dumps(data) if data else None,
+        )
 
 
 async def get_active_weather_merge_positions() -> list[dict[str, Any]]:
