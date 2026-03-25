@@ -527,97 +527,6 @@ function EdgeScannerSection({ data }: { data: CalibrationRow[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Section 2 — Momentum & Trajectory
-// ---------------------------------------------------------------------------
-
-function TrajectorySection({ data }: { data: SequentialRow[] }) {
-  const momentumData = data.filter((r) => r.analysis_type === "momentum");
-
-  const cardsData = MARKET_TYPES_8.map((mt) => {
-    const rising = momentumData.find((r) => r.market_type === mt && r.key === "rising_60s");
-    const winRate = rising ? parseFloat(String(rising.up_win_rate ?? rising.value ?? "0")) : null;
-    return { market_type: mt, rising, winRate };
-  });
-
-  const momentumCount = cardsData.filter(
-    (c) => c.winRate !== null && c.winRate > 0.6
-  ).length;
-
-  const bannerColor =
-    momentumCount >= 5
-      ? "border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-400"
-      : momentumCount >= 3
-        ? "border-yellow-500/30 bg-yellow-500/[0.06] text-yellow-400"
-        : "border-red-500/30 bg-red-500/[0.06] text-red-400";
-
-  return (
-    <AnalysisSection
-      title="Price Trajectory"
-      description="Does price direction in the first 60 seconds predict the final outcome?"
-    >
-      <div className={cn("mb-5 rounded-lg border px-4 py-2.5 text-sm font-medium", bannerColor)}>
-        Momentum effect detected in {momentumCount}/8 market types
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {cardsData.map(({ market_type, rising, winRate }) => {
-          const label = MARKET_TYPE_LABELS[market_type] || market_type;
-          const winPct = winRate !== null ? winRate * 100 : null;
-          const badgeVariant = winPct !== null && winPct > 60 ? "up" as const : winPct !== null && winPct < 50 ? "down" as const : "default" as const;
-          const badgeText = winPct !== null ? `${winPct.toFixed(0)}% Up` : "–";
-
-          const reversal = data.find(
-            (r) => r.analysis_type === "momentum" && r.market_type === market_type && r.key === "reversal_60s"
-          );
-
-          return (
-            <GlassPanel key={market_type} variant="glow-br" className="p-6">
-              <div className="relative">
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="text-base font-semibold tracking-tight text-zinc-100">{label}</span>
-                  <Badge variant={badgeVariant}>{badgeText}</Badge>
-                </div>
-
-                {rising ? (
-                  <>
-                    <p className="text-sm text-zinc-300">
-                      <span className="text-emerald-400">↑</span> Rising at 60s → Up wins{" "}
-                      <span className={`font-mono text-sm font-bold ${winPct! > 60 ? "text-emerald-400" : winPct! < 50 ? "text-red-400" : "text-zinc-200"}`}>
-                        {winPct!.toFixed(1)}%
-                      </span>
-                    </p>
-                    <div className="mt-2 h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${winPct! > 60 ? "bg-emerald-400" : winPct! < 50 ? "bg-red-400" : "bg-yellow-400"}`}
-                        style={{ width: `${Math.min(winPct!, 100)}%` }}
-                      />
-                    </div>
-                    <p className="mt-2 text-xs text-zinc-400">
-                      {rising.sample_count.toLocaleString("en-US")} samples
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-sm text-zinc-500">No momentum data</p>
-                )}
-                {reversal && reversal.sample_count > 0 && (
-                  <p className="mt-3 text-sm text-zinc-300">
-                    <span className="text-yellow-400">↩</span>{" "}
-                    {reversal.sample_count.toLocaleString("en-US")} reversals,{" "}
-                    <span className="font-mono text-xs font-semibold text-zinc-200">
-                      {(parseFloat(String(reversal.up_win_rate ?? reversal.value ?? "0")) * 100).toFixed(1)}%
-                    </span>{" "}
-                    resolved Up
-                  </p>
-                )}
-              </div>
-            </GlassPanel>
-          );
-        })}
-      </div>
-    </AnalysisSection>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Section 3 — Time of Day
 // ---------------------------------------------------------------------------
 
@@ -1261,7 +1170,6 @@ export function AnalysisClient({ data }: { data: AnalysisData & { run: AnalysisR
             </AnalysisSection>
           );
         })()}
-        <TrajectorySection data={sequential} />
         <TimeofdaySection data={timeofday} />
         <CorrelationSection data={sequential} />
         <PrevInfluenceSection data={sequential} />

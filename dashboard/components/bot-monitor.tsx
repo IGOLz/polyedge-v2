@@ -252,12 +252,6 @@ const STRATEGY_COLORS: Record<
 		border: "border-violet-500/20",
 		glow: "via-violet-500/40",
 	},
-	// Legacy strategies (for historical trades)
-	momentum: {
-		badge: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-		border: "border-blue-500/20",
-		glow: "via-blue-500/40",
-	},
 };
 
 function getStrategyStyle(name: string) {
@@ -273,7 +267,7 @@ function getStrategyStyle(name: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Filter button row (matches strategy3 exactly)
+// Filter button row
 // ---------------------------------------------------------------------------
 
 function FilterRow({
@@ -306,7 +300,7 @@ function FilterRow({
 }
 
 // ---------------------------------------------------------------------------
-// Chart tooltip (matches strategy3 exactly)
+// Chart tooltip
 // ---------------------------------------------------------------------------
 
 function ChartTooltipContent({
@@ -1030,17 +1024,6 @@ function getSignalMetric(trade: TradeRow): {
 			};
 		}
 	}
-	// Legacy: momentum from notes
-	const parsed = parseJsonSafe(trade.notes);
-	if (parsed?.momentum_value != null) {
-		const m = Number(parsed.momentum_value);
-		if (!Number.isNaN(m)) {
-			return {
-				value: `${m >= 0 ? "+" : ""}${m.toFixed(3)}`,
-				color: m >= 0 ? "text-emerald-400" : "text-red-400",
-			};
-		}
-	}
 	return null;
 }
 
@@ -1234,34 +1217,6 @@ function SignalDataPanel({ data }: { data: Record<string, unknown> }) {
 		{
 			label: "Remaining",
 			key: "seconds_remaining",
-			format: (v) => `${v}s`,
-		},
-		// Legacy momentum fields
-		{ label: "Price A", key: "price_a", format: (v) => fmtPrice(Number(v)) },
-		{ label: "Price B", key: "price_b", format: (v) => fmtPrice(Number(v)) },
-		{
-			label: "Price Open",
-			key: "price_open",
-			format: (v) => fmtPrice(Number(v)),
-		},
-		{
-			label: "Momentum",
-			key: "momentum_value",
-			format: (v) => {
-				const n = Number(v);
-				return `${n >= 0 ? "+" : ""}${n.toFixed(4)}`;
-			},
-			highlight: (v) =>
-				Number(v) >= 0 ? "text-emerald-400" : "text-red-400",
-		},
-		{
-			label: "Price A Offset",
-			key: "price_a_seconds",
-			format: (v) => `${v}s`,
-		},
-		{
-			label: "Price B Offset",
-			key: "price_b_seconds",
 			format: (v) => `${v}s`,
 		},
 	];

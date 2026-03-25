@@ -16,7 +16,6 @@ export async function getStrategiesOverview(): Promise<{ strategies: StrategyRes
   const strategies: StrategyResult[] = [
     { strategy: "S1", name: "Farming", total_pnl: null, roi: null, win_rate: null, trades_taken: null, param1: null, param2: null, href: "/strategy" },
     { strategy: "S2", name: "Calibration", total_pnl: null, roi: null, win_rate: null, trades_taken: null, param1: null, param2: null, href: "/strategy2" },
-    { strategy: "S3", name: "Momentum", total_pnl: null, roi: null, win_rate: null, trades_taken: null, param1: null, param2: null, href: "/strategy3" },
     { strategy: "S4", name: "Streak Reversal", total_pnl: null, roi: null, win_rate: null, trades_taken: null, param1: null, param2: null, href: "/strategy4" },
   ];
 
@@ -74,31 +73,6 @@ export async function getStrategiesOverview(): Promise<{ strategies: StrategyRes
     }
   } catch { /* table may not exist */ }
 
-  // Strategy 3: Momentum
-  try {
-    const rows = await query<{
-      total_pnl: string;
-      roi: string;
-      win_rate: string;
-      trades_taken: number;
-      param1: number;
-    }>(
-      `SELECT total_pnl, roi, win_rate, trades_taken,
-              min_momentum as param1
-       FROM momentum_strategy_results
-       WHERE strategy_run_id = (SELECT MAX(id) FROM momentum_strategy_runs)
-         AND trades_taken >= 10
-       ORDER BY total_pnl DESC LIMIT 1`
-    );
-    if (rows.length > 0) {
-      strategies[2].total_pnl = parseFloat(String(rows[0].total_pnl));
-      strategies[2].roi = parseFloat(String(rows[0].roi));
-      strategies[2].win_rate = parseFloat(String(rows[0].win_rate));
-      strategies[2].trades_taken = rows[0].trades_taken;
-      strategies[2].param1 = rows[0].param1;
-    }
-  } catch { /* table may not exist */ }
-
   // Strategy 4: Streak
   try {
     const rows = await query<{
@@ -116,11 +90,11 @@ export async function getStrategiesOverview(): Promise<{ strategies: StrategyRes
        ORDER BY total_pnl DESC LIMIT 1`
     );
     if (rows.length > 0) {
-      strategies[3].total_pnl = parseFloat(String(rows[0].total_pnl));
-      strategies[3].roi = parseFloat(String(rows[0].roi));
-      strategies[3].win_rate = parseFloat(String(rows[0].win_rate));
-      strategies[3].trades_taken = rows[0].trades_taken;
-      strategies[3].param1 = rows[0].param1;
+      strategies[2].total_pnl = parseFloat(String(rows[0].total_pnl));
+      strategies[2].roi = parseFloat(String(rows[0].roi));
+      strategies[2].win_rate = parseFloat(String(rows[0].win_rate));
+      strategies[2].trades_taken = rows[0].trades_taken;
+      strategies[2].param1 = rows[0].param1;
     }
   } catch { /* table may not exist */ }
 

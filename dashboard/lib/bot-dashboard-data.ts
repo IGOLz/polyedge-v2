@@ -379,6 +379,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
             placed_at,
             resolved_at
           FROM bot_trades
+          WHERE strategy_name NOT LIKE 'momentum%'
           ORDER BY placed_at DESC
           LIMIT 18
         `)
@@ -394,6 +395,7 @@ export async function getBotDashboardData(): Promise<BotDashboardData> {
             AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) AS avg_pnl
           FROM bot_trades
           WHERE status = 'filled'
+            AND strategy_name NOT LIKE 'momentum%'
           GROUP BY strategy_name
           ORDER BY SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
         `)

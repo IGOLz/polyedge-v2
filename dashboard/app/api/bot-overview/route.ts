@@ -122,6 +122,7 @@ async function fetchBotOverview() {
           AVG(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) as avg_pnl
         FROM bot_trades
         WHERE status = 'filled'
+          AND strategy_name NOT LIKE 'momentum%'
         GROUP BY strategy_name
         ORDER BY SUM(${PNL_SQL}) FILTER (WHERE final_outcome IN ('win_resolution','take_profit','loss','stop_loss')) DESC NULLS LAST
       `),

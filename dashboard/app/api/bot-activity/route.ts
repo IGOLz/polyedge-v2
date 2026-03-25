@@ -61,15 +61,17 @@ export async function GET(request: Request) {
     let paramIdx = 1;
 
     if (type === "filled") {
-      tradesQuery += ` WHERE status = 'filled'`;
+      tradesQuery += ` WHERE status = 'filled' AND strategy_name NOT LIKE 'momentum%'`;
     } else if (type === "wins") {
-      tradesQuery += ` WHERE final_outcome IN ('win_resolution', 'take_profit')`;
+      tradesQuery += ` WHERE final_outcome IN ('win_resolution', 'take_profit') AND strategy_name NOT LIKE 'momentum%'`;
     } else if (type === "losses") {
-      tradesQuery += ` WHERE final_outcome = 'loss'`;
+      tradesQuery += ` WHERE final_outcome = 'loss' AND strategy_name NOT LIKE 'momentum%'`;
     } else if (type === "pending") {
-      tradesQuery += ` WHERE status = 'filled' AND final_outcome IS NULL`;
+      tradesQuery += ` WHERE status = 'filled' AND final_outcome IS NULL AND strategy_name NOT LIKE 'momentum%'`;
     } else if (type === "nofill") {
-      tradesQuery += ` WHERE status = 'fok_no_fill'`;
+      tradesQuery += ` WHERE status = 'fok_no_fill' AND strategy_name NOT LIKE 'momentum%'`;
+    } else {
+      tradesQuery += ` WHERE strategy_name NOT LIKE 'momentum%'`;
     }
 
     tradesQuery += ` ORDER BY placed_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`;
