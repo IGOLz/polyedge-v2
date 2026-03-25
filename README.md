@@ -39,7 +39,7 @@ src/
 └── trading_weather/ # Dedicated ColdMath-style weather merge bot
     ├── main.py      # Guarded live loop, audit checks, entry execution
     ├── config.py    # Runtime caps + wallet guard configuration
-    ├── db.py        # weather_merge_positions table helpers
+    ├── db.py        # weather_merge_positions + weather_merge_position_events helpers
     ├── safe_ops.py  # Safe approvals, merge, redeem helpers
     ├── strategy.py  # Candidate ranking + paired-entry planning
     └── wallet_guard.py # Public-wallet contamination checks
@@ -226,7 +226,7 @@ When you're ready to promote this repo to the main collector, stop `core-debug` 
 
 1. **Core isolation**: Core's Docker image is built separately and never rebuilt during routine updates. Only `analysis`, `trading`, and `dashboard` are rebuilt/restarted.
 
-2. **Shared database**: All services connect to the same TimescaleDB instance. Core writes `market_ticks` and `market_outcomes`; analysis reads them; trading reads them and writes to `bot_trades`; dashboard reads shared tables and exposes limited control flows.
+2. **Shared database**: All services connect to the same TimescaleDB instance. Core writes `market_ticks` and `market_outcomes`; analysis reads them; `trading` writes `bot_trades` and `bot_logs`; `trading-weather` writes `bot_trades`, `bot_logs`, `weather_merge_positions`, and `weather_merge_position_events`; dashboard reads the shared tables and exposes limited control flows.
 
 3. **Shared code**: The `shared/` module contains database, API, WebSocket, and config code that's used by all Python services. The dashboard now lives in the same repo so UI changes can track backend strategy changes together.
 
