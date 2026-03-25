@@ -212,6 +212,7 @@ class TradingWeatherGuardTests(unittest.TestCase):
         self.assertEqual(telemetry["sequence_budget_usd"], weather_config.DEFAULT_SEQUENCE_BUDGET_USD)
         self.assertEqual(telemetry["max_total_exposure_usd"], weather_config.DEFAULT_MAX_TOTAL_EXPOSURE_USD)
         self.assertEqual(telemetry["daily_loss_limit_usd"], weather_config.DEFAULT_DAILY_LOSS_LIMIT_USD)
+        self.assertEqual(telemetry["total_spend_limit_usd"], weather_config.DEFAULT_TOTAL_SPEND_LIMIT_USD)
         self.assertEqual(telemetry["require_clean_wallet"], weather_config.REQUIRE_CLEAN_WALLET)
         self.assertEqual(telemetry["allow_orphaned_positions"], weather_config.ALLOW_ORPHANED_POSITIONS)
         self.assertTrue(telemetry["code_fingerprint"])
@@ -222,6 +223,8 @@ class TradingWeatherGuardTests(unittest.TestCase):
             {
                 "balance": 10,
                 "daily_realized_pnl": 0,
+                "total_spent_usd": 12.5,
+                "total_spend_limit_usd": 30,
                 "active_positions": 0,
                 "active_exposure_usd": 0,
                 "context_count": 1,
@@ -243,6 +246,7 @@ class TradingWeatherGuardTests(unittest.TestCase):
         )
 
         self.assertIn("guard=blocked:foreign_open_positions_detected", message)
+        self.assertIn("spent=12.50/30.00", message)
         self.assertIn("foreign_positions=2", message)
         self.assertIn("foreign_activity=7", message)
         self.assertIn("orphaned_weather=1", message)

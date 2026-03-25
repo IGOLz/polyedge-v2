@@ -262,6 +262,7 @@ def build_startup_telemetry(*, config_path: str, dry_run: bool, bot_config: dict
         "sequence_budget_usd": config.DEFAULT_SEQUENCE_BUDGET_USD,
         "max_total_exposure_usd": config.DEFAULT_MAX_TOTAL_EXPOSURE_USD,
         "daily_loss_limit_usd": config.DEFAULT_DAILY_LOSS_LIMIT_USD,
+        "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
         "max_concurrent_positions": config.DEFAULT_MAX_CONCURRENT_POSITIONS,
         "max_entry_attempts": config.DEFAULT_MAX_ENTRY_ATTEMPTS,
         "loop_interval_seconds": config.DEFAULT_LOOP_INTERVAL_SECONDS,
@@ -395,6 +396,8 @@ def _cycle_status_message(
     near_miss_count = int(report.get("near_miss_count") or 0)
     entry_attempts = int(report.get("entry_attempts") or 0)
     daily_realized_pnl = safe_float(report.get("daily_realized_pnl")) or 0.0
+    total_spent_usd = safe_float(report.get("total_spent_usd")) or 0.0
+    total_spend_limit_usd = safe_float(report.get("total_spend_limit_usd")) or 0.0
     stand_down_reason = str(report.get("stand_down_reason") or "").strip()
     top_candidate = report.get("top_candidate")
     top_near_miss = report.get("top_near_miss")
@@ -406,6 +409,7 @@ def _cycle_status_message(
         "[WEATHER-MERGE] Summary | "
         f"balance={balance:.2f} "
         f"daily_pnl={daily_realized_pnl:.2f} "
+        f"spent={total_spent_usd:.2f}/{total_spend_limit_usd:.2f} "
         f"active_positions={active_positions} "
         f"exposure={active_exposure_usd:.2f} "
         f"contexts={context_count} "
@@ -508,6 +512,8 @@ def _report_snapshot(report: dict[str, Any]) -> dict[str, Any]:
         "daily_realized_pnl": _round_value(report.get("daily_realized_pnl"), 2),
         "daily_loss": _round_value(report.get("daily_loss"), 2),
         "daily_loss_limit_usd": _round_value(report.get("daily_loss_limit_usd"), 2),
+        "total_spent_usd": _round_value(report.get("total_spent_usd"), 2),
+        "total_spend_limit_usd": _round_value(report.get("total_spend_limit_usd"), 2),
         "active_positions": int(report.get("active_positions") or 0),
         "active_exposure_usd": _round_value(report.get("active_exposure_usd"), 2),
         "context_count": int(report.get("context_count") or 0),
@@ -554,6 +560,13 @@ def _stand_down_message(report: dict[str, Any]) -> str:
             f"reason={reason} "
             f"daily_loss={(safe_float(report.get('daily_loss')) or 0.0):.2f} "
             f"limit={(safe_float(report.get('daily_loss_limit_usd')) or 0.0):.2f}"
+        )
+    if reason == "total_spend_limit_reached":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"spent={(safe_float(report.get('total_spent_usd')) or 0.0):.2f} "
+            f"limit={(safe_float(report.get('total_spend_limit_usd')) or 0.0):.2f}"
         )
     if reason == "capacity_reached":
         return (
@@ -1965,6 +1978,7 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
 
     daily_realized_pnl = await weather_db.get_daily_realized_pnl()
     daily_loss = max(0.0, -daily_realized_pnl)
+    total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_merge")
 
     positions = await weather_db.get_active_weather_merge_positions()
     active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
@@ -1998,7 +2012,13 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
         near_miss_limit=config.DEFAULT_NEAR_MISS_LIMIT,
     )
 
-    if stand_down_reason is None and daily_loss >= runtime.daily_loss_limit_usd:
+    if (
+        stand_down_reason is None
+        and config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0
+        and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD
+    ):
+        stand_down_reason = "total_spend_limit_reached"
+    elif stand_down_reason is None and daily_loss >= runtime.daily_loss_limit_usd:
         stand_down_reason = "daily_loss_limit_reached"
     elif stand_down_reason is None and (
         len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd
@@ -2014,6 +2034,13 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
             positions = await weather_db.get_active_weather_merge_positions()
             active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
             active_market_ids = {str(position.get("market_id")) for position in positions}
+            total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_merge")
+            if (
+                config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0
+                and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD
+            ):
+                stand_down_reason = "total_spend_limit_reached"
+                break
             if len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
                 stand_down_reason = "capacity_reached"
                 break
@@ -2032,6 +2059,7 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
 
     final_positions = await weather_db.get_active_weather_merge_positions()
     final_exposure_usd = round(sum(open_position_exposure(position) for position in final_positions), 6)
+    total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_merge")
     near_misses = scan_report.get("near_misses") or []
     return {
         "generated_at": generated_at,
@@ -2040,6 +2068,8 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
         "daily_realized_pnl": round(daily_realized_pnl, 6),
         "daily_loss": round(daily_loss, 6),
         "daily_loss_limit_usd": runtime.daily_loss_limit_usd,
+        "total_spent_usd": round(total_spent_usd, 6),
+        "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
         "active_positions": len(final_positions),
         "active_exposure_usd": final_exposure_usd,
         "context_count": int(scan_report.get("context_count") or 0),
@@ -2276,6 +2306,7 @@ async def run(*, config_path: str, dry_run: bool, once: bool, engine: str) -> No
             f"cfg={startup['config_fingerprint']} "
             f"loop={startup['loop_interval_seconds']:.0f}s "
             f"caps={startup['sequence_budget_usd']:.2f}/{startup['max_total_exposure_usd']:.2f}/{startup['daily_loss_limit_usd']:.2f} "
+            f"spend_cap={startup['total_spend_limit_usd']:.2f} "
             f"max_positions={startup['max_concurrent_positions']} "
             f"max_attempts={startup['max_entry_attempts']} "
             f"guard={'clean_wallet_required' if startup['require_clean_wallet'] else 'clean_wallet_optional'} "

@@ -591,6 +591,21 @@ async def get_daily_resolved_net_pnl_for_market_prefix(
     return float(row["net_pnl"] or 0.0) if row else 0.0
 
 
+async def get_cumulative_spend_for_engine(engine_name: str) -> float:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(bet_size_usd), 0) AS gross_spend
+            FROM bot_trades
+            WHERE COALESCE(signal_data->>'engine', '') = $1
+              AND status IN ('partial_fill', 'open_partial', 'filled')
+            """,
+            engine_name,
+        )
+    return float(row["gross_spend"] or 0.0) if row else 0.0
+
+
 async def get_open_position_rows_for_market_prefix(
     market_prefix: str,
 ) -> list[dict[str, Any]]:
