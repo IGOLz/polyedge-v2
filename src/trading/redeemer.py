@@ -240,7 +240,7 @@ def _redeem_condition_onchain(
     ).build_transaction(
         {
             "from": Web3.to_checksum_address(eoa_address),
-            "nonce": w3.eth.get_transaction_count(Web3.to_checksum_address(eoa_address)),
+            "nonce": w3.eth.get_transaction_count(Web3.to_checksum_address(eoa_address), "pending"),
             "gas": 300_000,
             "maxFeePerGas": w3.to_wei("100", "gwei"),
             "maxPriorityFeePerGas": w3.to_wei("30", "gwei"),

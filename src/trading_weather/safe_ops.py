@@ -269,6 +269,7 @@ def _execute_safe_calls_onchain(
     eoa_address = Web3.to_checksum_address(trading_config.EOA_ADDRESS)
     signature = _build_caller_approved_signature(trading_config.EOA_ADDRESS)
     last_tx_hash = ""
+    next_nonce = w3.eth.get_transaction_count(eoa_address, "pending")
     for call in calls:
         tx = safe.functions.execTransaction(
             Web3.to_checksum_address(call["to"]),
@@ -284,7 +285,7 @@ def _execute_safe_calls_onchain(
         ).build_transaction(
             {
                 "from": eoa_address,
-                "nonce": w3.eth.get_transaction_count(eoa_address),
+                "nonce": next_nonce,
                 "gas": 300_000,
                 "maxFeePerGas": w3.to_wei("100", "gwei"),
                 "maxPriorityFeePerGas": w3.to_wei("30", "gwei"),
@@ -293,6 +294,7 @@ def _execute_safe_calls_onchain(
         signed = w3.eth.account.sign_transaction(tx, private_key=private_key)
         tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
         last_tx_hash = tx_hash.hex()
+        next_nonce += 1
         receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=180)
         if receipt["status"] == 0:
             raise RuntimeError(f"Safe call reverted on-chain: {last_tx_hash}")
