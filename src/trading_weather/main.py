@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from analysis.wallet_forensics.fetchers import WalletForensicsClient
 from analysis.wallet_forensics.utils import safe_float
 from shared.config import PROXY_URL
 from shared.db import close_pool, create_weather_tables, init_pool
@@ -42,6 +44,7 @@ from trading_weather.clone_engine import (
 )
 from trading_weather import config
 from trading_weather import db as weather_db
+from trading_weather import wallet_guard
 from trading_weather.safe_ops import ensure_weather_allowances, merge_position, redeem_position
 from trading_weather.strategy import (
     build_runtime_config,
@@ -236,6 +239,53 @@ def _load_bot_config(path: str) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _fingerprint_payload(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:12]
+
+
+def _code_fingerprint() -> str:
+    digest = hashlib.sha1()
+    for path in (
+        Path(__file__),
+        Path(__file__).with_name("config.py"),
+        Path(__file__).with_name("strategy.py"),
+        Path(__file__).with_name("wallet_guard.py"),
+    ):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
+
+
+def build_startup_telemetry(*, config_path: str, dry_run: bool, bot_config: dict[str, Any]) -> dict[str, Any]:
+    cap_settings = {
+        "sequence_budget_usd": config.DEFAULT_SEQUENCE_BUDGET_USD,
+        "max_total_exposure_usd": config.DEFAULT_MAX_TOTAL_EXPOSURE_USD,
+        "daily_loss_limit_usd": config.DEFAULT_DAILY_LOSS_LIMIT_USD,
+        "max_concurrent_positions": config.DEFAULT_MAX_CONCURRENT_POSITIONS,
+        "max_entry_attempts": config.DEFAULT_MAX_ENTRY_ATTEMPTS,
+        "loop_interval_seconds": config.DEFAULT_LOOP_INTERVAL_SECONDS,
+        "summary_interval_seconds": config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
+        "activity_lookback_minutes": config.ACTIVITY_LOOKBACK_MINUTES,
+        "require_clean_wallet": config.REQUIRE_CLEAN_WALLET,
+        "allow_orphaned_positions": config.ALLOW_ORPHANED_POSITIONS,
+    }
+    return {
+        "dry_run": dry_run,
+        "config_path": config_path,
+        "history_path": str(config.DEFAULT_HISTORY_PATH),
+        "strategy_name": str(bot_config.get("strategy_name") or "coldmath_inventory_rebalancing_merge_v2"),
+        "code_fingerprint": _code_fingerprint(),
+        "config_fingerprint": _fingerprint_payload(
+            {
+                "bot_config": bot_config,
+                "caps": cap_settings,
+            }
+        ),
+        **cap_settings,
+    }
+
+
 def _resolve_engine(*, requested: str, raw_config: dict[str, Any]) -> str:
     if requested in {"merge", "clone"}:
         return requested
@@ -263,6 +313,9 @@ def _cycle_status_message(
     top_candidate = report.get("top_candidate")
     top_near_miss = report.get("top_near_miss")
     top_rejection_reasons = report.get("top_rejection_reasons") or []
+    guard_report = report.get("wallet_guard") or {}
+    guard_reason = str(guard_report.get("reason") or "").strip()
+    guard_stats = guard_report.get("stats") or {}
     message = (
         "[WEATHER-MERGE] Summary | "
         f"balance={balance:.2f} "
@@ -277,6 +330,16 @@ def _cycle_status_message(
     )
     if stand_down_reason:
         message += f" | stand_down={stand_down_reason}"
+    if guard_report:
+        guard_label = "clean" if guard_report.get("ready") else f"blocked:{guard_reason or 'unknown'}"
+        message += f" | guard={guard_label}"
+        if not guard_report.get("ready"):
+            message += (
+                " "
+                f"foreign_positions={int(guard_stats.get('foreign_open_positions_count') or 0)} "
+                f"foreign_activity={int(guard_stats.get('foreign_activity_count') or 0)} "
+                f"orphaned_weather={int(guard_stats.get('orphaned_weather_positions_count') or 0)}"
+            )
     if top_candidate:
         combined_cost = safe_float(top_candidate.get("combined_cost"))
         merge_edge = safe_float(top_candidate.get("merge_edge"))
@@ -371,10 +434,13 @@ def _report_snapshot(report: dict[str, Any]) -> dict[str, Any]:
         "top_near_miss": report.get("top_near_miss"),
         "top_rejection_reasons": report.get("top_rejection_reasons") or [],
         "planned_entries": report.get("planned_entries") or [],
+        "wallet_guard": report.get("wallet_guard") or {},
     }
 
 
 def _candidate_signature(report: dict[str, Any]) -> str | None:
+    if str(report.get("stand_down_reason") or "").strip():
+        return None
     candidate = report.get("top_candidate")
     if not candidate:
         return None
@@ -394,6 +460,8 @@ def _json_safe_payload(payload: Any) -> Any:
 
 def _stand_down_message(report: dict[str, Any]) -> str:
     reason = str(report.get("stand_down_reason") or "").strip()
+    guard_report = report.get("wallet_guard") or {}
+    guard_stats = guard_report.get("stats") or {}
     if reason == "daily_loss_limit_reached":
         return (
             "[WEATHER-MERGE] Stand down | "
@@ -407,6 +475,32 @@ def _stand_down_message(report: dict[str, Any]) -> str:
             f"reason={reason} "
             f"active_positions={int(report.get('active_positions') or 0)} "
             f"exposure={(safe_float(report.get('active_exposure_usd')) or 0.0):.2f}"
+        )
+    if reason == "foreign_open_positions_detected":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"foreign_open_positions={int(guard_stats.get('foreign_open_positions_count') or 0)} "
+            f"weather_open_positions={int(guard_stats.get('weather_open_positions_count') or 0)}"
+        )
+    if reason == "foreign_wallet_activity_detected":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"foreign_activity={int(guard_stats.get('foreign_activity_count') or 0)} "
+            f"lookback_minutes={config.ACTIVITY_LOOKBACK_MINUTES}"
+        )
+    if reason == "orphaned_weather_inventory_detected":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"orphaned_weather_positions={int(guard_stats.get('orphaned_weather_positions_count') or 0)}"
+        )
+    if reason == "wallet_audit_error":
+        return (
+            "[WEATHER-MERGE] Stand down | "
+            f"reason={reason} "
+            f"error={guard_report.get('error') or 'unknown'}"
         )
     return f"[WEATHER-MERGE] Stand down | reason={reason or 'n/a'}"
 
@@ -439,6 +533,29 @@ def _candidate_cleared_message(previous: dict[str, Any] | None) -> str:
         f"{previous.get('city')} {previous.get('local_date')} {previous.get('bucket_label')} "
         f"cost={(safe_float(previous.get('combined_cost')) or float('nan')):.4f}"
     )
+
+
+def _entry_invariant_failure(candidate: dict[str, Any], plan: dict[str, Any]) -> str | None:
+    if wallet_guard.classify_market_bucket(
+        {
+            "slug": plan.get("event_slug"),
+            "question": plan.get("question"),
+        }
+    ) != "weather":
+        return "non_weather_plan"
+    if {plan.get("first_side"), plan.get("second_side")} != {"yes", "no"}:
+        return "entry_not_paired_yes_no"
+    if not str(plan.get("yes_token_id") or "").strip() or not str(plan.get("no_token_id") or "").strip():
+        return "missing_token_ids"
+    if not str(plan.get("condition_id") or "").strip():
+        return "missing_condition_id"
+    if int(plan.get("target_shares") or 0) <= 0:
+        return "non_positive_target_shares"
+    candidate_market_id = str(candidate.get("market_id") or "").strip()
+    plan_market_id = str(plan.get("market_id") or "").strip()
+    if candidate_market_id and plan_market_id and candidate_market_id != plan_market_id:
+        return "candidate_plan_market_mismatch"
+    return None
 
 
 def _append_cycle_history(*, history_path: Path, event_type: str, message: str, report: dict[str, Any]) -> None:
@@ -529,6 +646,73 @@ async def _emit_cycle_telemetry(
     telemetry.last_candidate_signature = current_candidate_signature
     telemetry.last_candidate_brief = report.get("top_candidate")
     telemetry.last_stand_down_reason = current_stand_down_reason
+
+
+async def _run_wallet_audit(
+    client: WalletForensicsClient,
+    *,
+    tracked_weather_market_ids: set[str],
+) -> dict[str, Any]:
+    if not config.REQUIRE_CLEAN_WALLET and config.ALLOW_ORPHANED_POSITIONS:
+        return {
+            "ready": True,
+            "reason": None,
+            "tracked_weather_market_ids": sorted(tracked_weather_market_ids),
+            "foreign_wallet_activity_detected": [],
+            "foreign_open_positions_detected": [],
+            "orphaned_weather_inventory_detected": [],
+            "weather_open_positions": [],
+            "stats": {
+                "foreign_activity_count": 0,
+                "foreign_open_positions_count": 0,
+                "weather_open_positions_count": 0,
+                "orphaned_weather_positions_count": 0,
+                "tracked_weather_market_ids_count": len(tracked_weather_market_ids),
+            },
+        }
+
+    end_dt = datetime.now(UTC)
+    start_dt = end_dt - timedelta(minutes=max(1, config.ACTIVITY_LOOKBACK_MINUTES))
+    try:
+        activity_rows, position_rows = await asyncio.gather(
+            asyncio.to_thread(
+                client.fetch_activity,
+                trading_config.PROXY_WALLET,
+                start_ts=int(start_dt.timestamp()),
+                end_ts=int(end_dt.timestamp()),
+            ),
+            asyncio.to_thread(
+                client.fetch_positions,
+                trading_config.PROXY_WALLET,
+                closed=False,
+            ),
+        )
+    except Exception as exc:
+        return {
+            "ready": False,
+            "reason": "wallet_audit_error",
+            "error": f"{type(exc).__name__}: {exc}",
+            "tracked_weather_market_ids": sorted(tracked_weather_market_ids),
+            "foreign_wallet_activity_detected": [],
+            "foreign_open_positions_detected": [],
+            "orphaned_weather_inventory_detected": [],
+            "weather_open_positions": [],
+            "stats": {
+                "foreign_activity_count": 0,
+                "foreign_open_positions_count": 0,
+                "weather_open_positions_count": 0,
+                "orphaned_weather_positions_count": 0,
+                "tracked_weather_market_ids_count": len(tracked_weather_market_ids),
+            },
+        }
+
+    return wallet_guard.audit_wallet_integrity(
+        activity_rows=activity_rows,
+        position_rows=position_rows,
+        tracked_weather_market_ids=tracked_weather_market_ids,
+        require_clean_wallet=config.REQUIRE_CLEAN_WALLET,
+        allow_orphaned_positions=config.ALLOW_ORPHANED_POSITIONS,
+    )
 
 
 def _clone_candidate_signature(report: dict[str, Any]) -> str | None:
@@ -1031,6 +1215,36 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         max_complete_set_cost=runtime.live_rules["complete_set_cost_lte"],
         max_inventory_imbalance_ratio=runtime.live_rules.get("max_inventory_imbalance_ratio"),
     )
+    await _log_event(
+        "weather_merge_entry_planned",
+        (
+            "[WEATHER-MERGE] Entry planned | "
+            f"{plan['city']} {plan['local_date']} {plan['bucket_label']} "
+            f"shares={int(plan['target_shares'])} "
+            f"cost={plan['combined_cost']:.4f} "
+            f"edge={plan['expected_edge_usd']:.4f}"
+        ),
+        {"position_id": position_id, "candidate": _candidate_brief(candidate), "plan": plan},
+    )
+
+    invariant_error = _entry_invariant_failure(candidate, plan)
+    if invariant_error:
+        await weather_db.close_weather_merge_position(
+            position_id,
+            status="entry_rejected",
+            notes=f"Rejected by entry invariant: {invariant_error}",
+        )
+        await _log_event(
+            "weather_merge_entry_rejected",
+            (
+                "[WEATHER-MERGE] Entry rejected | "
+                f"reason={invariant_error} "
+                f"market_id={plan.get('market_id')} "
+                f"city={plan.get('city')}"
+            ),
+            {"position_id": position_id, "candidate": _candidate_brief(candidate), "plan": plan},
+        )
+        return
 
     if dry_run:
         await weather_db.close_weather_merge_position(
@@ -1042,6 +1256,29 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             "weather_merge_dry_run",
             f"[WEATHER-MERGE] Dry run candidate {plan['city']} {plan['bucket_label']} | cost {plan['combined_cost']:.4f}",
             {"position_id": position_id, "plan": plan},
+        )
+        return
+
+    approval_state = await asyncio.to_thread(ensure_weather_allowances, auto_approve=config.AUTO_APPROVE)
+    if not approval_state.ready:
+        await weather_db.close_weather_merge_position(
+            position_id,
+            status="entry_blocked",
+            notes="Weather approvals are not ready",
+        )
+        await _log_event(
+            "weather_merge_entry_blocked",
+            "[WEATHER-MERGE] Entry blocked | approvals_not_ready",
+            {
+                "position_id": position_id,
+                "candidate": _candidate_brief(candidate),
+                "plan": plan,
+                "approval_state": {
+                    "ready": approval_state.ready,
+                    "missing_usdc_spenders": approval_state.missing_usdc_spenders,
+                    "missing_ctf_operators": approval_state.missing_ctf_operators,
+                },
+            },
         )
         return
 
@@ -1066,6 +1303,11 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             position_id,
             status="entry_failed",
             notes=f"First {first_side} leg did not fill",
+        )
+        await _log_event(
+            "weather_merge_entry_failed",
+            f"[WEATHER-MERGE] Entry failed | first_{first_side}_leg_no_fill | market_id={plan['market_id']}",
+            {"position_id": position_id, "plan": plan},
         )
         return
 
@@ -1098,6 +1340,11 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             status="entry_failed",
             notes="Second leg moved above complete-set threshold",
         )
+        await _log_event(
+            "weather_merge_entry_failed",
+            "[WEATHER-MERGE] Entry failed | second_leg_above_complete_set_threshold",
+            {"position_id": position_id, "plan": plan, "first_fill": first_fill},
+        )
         return
 
     second_fill = await asyncio.to_thread(
@@ -1123,6 +1370,11 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
             position_id,
             status="entry_failed",
             notes=f"Second {second_side} leg did not fill",
+        )
+        await _log_event(
+            "weather_merge_entry_failed",
+            f"[WEATHER-MERGE] Entry failed | second_{second_side}_leg_no_fill | market_id={plan['market_id']}",
+            {"position_id": position_id, "plan": plan, "first_fill": first_fill},
         )
         return
 
@@ -1165,7 +1417,7 @@ async def _attempt_entry(clob, candidate: dict[str, Any], plan: dict[str, Any], 
         await _reconcile_position(clob, position, runtime)
 
 
-async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
+async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
     generated_at = datetime.now(UTC)
     balance = await asyncio.to_thread(_get_usdc_balance, clob)
     runtime = build_runtime_config(
@@ -1185,12 +1437,28 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict
     daily_loss = max(0.0, -daily_realized_pnl)
 
     positions = await weather_db.get_active_weather_merge_positions()
-    for position in positions:
-        await _reconcile_position(clob, position, runtime)
-
-    positions = await weather_db.get_active_weather_merge_positions()
     active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
     active_market_ids = {str(position.get("market_id")) for position in positions}
+    tracked_weather_market_ids = {
+        str(position.get("market_id")).strip()
+        for position in positions
+        if str(position.get("market_id") or "").strip()
+    }
+    guard_report = await _run_wallet_audit(
+        wallet_client,
+        tracked_weather_market_ids=tracked_weather_market_ids,
+    )
+
+    stand_down_reason: str | None = None
+    if not guard_report.get("ready"):
+        stand_down_reason = str(guard_report.get("reason") or "wallet_audit_error")
+    else:
+        for position in positions:
+            await _reconcile_position(clob, position, runtime)
+
+        positions = await weather_db.get_active_weather_merge_positions()
+        active_exposure_usd = round(sum(open_position_exposure(position) for position in positions), 6)
+        active_market_ids = {str(position.get("market_id")) for position in positions}
     contexts = await fetch_active_weather_contexts(eligible_only=True)
     scan_report = scan_live_market_report(
         contexts,
@@ -1200,10 +1468,11 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict
         near_miss_limit=config.DEFAULT_NEAR_MISS_LIMIT,
     )
 
-    stand_down_reason: str | None = None
-    if daily_loss >= runtime.daily_loss_limit_usd:
+    if stand_down_reason is None and daily_loss >= runtime.daily_loss_limit_usd:
         stand_down_reason = "daily_loss_limit_reached"
-    elif len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd:
+    elif stand_down_reason is None and (
+        len(positions) >= runtime.max_concurrent_positions or active_exposure_usd >= runtime.max_total_exposure_usd
+    ):
         stand_down_reason = "capacity_reached"
 
     candidates = list(scan_report.get("candidates") or [])
@@ -1253,6 +1522,7 @@ async def _run_cycle(clob, bot_config: dict[str, Any], *, dry_run: bool) -> dict
         "top_near_miss": _candidate_brief(near_misses[0] if near_misses else None),
         "top_rejection_reasons": list(scan_report.get("rejection_reason_counts") or [])[:3],
         "planned_entries": planned_entries[:3],
+        "wallet_guard": guard_report,
     }
 
 
@@ -1300,7 +1570,7 @@ async def _run_clone_cycle(
         ),
     }
 
-    if dry_run or bot_config.get("execution_mode") != "live_small":
+    if dry_run or bot_config.get("execution_mode") != "live_small" or not config.CLONE_LIVE_ENABLED:
         health_state["execution_allowed"] = False
     else:
         health_state["execution_allowed"] = bool((health_state.get("execution_auth") or {}).get("allowed"))
@@ -1411,6 +1681,7 @@ async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
             "summary_interval_seconds": float((bot_config.get('runtime') or {}).get("summary_interval_seconds") or config.DEFAULT_SUMMARY_INTERVAL_SECONDS),
             "history_path": str(config.DEFAULT_CLONE_HISTORY_PATH),
             "execution_mode": bot_config.get("execution_mode"),
+            "clone_live_enabled": config.CLONE_LIVE_ENABLED,
         },
         echo=False,
     )
@@ -1458,41 +1729,48 @@ async def run(*, config_path: str, dry_run: bool, once: bool, engine: str) -> No
 
     bot_config = raw_config
     clob = _build_clob_client()
+    wallet_client = WalletForensicsClient()
     telemetry = WeatherMergeTelemetryState(
         summary_interval_seconds=config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
         history_path=config.DEFAULT_HISTORY_PATH,
     )
-
-    if not dry_run:
-        approval_state = await asyncio.to_thread(ensure_weather_allowances, auto_approve=config.AUTO_APPROVE)
-        if not approval_state.ready:
-            raise RuntimeError("Weather bot approvals are not ready")
+    startup = build_startup_telemetry(config_path=config_path, dry_run=dry_run, bot_config=bot_config)
 
     await _log_event(
         "weather_merge_start",
-        f"[WEATHER-MERGE] Bot started | mode={'DRY RUN' if dry_run else 'LIVE'} | config={config_path}",
-        {
-            "dry_run": dry_run,
-            "config_path": config_path,
-            "loop_interval_seconds": config.DEFAULT_LOOP_INTERVAL_SECONDS,
-            "summary_interval_seconds": config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
-            "history_path": str(config.DEFAULT_HISTORY_PATH),
-        },
+        (
+            "[WEATHER-MERGE] Bot started | "
+            f"mode={'DRY RUN' if dry_run else 'LIVE'} "
+            f"config={config_path} "
+            f"code={startup['code_fingerprint']} "
+            f"cfg={startup['config_fingerprint']} "
+            f"loop={startup['loop_interval_seconds']:.0f}s "
+            f"caps={startup['sequence_budget_usd']:.2f}/{startup['max_total_exposure_usd']:.2f}/{startup['daily_loss_limit_usd']:.2f} "
+            f"max_positions={startup['max_concurrent_positions']} "
+            f"max_attempts={startup['max_entry_attempts']} "
+            f"guard={'clean_wallet_required' if startup['require_clean_wallet'] else 'clean_wallet_optional'} "
+            f"orphaned={'allowed' if startup['allow_orphaned_positions'] else 'blocked'} "
+            f"lookback={startup['activity_lookback_minutes']}m"
+        ),
+        startup,
     )
 
-    while True:
-        try:
-            report = await _run_cycle(clob, bot_config, dry_run=dry_run)
-            await _emit_cycle_telemetry(report, telemetry)
-        except Exception as exc:
-            await _log_event(
-                "weather_merge_error",
-                f"[WEATHER-MERGE] Cycle failed: {type(exc).__name__}: {exc}",
-                {"error": str(exc), "error_type": type(exc).__name__},
-            )
-        if once:
-            return
-        await asyncio.sleep(config.DEFAULT_LOOP_INTERVAL_SECONDS)
+    try:
+        while True:
+            try:
+                report = await _run_cycle(clob, wallet_client, bot_config, dry_run=dry_run)
+                await _emit_cycle_telemetry(report, telemetry)
+            except Exception as exc:
+                await _log_event(
+                    "weather_merge_error",
+                    f"[WEATHER-MERGE] Cycle failed: {type(exc).__name__}: {exc}",
+                    {"error": str(exc), "error_type": type(exc).__name__},
+                )
+            if once:
+                return
+            await asyncio.sleep(config.DEFAULT_LOOP_INTERVAL_SECONDS)
+    finally:
+        wallet_client.close()
 
 
 def main() -> None:

@@ -24,6 +24,7 @@ from analysis.wallet_forensics.constants import (
     POLYGON_RPC_URL,
 )
 from analysis.wallet_forensics.utils import parse_iso_datetime, row_hash, safe_int, utc_now
+from shared.http import get_sync_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class WalletForensicsClient:
     """Thin client for public Polymarket and Polygon endpoints."""
 
     def __init__(self) -> None:
-        self._http = httpx.Client(
+        self._http = get_sync_http_client(
             timeout=DEFAULT_TIMEOUT_SECONDS,
             headers={"User-Agent": FORENSICS_USER_AGENT},
         )
