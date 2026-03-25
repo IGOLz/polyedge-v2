@@ -1,0 +1,18 @@
+{
+  "name": "polyedge-streamdeck-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf com.polyedge.streamdeck.sdPlugin/bin/*.js com.polyedge.streamdeck.sdPlugin/bin/**/*.js com.polyedge.streamdeck.sdPlugin/polyedge-main.streamDeckProfile",
+    "build": "npm run clean && tsc -p tsconfig.json && node scripts/build-profile.mjs",
+    "watch": "tsc --watch -p tsconfig.json"
+  },
+  "dependencies": {
+    "@elgato/streamdeck": "^2.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

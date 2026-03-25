@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "PolyEdge Monitor",
+  "Version": "0.1.0.0",
+  "Author": "PolyEdge",
+  "Actions": [
+    {
+      "Name": "Monitor Tile",
+      "UUID": "com.polyedge.streamdeck.monitor-tile",
+      "Icon": "imgs/actions/monitor-tile/icon",
+      "Tooltip": "Displays a live PolyEdge monitoring tile.",
+      "PropertyInspectorPath": "ui/monitor-tile.html",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/monitor-tile/key",
+          "TitleAlignment": "middle"
+        }
+      ]
+    }
+  ],
+  "Category": "PolyEdge Monitor",
+  "CategoryIcon": "imgs/plugin/category-icon",
+  "CodePath": "bin/plugin.js",
+  "Description": "Live Stream Deck monitoring for PolyEdge collector and bot telemetry.",
+  "Icon": "imgs/plugin/marketplace",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.9"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "12"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Profiles": [
+    {
+      "Name": "polyedge-main",
+      "DeviceType": 0,
+      "Readonly": false,
+      "DontAutoSwitchWhenInstalled": true,
+      "AutoInstall": true
+    }
+  ],
+  "UUID": "com.polyedge.streamdeck"
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PolyEdge Monitor Tile</title>
+    <link rel="stylesheet" href="monitor-tile.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <h1>Dashboard</h1>
+        <label>
+          <span>Base URL</span>
+          <input id="baseUrl" type="url" placeholder="http://192.168.8.164:3000" />
+        </label>
+        <label>
+          <span>Bearer Token</span>
+          <input id="bearerToken" type="password" placeholder="STREAMDECK_READ_TOKEN" />
+        </label>
+        <label>
+          <span>Poll Interval (sec)</span>
+          <input id="pollIntervalSec" type="number" min="5" max="60" step="1" />
+        </label>
+        <label>
+          <span>Timezone</span>
+          <select id="timezoneMode">
+            <option value="utc">UTC</option>
+            <option value="local">Local</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="panel">
+        <h1>Tile</h1>
+        <label>
+          <span>Tile</span>
+          <select id="tileId"></select>
+        </label>
+        <label>
+          <span>Target Path</span>
+          <input id="targetPath" type="text" placeholder="/bot" />
+        </label>
+        <p id="tileHelp" class="hint"></p>
+      </section>
+
+      <section class="panel status-panel">
+        <h1>Status</h1>
+        <p id="statusText" class="status">Connecting…</p>
+        <p class="hint">
+          Settings save automatically. Leave target path empty to use the tile default.
+        </p>
+      </section>
+    </main>
+
+    <script src="monitor-tile.js"></script>
+  </body>
+</html>
