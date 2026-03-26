@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -17,6 +17,19 @@ def _maybe_json(value: Any) -> Any:
         except json.JSONDecodeError:
             return value
     return value
+
+
+def _date_value(value: Any) -> date | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 async def create_weather_merge_tables() -> None:
@@ -120,6 +133,77 @@ async def create_weather_merge_tables() -> None:
             ON weather_merge_position_events (position_id, occurred_at DESC)
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_merge_cycles (
+                id SERIAL PRIMARY KEY,
+                captured_at TIMESTAMPTZ NOT NULL,
+                strategy_name TEXT NOT NULL,
+                dry_run BOOLEAN NOT NULL DEFAULT TRUE,
+                balance_usd NUMERIC(18,6),
+                daily_realized_pnl NUMERIC(18,6),
+                daily_loss NUMERIC(18,6),
+                total_spent_usd NUMERIC(18,6),
+                total_spend_limit_usd NUMERIC(18,6),
+                active_position_count INTEGER NOT NULL DEFAULT 0,
+                active_exposure_usd NUMERIC(18,6),
+                context_count INTEGER NOT NULL DEFAULT 0,
+                market_count INTEGER NOT NULL DEFAULT 0,
+                candidate_count INTEGER NOT NULL DEFAULT 0,
+                near_miss_count INTEGER NOT NULL DEFAULT 0,
+                entry_attempt_count INTEGER NOT NULL DEFAULT 0,
+                stand_down_reason TEXT,
+                top_rejection_reasons JSONB,
+                guard_data JSONB,
+                summary_data JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_merge_cycles_captured
+            ON weather_merge_cycles (captured_at DESC)
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_merge_market_scans (
+                id SERIAL PRIMARY KEY,
+                cycle_id INTEGER NOT NULL REFERENCES weather_merge_cycles(id) ON DELETE CASCADE,
+                captured_at TIMESTAMPTZ NOT NULL,
+                event_id TEXT NOT NULL,
+                event_slug TEXT NOT NULL,
+                market_id TEXT NOT NULL,
+                city TEXT NOT NULL,
+                local_date DATE,
+                bucket_label TEXT NOT NULL,
+                qualifies BOOLEAN NOT NULL DEFAULT FALSE,
+                combined_cost NUMERIC(18,6),
+                combined_mid_cost NUMERIC(18,6),
+                merge_edge NUMERIC(18,6),
+                midpoint_edge NUMERIC(18,6),
+                max_mergeable_size NUMERIC(18,6),
+                inventory_imbalance_ratio NUMERIC(18,6),
+                quote_age_seconds NUMERIC(18,6),
+                yes_bid NUMERIC(18,6),
+                yes_ask NUMERIC(18,6),
+                no_bid NUMERIC(18,6),
+                no_ask NUMERIC(18,6),
+                yes_ask_size NUMERIC(18,6),
+                no_ask_size NUMERIC(18,6),
+                rejection_reasons JSONB,
+                row_data JSONB,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_merge_market_scans_cycle
+            ON weather_merge_market_scans (cycle_id, qualifies, market_id)
+            """
+        )
 
 
 async def insert_weather_merge_position(
@@ -172,7 +256,7 @@ async def insert_weather_merge_position(
             plan["event_id"],
             plan["event_slug"],
             plan["city"],
-            plan.get("local_date"),
+            _date_value(plan.get("local_date")),
             plan["bucket_label"],
             plan.get("question"),
             plan["condition_id"],
@@ -210,6 +294,153 @@ async def attach_bot_trade(position_id: int, bot_trade_id: int) -> None:
             """,
             position_id,
             int(bot_trade_id),
+        )
+
+
+async def insert_weather_merge_cycle(
+    *,
+    captured_at: datetime,
+    strategy_name: str,
+    dry_run: bool,
+    balance_usd: float,
+    daily_realized_pnl: float,
+    daily_loss: float,
+    total_spent_usd: float,
+    total_spend_limit_usd: float | None,
+    active_position_count: int,
+    active_exposure_usd: float,
+    context_count: int,
+    market_count: int,
+    candidate_count: int,
+    near_miss_count: int,
+    entry_attempt_count: int,
+    stand_down_reason: str | None,
+    top_rejection_reasons: list[dict[str, Any]],
+    guard_data: dict[str, Any],
+    summary_data: dict[str, Any],
+) -> int:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO weather_merge_cycles (
+                captured_at,
+                strategy_name,
+                dry_run,
+                balance_usd,
+                daily_realized_pnl,
+                daily_loss,
+                total_spent_usd,
+                total_spend_limit_usd,
+                active_position_count,
+                active_exposure_usd,
+                context_count,
+                market_count,
+                candidate_count,
+                near_miss_count,
+                entry_attempt_count,
+                stand_down_reason,
+                top_rejection_reasons,
+                guard_data,
+                summary_data
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+            RETURNING id
+            """,
+            captured_at,
+            strategy_name,
+            dry_run,
+            Decimal(str(round(balance_usd, 6))),
+            Decimal(str(round(daily_realized_pnl, 6))),
+            Decimal(str(round(daily_loss, 6))),
+            Decimal(str(round(total_spent_usd, 6))),
+            Decimal(str(round(total_spend_limit_usd, 6))) if total_spend_limit_usd is not None else None,
+            int(active_position_count),
+            Decimal(str(round(active_exposure_usd, 6))),
+            int(context_count),
+            int(market_count),
+            int(candidate_count),
+            int(near_miss_count),
+            int(entry_attempt_count),
+            stand_down_reason,
+            json.dumps(top_rejection_reasons or []),
+            json.dumps(guard_data or {}),
+            json.dumps(summary_data or {}),
+        )
+    return int(row["id"])
+
+
+async def insert_weather_merge_market_scans(
+    cycle_id: int,
+    rows: list[dict[str, Any]],
+    *,
+    captured_at: datetime,
+) -> None:
+    if not rows:
+        return
+    pool = get_pool()
+    payload = []
+    for row in rows:
+        payload.append(
+            (
+                int(cycle_id),
+                captured_at,
+                str(row.get("event_id") or ""),
+                str(row.get("event_slug") or ""),
+                str(row.get("market_id") or ""),
+                str(row.get("city") or ""),
+                _date_value(row.get("local_date")),
+                str(row.get("bucket_label") or ""),
+                bool(row.get("qualifies")),
+                Decimal(str(round(float(row.get("combined_cost") or 0.0), 6))) if row.get("combined_cost") is not None else None,
+                Decimal(str(round(float(row.get("combined_mid_cost") or 0.0), 6))) if row.get("combined_mid_cost") is not None else None,
+                Decimal(str(round(float(row.get("merge_edge") or 0.0), 6))) if row.get("merge_edge") is not None else None,
+                Decimal(str(round(float(row.get("midpoint_edge") or 0.0), 6))) if row.get("midpoint_edge") is not None else None,
+                Decimal(str(round(float(row.get("max_mergeable_size") or 0.0), 6))) if row.get("max_mergeable_size") is not None else None,
+                Decimal(str(round(float(row.get("inventory_imbalance_ratio") or 0.0), 6))) if row.get("inventory_imbalance_ratio") is not None else None,
+                Decimal(str(round(float(row.get("quote_age_seconds") or 0.0), 6))) if row.get("quote_age_seconds") is not None else None,
+                Decimal(str(round(float(row.get("yes_bid") or 0.0), 6))) if row.get("yes_bid") is not None else None,
+                Decimal(str(round(float(row.get("yes_ask") or 0.0), 6))) if row.get("yes_ask") is not None else None,
+                Decimal(str(round(float(row.get("no_bid") or 0.0), 6))) if row.get("no_bid") is not None else None,
+                Decimal(str(round(float(row.get("no_ask") or 0.0), 6))) if row.get("no_ask") is not None else None,
+                Decimal(str(round(float(row.get("yes_ask_size") or 0.0), 6))) if row.get("yes_ask_size") is not None else None,
+                Decimal(str(round(float(row.get("no_ask_size") or 0.0), 6))) if row.get("no_ask_size") is not None else None,
+                json.dumps(row.get("rejection_reasons") or []),
+                json.dumps(row, default=str),
+            )
+        )
+    async with pool.acquire() as conn:
+        await conn.executemany(
+            """
+            INSERT INTO weather_merge_market_scans (
+                cycle_id,
+                captured_at,
+                event_id,
+                event_slug,
+                market_id,
+                city,
+                local_date,
+                bucket_label,
+                qualifies,
+                combined_cost,
+                combined_mid_cost,
+                merge_edge,
+                midpoint_edge,
+                max_mergeable_size,
+                inventory_imbalance_ratio,
+                quote_age_seconds,
+                yes_bid,
+                yes_ask,
+                no_bid,
+                no_ask,
+                yes_ask_size,
+                no_ask_size,
+                rejection_reasons,
+                row_data
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+            """,
+            payload,
         )
 
 

@@ -155,6 +155,7 @@ def scan_live_market_report(
         "candidate_count": len(candidates),
         "near_miss_count": len(rejected),
         "candidates": candidates,
+        "cycle_rows": [*candidates, *rejected],
         "near_misses": rejected[: max(0, int(near_miss_limit))],
         "rejection_reason_counts": [
             {"reason": reason, "count": count}

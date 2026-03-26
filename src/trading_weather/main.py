@@ -747,6 +747,35 @@ async def _emit_cycle_telemetry(
     telemetry.last_stand_down_reason = current_stand_down_reason
 
 
+async def _persist_merge_cycle(report: dict[str, Any], *, dry_run: bool) -> None:
+    cycle_id = await weather_db.insert_weather_merge_cycle(
+        captured_at=report["generated_at"],
+        strategy_name=str(report.get("strategy_name") or "weather_merge"),
+        dry_run=dry_run,
+        balance_usd=float(report.get("balance") or 0.0),
+        daily_realized_pnl=float(report.get("daily_realized_pnl") or 0.0),
+        daily_loss=float(report.get("daily_loss") or 0.0),
+        total_spent_usd=float(report.get("total_spent_usd") or 0.0),
+        total_spend_limit_usd=safe_float(report.get("total_spend_limit_usd")),
+        active_position_count=int(report.get("active_positions") or 0),
+        active_exposure_usd=float(report.get("active_exposure_usd") or 0.0),
+        context_count=int(report.get("context_count") or 0),
+        market_count=int(report.get("market_count") or 0),
+        candidate_count=int(report.get("candidate_count") or 0),
+        near_miss_count=int(report.get("near_miss_count") or 0),
+        entry_attempt_count=int(report.get("entry_attempts") or 0),
+        stand_down_reason=str(report.get("stand_down_reason") or "").strip() or None,
+        top_rejection_reasons=list(report.get("top_rejection_reasons") or []),
+        guard_data=report.get("wallet_guard") or {},
+        summary_data=_report_snapshot(report),
+    )
+    await weather_db.insert_weather_merge_market_scans(
+        cycle_id,
+        list(report.get("scan_rows") or []),
+        captured_at=report["generated_at"],
+    )
+
+
 async def _run_wallet_audit(
     client: WalletForensicsClient,
     *,
@@ -2063,6 +2092,7 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
     near_misses = scan_report.get("near_misses") or []
     return {
         "generated_at": generated_at,
+        "strategy_name": runtime.strategy_name,
         "dry_run": dry_run,
         "balance": round(balance, 6),
         "daily_realized_pnl": round(daily_realized_pnl, 6),
@@ -2082,6 +2112,7 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
         "top_near_miss": _candidate_brief(near_misses[0] if near_misses else None),
         "top_rejection_reasons": list(scan_report.get("rejection_reason_counts") or [])[:3],
         "planned_entries": planned_entries[:3],
+        "scan_rows": list(scan_report.get("cycle_rows") or []),
         "wallet_guard": guard_report,
     }
 
@@ -2320,6 +2351,7 @@ async def run(*, config_path: str, dry_run: bool, once: bool, engine: str) -> No
         while True:
             try:
                 report = await _run_cycle(clob, wallet_client, bot_config, dry_run=dry_run)
+                await _persist_merge_cycle(report, dry_run=dry_run)
                 await _emit_cycle_telemetry(report, telemetry)
             except Exception as exc:
                 await _log_event(
