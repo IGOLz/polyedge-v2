@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from shared.db import get_pool
-from weather.config import PILOT_MARKET_TYPE
+from weather.config import LOOKAHEAD_HOURS, PILOT_MARKET_TYPE
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -19,6 +20,58 @@ def _maybe_json(value: Any) -> Any:
         except json.JSONDecodeError:
             return value
     return value
+
+
+def _local_market_close(local_date: date | None, timezone_name: str | None) -> datetime | None:
+    if local_date is None or not timezone_name:
+        return None
+    zone = ZoneInfo(str(timezone_name))
+    return datetime.combine(local_date, datetime.max.time(), tzinfo=zone).astimezone(UTC)
+
+
+def _effective_market_close(local_date: date | None, timezone_name: str | None, ended_at: datetime | None) -> datetime | None:
+    local_close = _local_market_close(local_date, timezone_name)
+    if local_close is None:
+        return ended_at
+    if ended_at is None:
+        return local_close
+    return max(ended_at, local_close)
+
+
+def _eligibility_reason_tokens(reason: Any) -> list[str]:
+    text = str(reason or "").strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split(";") if part.strip()]
+
+
+def _row_effectively_live(row: Any, *, now: datetime) -> bool:
+    effective_close = _effective_market_close(
+        row.get("local_date"),
+        row.get("timezone"),
+        row.get("ended_at"),
+    )
+    if effective_close is None:
+        return True
+    return effective_close > now
+
+
+def _row_effectively_eligible(row: Any, *, now: datetime) -> bool:
+    if bool(row.get("eligible")):
+        return True
+    reasons = _eligibility_reason_tokens(row.get("eligibility_reason"))
+    if not reasons:
+        return False
+    if reasons != [f"outside {LOOKAHEAD_HOURS}h lookahead"]:
+        return False
+    effective_close = _effective_market_close(
+        row.get("local_date"),
+        row.get("timezone"),
+        row.get("ended_at"),
+    )
+    if effective_close is None:
+        return False
+    return now <= effective_close <= now + timedelta(hours=LOOKAHEAD_HOURS)
 
 
 async def fetch_station_rows() -> dict[str, dict[str, Any]]:
@@ -67,6 +120,7 @@ async def fetch_active_weather_contexts(
     eligible_only: bool = True,
     include_ended: bool = False,
 ) -> list[WeatherMarketContext]:
+    now = datetime.now(UTC)
     pool = get_pool()
     async with pool.acquire() as conn:
         where_parts = [
@@ -75,10 +129,6 @@ async def fetch_active_weather_contexts(
             "mo.resolved = FALSE",
         ]
         args: list[Any] = [PILOT_MARKET_TYPE]
-        if eligible_only:
-            where_parts.append("wmc.eligible = TRUE")
-        if not include_ended:
-            where_parts.append("COALESCE(mo.ended_at, wmc.ended_at) > NOW()")
 
         rows = await conn.fetch(
             f"""
@@ -153,8 +203,16 @@ async def fetch_active_weather_contexts(
             *args,
         )
 
-    grouped: dict[str, list[Any]] = defaultdict(list)
+    filtered_rows = []
     for row in rows:
+        if not include_ended and not _row_effectively_live(row, now=now):
+            continue
+        if eligible_only and not _row_effectively_eligible(row, now=now):
+            continue
+        filtered_rows.append(row)
+
+    grouped: dict[str, list[Any]] = defaultdict(list)
+    for row in filtered_rows:
         grouped[str(row["event_id"])].append(row)
 
     contexts: list[WeatherMarketContext] = []

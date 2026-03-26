@@ -58,6 +58,19 @@ class ColdMathWindowCompareTests(unittest.TestCase):
         self.assertEqual(event.timestamp_utc.isoformat(), "2026-03-23T16:53:46.123456+00:00")
         self.assertEqual(event.timestamp_source, "explicit_log")
 
+    def test_parse_bracket_log_line_with_docker_prefix(self):
+        event = _parse_log_line(
+            raw_line="polyedge-trading-weather  | [2026-03-25 22:07:08] INFO     [WEATHER-MERGE] Bot started | mode=LIVE",
+            source_path="docker.log",
+            line_number=2,
+            default_tz=UTC,
+        )
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual(event.timestamp_utc.isoformat(), "2026-03-25T22:07:08+00:00")
+        self.assertIn("mode=LIVE", event.message)
+
     def test_determine_window_uses_first_live_start_line(self):
         entries = [
             _parse_log_line(

@@ -216,6 +216,26 @@ def _market_ended_at(event: dict, market: dict) -> datetime | None:
         return None
 
 
+def _local_market_close(local_date: date | None, timezone_name: str | None) -> datetime | None:
+    if local_date is None or not timezone_name:
+        return None
+    zone = ZoneInfo(timezone_name)
+    return datetime.combine(local_date, datetime.max.time(), tzinfo=zone).astimezone(UTC)
+
+
+def _effective_market_close(
+    local_date: date | None,
+    timezone_name: str | None,
+    ended_at: datetime | None,
+) -> datetime | None:
+    local_close = _local_market_close(local_date, timezone_name)
+    if local_close is None:
+        return ended_at
+    if ended_at is None:
+        return local_close
+    return max(ended_at, local_close)
+
+
 def _event_liquidity(event: dict) -> float:
     direct = _safe_float(event.get("liquidity"))
     if direct is not None:
@@ -233,8 +253,9 @@ def _eligibility_window_ok(
     now: datetime,
 ) -> bool:
     latest_allowed = now + timedelta(hours=LOOKAHEAD_HOURS)
-    if ended_at is not None:
-        return now <= ended_at <= latest_allowed
+    effective_close = _effective_market_close(local_date, timezone_name, ended_at)
+    if effective_close is not None:
+        return now <= effective_close <= latest_allowed
     if local_date is None or not timezone_name:
         return False
     zone_now = now.astimezone(ZoneInfo(timezone_name))

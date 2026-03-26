@@ -115,6 +115,41 @@ class WeatherParserTests(unittest.TestCase):
         self.assertFalse(parsed.eligible)
         self.assertIn("resolution is not whole-degree", parsed.eligibility_reason)
 
+    def test_parse_same_day_market_uses_local_day_close_for_eligibility(self):
+        event = {
+            "id": "evt-3",
+            "slug": "highest-temperature-in-london-on-march-25-2026",
+            "title": "Highest temperature in London on March 25 2026?",
+            "description": (
+                "This market will resolve according to the highest temperature posted on "
+                "Weather Underground for station EGLC. The reported high will be rounded "
+                "to the nearest whole degree Celsius."
+            ),
+            "resolutionSource": "https://www.wunderground.com/history/daily/gb/london/EGLC",
+            "negRisk": True,
+            "liquidity": "25000",
+            "markets": [
+                {
+                    "conditionId": "m-low",
+                    "groupItemTitle": "12°C or below",
+                    "question": "12°C or below?",
+                    "active": True,
+                    "endDate": "2026-03-25T12:00:00Z",
+                }
+            ],
+        }
+
+        parsed = parse_weather_event(
+            event,
+            self.station_rows,
+            now=datetime(2026, 3, 25, 22, 7, tzinfo=UTC),
+        )
+
+        self.assertIsNotNone(parsed)
+        assert parsed is not None
+        self.assertTrue(parsed.eligible)
+        self.assertIsNone(parsed.eligibility_reason)
+
 
 if __name__ == "__main__":
     unittest.main()

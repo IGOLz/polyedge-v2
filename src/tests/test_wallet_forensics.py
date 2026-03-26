@@ -201,6 +201,31 @@ class WalletForensicsFetchersTests(unittest.TestCase):
         self.assertEqual(calls[2][0], "https://data-api.polymarket.com/trades")
         self.assertEqual(calls[2][1]["market"], "market-a")
 
+    def test_fetch_activity_clips_rows_to_requested_timestamp_window(self):
+        client = WalletForensicsClient()
+
+        def fake_get_json(url: str, **kwargs):
+            return [
+                {"timestamp": 5, "transactionHash": "0x05"},
+                {"timestamp": 10, "transactionHash": "0x10"},
+                {"timestamp": 20, "transactionHash": "0x20"},
+                {"timestamp": 30, "transactionHash": "0x30"},
+            ]
+
+        client._get_json = fake_get_json  # type: ignore[method-assign]
+        try:
+            rows = client.fetch_activity("0xwallet", start_ts=10, end_ts=20)
+        finally:
+            client.close()
+
+        self.assertEqual(
+            rows,
+            [
+                {"timestamp": 10, "transactionHash": "0x10"},
+                {"timestamp": 20, "transactionHash": "0x20"},
+            ],
+        )
+
     def test_fetch_prices_history_uses_clob_history_endpoint(self):
         client = WalletForensicsClient()
         calls: list[tuple[str, dict[str, object]]] = []

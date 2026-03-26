@@ -173,7 +173,7 @@ class WalletForensicsClient:
             ):
                 records[row_hash(row)] = row
 
-        rows = list(records.values())
+        rows = _clip_timestamp_rows(list(records.values()), start_ts=start_ts, end_ts=end_ts)
         rows.sort(key=lambda item: (safe_int(item.get("timestamp")) or 0, item.get("transactionHash") or "", row_hash(item)))
         return rows
 
@@ -227,7 +227,7 @@ class WalletForensicsClient:
             for row in market_rows:
                 records[row_hash(row)] = row
 
-        values = list(records.values())
+        values = _clip_timestamp_rows(list(records.values()), start_ts=start_ts, end_ts=end_ts)
         values.sort(key=lambda item: (safe_int(item.get("timestamp")) or 0, item.get("transactionHash") or "", row_hash(item)))
         return values
 
@@ -418,6 +418,28 @@ def collect_time_sliced_pages(
     values = list(seen.values())
     values.sort(key=lambda item: (safe_int(item.get("timestamp")) or 0, item.get("transactionHash") or "", row_hash(item)))
     return values
+
+
+def _clip_timestamp_rows(
+    rows: list[dict[str, Any]],
+    *,
+    start_ts: int | None,
+    end_ts: int | None,
+) -> list[dict[str, Any]]:
+    if start_ts is None and end_ts is None:
+        return rows
+
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        timestamp = safe_int(row.get("timestamp"))
+        if timestamp is None:
+            continue
+        if start_ts is not None and timestamp < start_ts:
+            continue
+        if end_ts is not None and timestamp > end_ts:
+            continue
+        filtered.append(row)
+    return filtered
 
 
 def _collect_market_rows(

@@ -298,21 +298,23 @@ def _parse_log_line(
     line_number: int,
     default_tz: tzinfo,
 ) -> ParsedLogLine | None:
-    bracket_match = BRACKET_LOG_RE.match(raw_line)
+    normalized_line = _normalize_log_line(raw_line)
+
+    bracket_match = BRACKET_LOG_RE.match(normalized_line)
     if bracket_match:
         naive = datetime.strptime(bracket_match.group("ts"), "%Y-%m-%d %H:%M:%S")
         local_dt = naive.replace(tzinfo=default_tz)
         return ParsedLogLine(
             timestamp_utc=local_dt.astimezone(UTC),
             message=bracket_match.group("message").strip(),
-            raw_line=raw_line,
+            raw_line=normalized_line,
             source_path=source_path,
             line_number=line_number,
             raw_timestamp=bracket_match.group("ts"),
             timestamp_source="naive_log",
         )
 
-    iso_match = ISO_PREFIX_RE.match(raw_line)
+    iso_match = ISO_PREFIX_RE.match(normalized_line)
     if iso_match:
         parsed_ts = _parse_iso_timestamp(iso_match.group("ts"))
         if parsed_ts.tzinfo is None:
@@ -320,7 +322,7 @@ def _parse_log_line(
         return ParsedLogLine(
             timestamp_utc=parsed_ts.astimezone(UTC),
             message=iso_match.group("message").strip(),
-            raw_line=raw_line,
+            raw_line=normalized_line,
             source_path=source_path,
             line_number=line_number,
             raw_timestamp=iso_match.group("ts"),
@@ -328,6 +330,20 @@ def _parse_log_line(
         )
 
     return None
+
+
+def _normalize_log_line(raw_line: str) -> str:
+    text = str(raw_line or "").strip()
+    if not text:
+        return text
+    if BRACKET_LOG_RE.match(text) or ISO_PREFIX_RE.match(text):
+        return text
+    bracket_start = text.find("[20")
+    if bracket_start > 0:
+        candidate = text[bracket_start:]
+        if BRACKET_LOG_RE.match(candidate):
+            return candidate
+    return text
 
 
 def _determine_window(*, log_entries: list[ParsedLogLine], window_hours: float) -> dict[str, Any]:
