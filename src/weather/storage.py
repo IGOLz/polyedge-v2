@@ -211,91 +211,7 @@ async def fetch_active_weather_contexts(
             continue
         filtered_rows.append(row)
 
-    grouped: dict[str, list[Any]] = defaultdict(list)
-    for row in filtered_rows:
-        grouped[str(row["event_id"])].append(row)
-
-    contexts: list[WeatherMarketContext] = []
-    for event_rows in grouped.values():
-        first = event_rows[0]
-        markets: list[WeatherBucketMarket] = []
-        for row in event_rows:
-            latest_quote_time = row["up_quote_time"] or row["down_quote_time"]
-            markets.append(
-                WeatherBucketMarket(
-                    market_id=row["market_id"],
-                    event_id=row["event_id"],
-                    event_slug=row["event_slug"],
-                    market_slug=row["market_slug"] or "",
-                    question=row["question"],
-                    city=row["city"],
-                    city_key=row["city_key"],
-                    station_code=row["station_code"],
-                    station_name=row["station_name"],
-                    lat=float(row["lat"]) if row["lat"] is not None else None,
-                    lon=float(row["lon"]) if row["lon"] is not None else None,
-                    timezone=row["timezone"],
-                    local_date=row["local_date"],
-                    unit=row["unit"],
-                    bucket_label=row["bucket_label"],
-                    bucket_low=float(row["bucket_low"]) if row["bucket_low"] is not None else None,
-                    bucket_high=float(row["bucket_high"]) if row["bucket_high"] is not None else None,
-                    bucket_order=int(row["bucket_order"]),
-                    rule_family=row["rule_family"],
-                    resolution_source_url=row["resolution_source_url"],
-                    resolution_precision_scale=int(row["resolution_precision_scale"] or 0),
-                    neg_risk=bool(row["neg_risk"]),
-                    active=bool(row["active"]),
-                    eligible=bool(row["eligible"]),
-                    eligibility_reason=row["eligibility_reason"],
-                    yes_token_id=row["yes_token_id"],
-                    no_token_id=row["no_token_id"],
-                    started_at=row["started_at"],
-                    ended_at=row["ended_at"],
-                    yes_bid=float(row["up_best_bid"]) if row["up_best_bid"] is not None else None,
-                    yes_ask=float(row["up_best_ask"]) if row["up_best_ask"] is not None else None,
-                    yes_mid=float(row["up_mid"]) if row["up_mid"] is not None else None,
-                    yes_bid_size=float(row["up_best_bid_size"]) if row["up_best_bid_size"] is not None else None,
-                    yes_ask_size=float(row["up_best_ask_size"]) if row["up_best_ask_size"] is not None else None,
-                    no_bid=float(row["down_best_bid"]) if row["down_best_bid"] is not None else None,
-                    no_ask=float(row["down_best_ask"]) if row["down_best_ask"] is not None else None,
-                    no_mid=float(row["down_mid"]) if row["down_mid"] is not None else None,
-                    no_bid_size=float(row["down_best_bid_size"]) if row["down_best_bid_size"] is not None else None,
-                    no_ask_size=float(row["down_best_ask_size"]) if row["down_best_ask_size"] is not None else None,
-                    latest_quote_time=latest_quote_time,
-                )
-            )
-
-        local_date = first["local_date"]
-        if local_date is not None:
-            title = f"Highest temperature in {first['city']} on {local_date.isoformat()}"
-        else:
-            title = first["event_slug"].replace("-", " ")
-
-        contexts.append(
-            WeatherMarketContext(
-                event_id=str(first["event_id"]),
-                event_slug=str(first["event_slug"]),
-                title=title,
-                city=str(first["city"]),
-                city_key=str(first["city_key"]),
-                station_code=first["station_code"],
-                station_name=first["station_name"],
-                lat=float(first["lat"]) if first["lat"] is not None else None,
-                lon=float(first["lon"]) if first["lon"] is not None else None,
-                timezone=first["timezone"],
-                local_date=local_date,
-                unit=first["unit"],
-                rule_family=first["rule_family"],
-                resolution_source_url=first["resolution_source_url"],
-                verified_station=bool(first["station_verified"]),
-                observation_provider=first["observation_provider"],
-                forecast_provider=first["forecast_provider"],
-                markets=markets,
-            )
-        )
-
-    return sorted(contexts, key=lambda item: (item.local_date or datetime.now(UTC).date(), item.city))
+    return _build_contexts_from_rows(filtered_rows)
 
 
 async def fetch_recent_forecast_rows(
@@ -415,3 +331,91 @@ async def fetch_quote_near(
             window_seconds,
         )
     return dict(row) if row is not None else None
+
+
+def _build_contexts_from_rows(rows: list[Any]) -> list[WeatherMarketContext]:
+    grouped: dict[str, list[Any]] = defaultdict(list)
+    for row in rows:
+        grouped[str(row["event_id"])].append(row)
+
+    contexts: list[WeatherMarketContext] = []
+    for event_rows in grouped.values():
+        first = event_rows[0]
+        markets: list[WeatherBucketMarket] = []
+        for row in event_rows:
+            latest_quote_time = row["up_quote_time"] or row["down_quote_time"]
+            markets.append(
+                WeatherBucketMarket(
+                    market_id=row["market_id"],
+                    event_id=row["event_id"],
+                    event_slug=row["event_slug"],
+                    market_slug=row["market_slug"] or "",
+                    question=row["question"],
+                    city=row["city"],
+                    city_key=row["city_key"],
+                    station_code=row["station_code"],
+                    station_name=row["station_name"],
+                    lat=float(row["lat"]) if row["lat"] is not None else None,
+                    lon=float(row["lon"]) if row["lon"] is not None else None,
+                    timezone=row["timezone"],
+                    local_date=row["local_date"],
+                    unit=row["unit"],
+                    bucket_label=row["bucket_label"],
+                    bucket_low=float(row["bucket_low"]) if row["bucket_low"] is not None else None,
+                    bucket_high=float(row["bucket_high"]) if row["bucket_high"] is not None else None,
+                    bucket_order=int(row["bucket_order"]),
+                    rule_family=row["rule_family"],
+                    resolution_source_url=row["resolution_source_url"],
+                    resolution_precision_scale=int(row["resolution_precision_scale"] or 0),
+                    neg_risk=bool(row["neg_risk"]),
+                    active=bool(row["active"]),
+                    eligible=bool(row["eligible"]),
+                    eligibility_reason=row["eligibility_reason"],
+                    yes_token_id=row["yes_token_id"],
+                    no_token_id=row["no_token_id"],
+                    started_at=row["started_at"],
+                    ended_at=row["ended_at"],
+                    yes_bid=float(row["up_best_bid"]) if row["up_best_bid"] is not None else None,
+                    yes_ask=float(row["up_best_ask"]) if row["up_best_ask"] is not None else None,
+                    yes_mid=float(row["up_mid"]) if row["up_mid"] is not None else None,
+                    yes_bid_size=float(row["up_best_bid_size"]) if row["up_best_bid_size"] is not None else None,
+                    yes_ask_size=float(row["up_best_ask_size"]) if row["up_best_ask_size"] is not None else None,
+                    no_bid=float(row["down_best_bid"]) if row["down_best_bid"] is not None else None,
+                    no_ask=float(row["down_best_ask"]) if row["down_best_ask"] is not None else None,
+                    no_mid=float(row["down_mid"]) if row["down_mid"] is not None else None,
+                    no_bid_size=float(row["down_best_bid_size"]) if row["down_best_bid_size"] is not None else None,
+                    no_ask_size=float(row["down_best_ask_size"]) if row["down_best_ask_size"] is not None else None,
+                    latest_quote_time=latest_quote_time,
+                )
+            )
+
+        local_date = first["local_date"]
+        if local_date is not None:
+            title = f"Highest temperature in {first['city']} on {local_date.isoformat()}"
+        else:
+            title = first["event_slug"].replace("-", " ")
+
+        contexts.append(
+            WeatherMarketContext(
+                event_id=str(first["event_id"]),
+                event_slug=str(first["event_slug"]),
+                title=title,
+                city=str(first["city"]),
+                city_key=str(first["city_key"]),
+                station_code=first["station_code"],
+                station_name=first["station_name"],
+                lat=float(first["lat"]) if first["lat"] is not None else None,
+                lon=float(first["lon"]) if first["lon"] is not None else None,
+                timezone=first["timezone"],
+                local_date=local_date,
+                unit=first["unit"],
+                rule_family=first["rule_family"],
+                resolution_source_url=first["resolution_source_url"],
+                verified_station=bool(first["station_verified"]),
+                observation_provider=first["observation_provider"],
+                forecast_provider=first["forecast_provider"],
+                markets=markets,
+            )
+        )
+
+    return sorted(contexts, key=lambda item: (item.local_date or datetime.now(UTC).date(), item.city))

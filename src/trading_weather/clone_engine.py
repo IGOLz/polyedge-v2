@@ -485,13 +485,18 @@ def clone_cycle_status_message(summary: dict[str, Any]) -> str:
         f"auth={summary.get('execution_health')} "
         f"market_data={summary.get('market_data_health')} "
         f"quote_coverage={float(summary.get('quote_coverage_ratio') or 0.0):.2f} "
+        f"spent={float(summary.get('total_spent_usd') or 0.0):.2f}/{float(summary.get('total_spend_limit_usd') or 0.0):.2f} "
         f"contexts={int(summary.get('context_count') or 0)} "
         f"markets={int(summary.get('market_count') or 0)} "
         f"candidates={int(summary.get('candidate_count') or 0)} "
         f"sequences={int(summary.get('sequence_count') or 0)} "
         f"active_positions={int(summary.get('active_positions') or 0)} "
+        f"exposure={float(summary.get('active_exposure_usd') or 0.0):.2f} "
         f"entries={int(summary.get('entry_attempts') or 0)}"
     )
+    stand_down_reason = str(summary.get("stand_down_reason") or "").strip()
+    if stand_down_reason:
+        message += f" | stand_down={stand_down_reason}"
     top_candidate = summary.get("top_candidate") or {}
     if top_candidate:
         if top_candidate.get("playbook_key") == "paired_under_par":

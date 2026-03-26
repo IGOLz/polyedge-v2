@@ -12,6 +12,7 @@ from trading_weather.clone_engine import (
     _normalize_buy_target_shares,
     _normalize_pair_target_shares,
     build_clone_runtime,
+    clone_cycle_status_message,
     evaluate_clone_cycle,
     plan_directional_entry,
     preflight_clone_health,
@@ -393,6 +394,31 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(_minimum_buy_target_shares(0.495), 4)
         self.assertEqual(_minimum_pair_target_shares(0.499, 0.501), 10)
         self.assertEqual(_minimum_buy_order_shares(0.99), 2)
+
+    def test_clone_cycle_status_message_includes_spend_and_stand_down(self):
+        message = clone_cycle_status_message(
+            {
+                "execution_allowed": False,
+                "execution_health": "healthy",
+                "market_data_health": "healthy",
+                "quote_coverage_ratio": 0.75,
+                "total_spent_usd": 7.5,
+                "total_spend_limit_usd": 30.0,
+                "context_count": 4,
+                "market_count": 44,
+                "candidate_count": 2,
+                "sequence_count": 5,
+                "active_positions": 1,
+                "active_exposure_usd": 3.25,
+                "entry_attempts": 0,
+                "stand_down_reason": "foreign_wallet_activity_detected",
+                "top_rejection_reasons": [{"reason": "missing_directional_ask", "count": 8}],
+            }
+        )
+
+        self.assertIn("spent=7.50/30.00", message)
+        self.assertIn("exposure=3.25", message)
+        self.assertIn("stand_down=foreign_wallet_activity_detected", message)
 
 
 if __name__ == "__main__":

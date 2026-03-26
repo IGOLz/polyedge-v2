@@ -2119,6 +2119,7 @@ async def _run_cycle(clob, wallet_client: WalletForensicsClient, bot_config: dic
 
 async def _run_clone_cycle(
     clob,
+    wallet_client: WalletForensicsClient,
     bot_config: dict[str, Any],
     *,
     dry_run: bool,
@@ -2171,6 +2172,29 @@ async def _run_clone_cycle(
     active_positions = await get_open_clone_positions()
     await _reconcile_clone_positions(clob, active_positions)
     active_positions = await get_open_clone_positions()
+    active_exposure = _clone_active_exposure_usd(active_positions)
+    tracked_weather_market_ids = {
+        str(position.get("market_id")).strip()
+        for position in active_positions
+        if str(position.get("market_id") or "").strip()
+    }
+    guard_report = await _run_wallet_audit(
+        wallet_client,
+        tracked_weather_market_ids=tracked_weather_market_ids,
+    )
+    total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
+    stand_down_reason: str | None = None
+    if not guard_report.get("ready"):
+        stand_down_reason = str(guard_report.get("reason") or "wallet_audit_error")
+    elif config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
+        stand_down_reason = "total_spend_limit_reached"
+    elif len(active_positions) >= int(runtime.runtime.get("max_concurrent_positions") or 1):
+        stand_down_reason = "capacity_reached"
+    elif active_exposure >= float(runtime.runtime.get("max_total_exposure_usd") or 0.0) > 0.0:
+        stand_down_reason = "capacity_reached"
+    if stand_down_reason is not None:
+        health_state["execution_allowed"] = False
+
     active_market_ids = {str(position.get("market_id") or "") for position in active_positions}
     report = evaluate_clone_cycle(
         contexts=contexts,
@@ -2183,12 +2207,16 @@ async def _run_clone_cycle(
     )
 
     entry_attempts = 0
-    if report["candidates"]:
+    if stand_down_reason is None and report["candidates"]:
         for candidate in report["candidates"]:
             if not (candidate.get("qualifies") and candidate.get("live_eligible")):
                 continue
             active_positions = await get_open_clone_positions()
             active_exposure = _clone_active_exposure_usd(active_positions)
+            total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
+            if config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
+                stand_down_reason = "total_spend_limit_reached"
+                break
             plan = None
             if candidate.get("playbook_key") == "paired_under_par":
                 plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
@@ -2217,6 +2245,15 @@ async def _run_clone_cycle(
         health_state=health_state,
         active_positions=active_positions,
         entry_attempts=entry_attempts,
+    )
+    summary.update(
+        {
+            "stand_down_reason": stand_down_reason,
+            "total_spent_usd": round(total_spent_usd, 6),
+            "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
+            "wallet_guard": guard_report,
+            "active_exposure_usd": round(active_exposure, 6),
+        }
     )
     cycle_id = await insert_clone_cycle(
         captured_at=captured_at,
@@ -2256,20 +2293,31 @@ async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
     raw_config = _load_bot_config(config_path)
     bot_config = normalize_clone_bot_config(raw_config)
     clob = _build_clob_client()
+    wallet_client = WalletForensicsClient()
     telemetry = WeatherCloneTelemetryState(
         summary_interval_seconds=float((bot_config.get("runtime") or {}).get("summary_interval_seconds") or config.DEFAULT_SUMMARY_INTERVAL_SECONDS),
         history_path=config.DEFAULT_CLONE_HISTORY_PATH,
     )
     sequence_state: dict[str, dict[str, Any]] = {}
+    startup = build_startup_telemetry(config_path=config_path, dry_run=dry_run, bot_config=bot_config)
 
     await trading_db.log_event(
         "weather_clone_start",
-        f"[WEATHER-CLONE] Bot started | mode={'DRY RUN' if dry_run else 'LIVE'} | config={config_path}",
+        (
+            "[WEATHER-CLONE] Bot started | "
+            f"mode={'DRY RUN' if dry_run else 'LIVE'} "
+            f"config={config_path} "
+            f"code={startup['code_fingerprint']} "
+            f"cfg={startup['config_fingerprint']} "
+            f"loop={startup['loop_interval_seconds']:.0f}s "
+            f"caps={startup['sequence_budget_usd']:.2f}/{startup['max_total_exposure_usd']:.2f}/{startup['daily_loss_limit_usd']:.2f} "
+            f"spend_cap={startup['total_spend_limit_usd']:.2f} "
+            f"guard={'clean_wallet_required' if startup['require_clean_wallet'] else 'clean_wallet_optional'} "
+            f"lookback={startup['activity_lookback_minutes']}m "
+            f"clone_live_enabled={config.CLONE_LIVE_ENABLED}"
+        ),
         {
-            "dry_run": dry_run,
-            "config_path": config_path,
-            "loop_interval_seconds": float((bot_config.get('runtime') or {}).get("loop_interval_seconds") or config.DEFAULT_LOOP_INTERVAL_SECONDS),
-            "summary_interval_seconds": float((bot_config.get('runtime') or {}).get("summary_interval_seconds") or config.DEFAULT_SUMMARY_INTERVAL_SECONDS),
+            **startup,
             "history_path": str(config.DEFAULT_CLONE_HISTORY_PATH),
             "execution_mode": bot_config.get("execution_mode"),
             "clone_live_enabled": config.CLONE_LIVE_ENABLED,
@@ -2286,6 +2334,7 @@ async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
         try:
             await _run_clone_cycle(
                 clob,
+                wallet_client,
                 bot_config,
                 dry_run=dry_run,
                 telemetry=telemetry,
@@ -2300,6 +2349,7 @@ async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
             )
             log.warning("[WEATHER-CLONE] Cycle failed: %s: %s", type(exc).__name__, exc)
         if once:
+            wallet_client.close()
             return
         loop_interval = float((bot_config.get("runtime") or {}).get("loop_interval_seconds") or config.DEFAULT_LOOP_INTERVAL_SECONDS)
         await asyncio.sleep(loop_interval)

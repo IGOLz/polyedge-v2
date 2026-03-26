@@ -36,8 +36,8 @@ src/
 │   ├── redeemer.py  # On-chain position redemption via Safe
 │   └── utils.py     # Colored logging for trading
 │
-└── trading_weather/ # Dedicated ColdMath-style weather merge bot
-    ├── main.py      # Guarded live loop, audit checks, entry execution
+└── trading_weather/ # Dedicated ColdMath-style weather bot
+    ├── main.py      # Guarded live loop, audit checks, merge/clone execution
     ├── config.py    # Runtime caps + wallet guard configuration
     ├── db.py        # weather_merge_positions + weather_merge_position_events helpers
     ├── safe_ops.py  # Safe approvals, merge, redeem helpers
@@ -68,7 +68,7 @@ streamdeck-plugin/   # Elgato Stream Deck plugin for live monitoring tiles
 | `core-debug` | polyedge-core-debug | Dry-run validation, no DB writes | On-demand |
 | `analysis` | polyedge-analysis | Strategy backtests | On-demand |
 | `trading` | polyedge-trading | Live trading bot | Safe to restart |
-| `trading-weather` | polyedge-trading-weather | Dedicated weather merge bot | Safe to restart |
+| `trading-weather` | polyedge-trading-weather | Dedicated ColdMath-style weather bot | Safe to restart |
 | `dashboard` | polyedge-dashboard | Next.js UI for monitoring + light control actions | Safe to restart |
 
 ## Update Workflow (on LXC)
