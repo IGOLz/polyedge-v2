@@ -14,7 +14,7 @@ from typing import Any
 from analysis.coldmath_window_compare import DEFAULT_LOG_PATH, _derive_weather_trade_metadata, run_window_comparison
 from analysis.db_sync import get_connection
 from analysis.wallet_forensics.db import load_rows
-from analysis.wallet_forensics.utils import ensure_dir
+from analysis.wallet_forensics.utils import ensure_dir, parse_iso_datetime, safe_float, safe_int
 from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.clone_engine import build_clone_runtime, evaluate_clone_cycle
 from trading_weather.strategy import build_runtime_config, scan_live_market_report
@@ -117,7 +117,22 @@ def _normalize_weather_trades(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     normalized: list[dict[str, Any]] = []
     for row in rows:
         merged = dict(row)
+        timestamp_utc = _trade_timestamp_utc(merged)
+        if timestamp_utc is None:
+            continue
+        merged["timestamp_utc"] = timestamp_utc
         derived = _derive_weather_trade_metadata(row)
+        merged["condition_id"] = str(
+            merged.get("condition_id")
+            or merged.get("conditionId")
+            or merged.get("market_id")
+            or merged.get("market")
+            or ""
+        ).strip()
+        if not merged.get("event_slug"):
+            merged["event_slug"] = merged.get("eventSlug") or merged.get("event_slug")
+        if not merged.get("market_slug"):
+            merged["market_slug"] = merged.get("slug") or merged.get("market_slug")
         if not merged.get("city"):
             merged["city"] = derived.get("city")
         if not merged.get("local_date"):
@@ -128,9 +143,37 @@ def _normalize_weather_trades(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             merged["bucket_label"] = _normalize_bucket_label(merged.get("bucket_label"))
         if not merged.get("event_slug") and merged.get("city") and merged.get("local_date"):
             merged["event_slug"] = _event_slug(str(merged["city"]), str(merged["local_date"]))
+        side = str(merged.get("side") or "").strip().lower()
+        merged["side"] = side
+        outcome = str(merged.get("outcome") or "").strip().lower()
+        if outcome in {"up", "yes"}:
+            outcome = "yes"
+        elif outcome in {"down", "no"}:
+            outcome = "no"
+        merged["outcome"] = outcome
+        merged["trade_type"] = "sell" if side == "sell" else "buy"
+        merged["price"] = safe_float(merged.get("price"))
+        merged["size"] = safe_float(merged.get("size") or merged.get("usdcSize"))
         normalized.append(merged)
     normalized.sort(key=lambda item: item["timestamp_utc"])
     return normalized
+
+
+def _trade_timestamp_utc(row: dict[str, Any]) -> datetime | None:
+    existing = row.get("timestamp_utc")
+    if isinstance(existing, datetime):
+        return existing if existing.tzinfo is not None else existing.replace(tzinfo=UTC)
+    if existing:
+        try:
+            parsed = parse_iso_datetime(existing)
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            return parsed
+    timestamp = safe_int(row.get("timestamp"))
+    if timestamp is None:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=UTC)
 
 
 def _event_slug(city: str, local_date: str) -> str:

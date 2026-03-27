@@ -32,6 +32,29 @@ class ColdMathQuoteParityTests(unittest.TestCase):
         )
         self.assertEqual(normalized[0]["bucket_label"], "68-69°F")
 
+    def test_normalize_weather_trades_uses_unix_timestamp_when_timestamp_utc_missing(self):
+        rows = [
+            {
+                "timestamp": int(datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC).timestamp()),
+                "conditionId": "cond-1",
+                "eventSlug": "highest-temperature-in-rome-on-march-25-2026",
+                "slug": "highest-temperature-in-rome-on-march-25-2026-16c",
+                "title": "Will the highest temperature in Rome be 16C on March 25?",
+                "side": "BUY",
+                "outcome": "Yes",
+                "price": "0.05",
+                "size": "100",
+            }
+        ]
+
+        normalized = _normalize_weather_trades(rows)
+
+        self.assertEqual(normalized[0]["timestamp_utc"], datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC))
+        self.assertEqual(normalized[0]["condition_id"], "cond-1")
+        self.assertEqual(normalized[0]["trade_type"], "buy")
+        self.assertEqual(normalized[0]["outcome"], "yes")
+        self.assertEqual(normalized[0]["size"], 100.0)
+
     def test_nearest_quote_row_uses_closest_snapshot_inside_window(self):
         target = datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC)
         series = {
