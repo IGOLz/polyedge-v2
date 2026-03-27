@@ -115,6 +115,28 @@ async def fetch_quote_tracking_assets() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+async def fetch_known_weather_token_ids(market_ids: list[str]) -> dict[str, tuple[str | None, str | None]]:
+    if not market_ids:
+        return {}
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT market_id, yes_token_id, no_token_id
+            FROM weather_market_catalog
+            WHERE market_id = ANY($1::text[])
+            """,
+            market_ids,
+        )
+    return {
+        str(row["market_id"]): (
+            str(row["yes_token_id"]) if row["yes_token_id"] is not None else None,
+            str(row["no_token_id"]) if row["no_token_id"] is not None else None,
+        )
+        for row in rows
+    }
+
+
 async def fetch_active_weather_contexts(
     *,
     eligible_only: bool = True,
