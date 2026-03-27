@@ -55,11 +55,13 @@ from weather.providers import (
 from weather.station_map import seed_station_rows
 from weather.storage import (
     fetch_active_weather_contexts,
+    fetch_known_weather_token_ids,
     fetch_quote_tracking_assets,
     fetch_station_rows,
 )
 
 logger = setup_logger("weather")
+TOKEN_ID_FETCH_CONCURRENCY = 8
 
 
 @dataclass
@@ -135,13 +137,31 @@ async def _hydrate_token_ids(
     http_client: httpx.AsyncClient,
     parsed_event: ParsedWeatherEvent,
 ) -> ParsedWeatherEvent:
-    tasks = [
-        fetch_token_ids_async(http_client, market.market_id)
+    semaphore = asyncio.Semaphore(TOKEN_ID_FETCH_CONCURRENCY)
+
+    async def _fetch_missing(market_id: str) -> tuple[str, tuple[str, str] | None | Exception]:
+        async with semaphore:
+            try:
+                token_ids = await fetch_token_ids_async(http_client, market_id)
+                return market_id, token_ids
+            except Exception as exc:  # pragma: no cover
+                return market_id, exc
+
+    missing_markets = [
+        market
         for market in parsed_event.markets
+        if not str(market.yes_token_id or "").strip() or not str(market.no_token_id or "").strip()
     ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for market, token_ids in zip(parsed_event.markets, results, strict=False):
-        if isinstance(token_ids, Exception) or token_ids is None:
+    tasks = [_fetch_missing(market.market_id) for market in missing_markets]
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+    token_map = {
+        market_id: token_ids
+        for market_id, token_ids in results
+        if not isinstance(token_ids, Exception) and token_ids is not None
+    }
+    for market in parsed_event.markets:
+        token_ids = token_map.get(market.market_id)
+        if token_ids is None:
             continue
         market.yes_token_id, market.no_token_id = token_ids
     return parsed_event
@@ -167,6 +187,19 @@ async def discovery_loop(app_state: AppState, http_client: httpx.AsyncClient) ->
                         continue
                     if result is not None:
                         events.append(result)
+
+                known_token_ids = await fetch_known_weather_token_ids(
+                    [market.market_id for event in events for market in event.markets]
+                )
+                for event in events:
+                    for market in event.markets:
+                        known = known_token_ids.get(market.market_id)
+                        if not known:
+                            continue
+                        if known[0]:
+                            market.yes_token_id = known[0]
+                        if known[1]:
+                            market.no_token_id = known[1]
 
                 hydrated = await asyncio.gather(
                     *[_hydrate_token_ids(http_client, event) for event in events],

@@ -14,11 +14,11 @@ from typing import Any
 from analysis.coldmath_window_compare import DEFAULT_LOG_PATH, _derive_weather_trade_metadata, run_window_comparison
 from analysis.db_sync import get_connection
 from analysis.wallet_forensics.db import load_rows
-from analysis.wallet_forensics.utils import ensure_dir
-from trading_weather.clone_config import normalize_clone_bot_config
+from analysis.wallet_forensics.utils import ensure_dir, parse_iso_datetime, safe_float, safe_int
+from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, normalize_clone_bot_config
 from trading_weather.clone_engine import build_clone_runtime, evaluate_clone_cycle
 from trading_weather.strategy import build_runtime_config, scan_live_market_report
-from weather.models import WeatherBucketMarket, WeatherMarketContext
+from weather.models import WeatherBucketMarket, WeatherMarketContext, complete_neg_risk_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,22 @@ def _normalize_weather_trades(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     normalized: list[dict[str, Any]] = []
     for row in rows:
         merged = dict(row)
+        timestamp_utc = _trade_timestamp_utc(merged)
+        if timestamp_utc is None:
+            continue
+        merged["timestamp_utc"] = timestamp_utc
         derived = _derive_weather_trade_metadata(row)
+        merged["condition_id"] = str(
+            merged.get("condition_id")
+            or merged.get("conditionId")
+            or merged.get("market_id")
+            or merged.get("market")
+            or ""
+        ).strip()
+        if not merged.get("event_slug"):
+            merged["event_slug"] = merged.get("eventSlug") or merged.get("event_slug")
+        if not merged.get("market_slug"):
+            merged["market_slug"] = merged.get("slug") or merged.get("market_slug")
         if not merged.get("city"):
             merged["city"] = derived.get("city")
         if not merged.get("local_date"):
@@ -128,9 +143,37 @@ def _normalize_weather_trades(rows: list[dict[str, Any]]) -> list[dict[str, Any]
             merged["bucket_label"] = _normalize_bucket_label(merged.get("bucket_label"))
         if not merged.get("event_slug") and merged.get("city") and merged.get("local_date"):
             merged["event_slug"] = _event_slug(str(merged["city"]), str(merged["local_date"]))
+        side = str(merged.get("side") or "").strip().lower()
+        merged["side"] = side
+        outcome = str(merged.get("outcome") or "").strip().lower()
+        if outcome in {"up", "yes"}:
+            outcome = "yes"
+        elif outcome in {"down", "no"}:
+            outcome = "no"
+        merged["outcome"] = outcome
+        merged["trade_type"] = "sell" if side == "sell" else "buy"
+        merged["price"] = safe_float(merged.get("price"))
+        merged["size"] = safe_float(merged.get("size") or merged.get("usdcSize"))
         normalized.append(merged)
     normalized.sort(key=lambda item: item["timestamp_utc"])
     return normalized
+
+
+def _trade_timestamp_utc(row: dict[str, Any]) -> datetime | None:
+    existing = row.get("timestamp_utc")
+    if isinstance(existing, datetime):
+        return existing if existing.tzinfo is not None else existing.replace(tzinfo=UTC)
+    if existing:
+        try:
+            parsed = parse_iso_datetime(existing)
+        except Exception:
+            parsed = None
+        if parsed is not None:
+            return parsed
+    timestamp = safe_int(row.get("timestamp"))
+    if timestamp is None:
+        return None
+    return datetime.fromtimestamp(timestamp, tz=UTC)
 
 
 def _event_slug(city: str, local_date: str) -> str:
@@ -441,6 +484,19 @@ def _build_context_for_event(
             quote_window_seconds=quote_window_seconds,
         )
         latest_quote_time = (up or {}).get("time") or (down or {}).get("time")
+        completed_quotes = complete_neg_risk_quotes(
+            neg_risk=bool(row.get("neg_risk")),
+            yes_bid=_float_value((up or {}).get("best_bid")),
+            yes_ask=_float_value((up or {}).get("best_ask")),
+            yes_mid=_float_value((up or {}).get("mid")),
+            yes_bid_size=_float_value((up or {}).get("best_bid_size")),
+            yes_ask_size=_float_value((up or {}).get("best_ask_size")),
+            no_bid=_float_value((down or {}).get("best_bid")),
+            no_ask=_float_value((down or {}).get("best_ask")),
+            no_mid=_float_value((down or {}).get("mid")),
+            no_bid_size=_float_value((down or {}).get("best_bid_size")),
+            no_ask_size=_float_value((down or {}).get("best_ask_size")),
+        )
         markets.append(
             WeatherBucketMarket(
                 market_id=str(row["market_id"]),
@@ -472,16 +528,16 @@ def _build_context_for_event(
                 no_token_id=row.get("no_token_id"),
                 started_at=row.get("started_at"),
                 ended_at=row.get("ended_at"),
-                yes_bid=_float_value((up or {}).get("best_bid")),
-                yes_ask=_float_value((up or {}).get("best_ask")),
-                yes_mid=_float_value((up or {}).get("mid")),
-                yes_bid_size=_float_value((up or {}).get("best_bid_size")),
-                yes_ask_size=_float_value((up or {}).get("best_ask_size")),
-                no_bid=_float_value((down or {}).get("best_bid")),
-                no_ask=_float_value((down or {}).get("best_ask")),
-                no_mid=_float_value((down or {}).get("mid")),
-                no_bid_size=_float_value((down or {}).get("best_bid_size")),
-                no_ask_size=_float_value((down or {}).get("best_ask_size")),
+                yes_bid=completed_quotes["yes_bid"],
+                yes_ask=completed_quotes["yes_ask"],
+                yes_mid=completed_quotes["yes_mid"],
+                yes_bid_size=completed_quotes["yes_bid_size"],
+                yes_ask_size=completed_quotes["yes_ask_size"],
+                no_bid=completed_quotes["no_bid"],
+                no_ask=completed_quotes["no_ask"],
+                no_mid=completed_quotes["no_mid"],
+                no_bid_size=completed_quotes["no_bid_size"],
+                no_ask_size=completed_quotes["no_ask_size"],
                 latest_quote_time=latest_quote_time,
             )
         )
@@ -521,7 +577,9 @@ def _nearest_quote_row(
     rows = series["rows"]
     index = bisect_left(times, captured_at)
     candidates: list[tuple[float, dict[str, Any]]] = []
-    for candidate_index in {index - 1, index}:
+    lower = max(0, index - 6)
+    upper = min(len(times), index + 6)
+    for candidate_index in range(lower, upper):
         if 0 <= candidate_index < len(times):
             row = rows[candidate_index]
             delta = abs((row["time"] - captured_at).total_seconds())
@@ -529,8 +587,52 @@ def _nearest_quote_row(
                 candidates.append((delta, row))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[0])
+    candidates.sort(
+        key=lambda item: (
+            _quote_row_quality_rank(item[1]),
+            _quote_row_spread_penalty(item[1]),
+            item[0],
+            -_quote_row_richness(item[1]),
+        )
+    )
     return candidates[0][1]
+
+
+def _quote_row_quality_rank(row: dict[str, Any]) -> int:
+    best_bid = _float_value(row.get("best_bid"))
+    best_ask = _float_value(row.get("best_ask"))
+    if best_bid is not None and best_ask is not None:
+        return 0
+    if best_ask is not None:
+        return 1
+    if best_bid is not None:
+        return 2
+    if row.get("mid") is not None:
+        return 3
+    return 4
+
+
+def _quote_row_spread_penalty(row: dict[str, Any]) -> float:
+    best_bid = _float_value(row.get("best_bid"))
+    best_ask = _float_value(row.get("best_ask"))
+    if best_bid is None or best_ask is None:
+        return 999.0
+    return round(max(0.0, best_ask - best_bid), 6)
+
+
+def _quote_row_richness(row: dict[str, Any]) -> int:
+    score = 0
+    if row.get("best_bid") is not None:
+        score += 1
+    if row.get("best_ask") is not None:
+        score += 1
+    if row.get("mid") is not None:
+        score += 1
+    if row.get("best_bid_size") is not None:
+        score += 1
+    if row.get("best_ask_size") is not None:
+        score += 1
+    return score
 
 
 def _date_value(value: Any) -> date | None:
@@ -564,7 +666,7 @@ def _row_by_market_id(rows: list[dict[str, Any]], market_id: str) -> dict[str, A
 
 def _match_clone_trade_row(rows: list[dict[str, Any]], *, trade_outcome: str) -> dict[str, Any] | None:
     for row in rows:
-        if bool(row.get("qualifies")) and str(row.get("playbook_key") or "") == "paired_under_par":
+        if bool(row.get("qualifies")) and str(row.get("playbook_key") or "") in PAIR_PLAYBOOK_KEYS:
             return row
     for row in rows:
         if not bool(row.get("qualifies")):
@@ -577,7 +679,7 @@ def _match_clone_trade_row(rows: list[dict[str, Any]], *, trade_outcome: str) ->
 def _clone_reason(rows: list[dict[str, Any]], *, trade_outcome: str) -> str:
     if not rows:
         return "market_not_evaluated"
-    paired = [row for row in rows if str(row.get("playbook_key") or "") == "paired_under_par"]
+    paired = [row for row in rows if str(row.get("playbook_key") or "") in PAIR_PLAYBOOK_KEYS]
     if paired:
         return _first_reason(paired[0]) or "paired_under_par_not_qualified"
     sided = [row for row in rows if str(row.get("side") or "").strip().lower() == trade_outcome]

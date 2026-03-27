@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from shared.db import get_pool
 from weather.config import LOOKAHEAD_HOURS, PILOT_MARKET_TYPE
-from weather.models import WeatherBucketMarket, WeatherMarketContext
+from weather.models import WeatherBucketMarket, WeatherMarketContext, complete_neg_risk_quotes
 
 
 def _maybe_json(value: Any) -> Any:
@@ -113,6 +113,28 @@ async def fetch_quote_tracking_assets() -> list[dict[str, Any]]:
             """
         )
     return [dict(row) for row in rows]
+
+
+async def fetch_known_weather_token_ids(market_ids: list[str]) -> dict[str, tuple[str | None, str | None]]:
+    if not market_ids:
+        return {}
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT market_id, yes_token_id, no_token_id
+            FROM weather_market_catalog
+            WHERE market_id = ANY($1::text[])
+            """,
+            market_ids,
+        )
+    return {
+        str(row["market_id"]): (
+            str(row["yes_token_id"]) if row["yes_token_id"] is not None else None,
+            str(row["no_token_id"]) if row["no_token_id"] is not None else None,
+        )
+        for row in rows
+    }
 
 
 async def fetch_active_weather_contexts(
@@ -344,6 +366,19 @@ def _build_contexts_from_rows(rows: list[Any]) -> list[WeatherMarketContext]:
         markets: list[WeatherBucketMarket] = []
         for row in event_rows:
             latest_quote_time = row["up_quote_time"] or row["down_quote_time"]
+            completed_quotes = complete_neg_risk_quotes(
+                neg_risk=bool(row["neg_risk"]),
+                yes_bid=float(row["up_best_bid"]) if row["up_best_bid"] is not None else None,
+                yes_ask=float(row["up_best_ask"]) if row["up_best_ask"] is not None else None,
+                yes_mid=float(row["up_mid"]) if row["up_mid"] is not None else None,
+                yes_bid_size=float(row["up_best_bid_size"]) if row["up_best_bid_size"] is not None else None,
+                yes_ask_size=float(row["up_best_ask_size"]) if row["up_best_ask_size"] is not None else None,
+                no_bid=float(row["down_best_bid"]) if row["down_best_bid"] is not None else None,
+                no_ask=float(row["down_best_ask"]) if row["down_best_ask"] is not None else None,
+                no_mid=float(row["down_mid"]) if row["down_mid"] is not None else None,
+                no_bid_size=float(row["down_best_bid_size"]) if row["down_best_bid_size"] is not None else None,
+                no_ask_size=float(row["down_best_ask_size"]) if row["down_best_ask_size"] is not None else None,
+            )
             markets.append(
                 WeatherBucketMarket(
                     market_id=row["market_id"],
@@ -375,16 +410,16 @@ def _build_contexts_from_rows(rows: list[Any]) -> list[WeatherMarketContext]:
                     no_token_id=row["no_token_id"],
                     started_at=row["started_at"],
                     ended_at=row["ended_at"],
-                    yes_bid=float(row["up_best_bid"]) if row["up_best_bid"] is not None else None,
-                    yes_ask=float(row["up_best_ask"]) if row["up_best_ask"] is not None else None,
-                    yes_mid=float(row["up_mid"]) if row["up_mid"] is not None else None,
-                    yes_bid_size=float(row["up_best_bid_size"]) if row["up_best_bid_size"] is not None else None,
-                    yes_ask_size=float(row["up_best_ask_size"]) if row["up_best_ask_size"] is not None else None,
-                    no_bid=float(row["down_best_bid"]) if row["down_best_bid"] is not None else None,
-                    no_ask=float(row["down_best_ask"]) if row["down_best_ask"] is not None else None,
-                    no_mid=float(row["down_mid"]) if row["down_mid"] is not None else None,
-                    no_bid_size=float(row["down_best_bid_size"]) if row["down_best_bid_size"] is not None else None,
-                    no_ask_size=float(row["down_best_ask_size"]) if row["down_best_ask_size"] is not None else None,
+                    yes_bid=completed_quotes["yes_bid"],
+                    yes_ask=completed_quotes["yes_ask"],
+                    yes_mid=completed_quotes["yes_mid"],
+                    yes_bid_size=completed_quotes["yes_bid_size"],
+                    yes_ask_size=completed_quotes["yes_ask_size"],
+                    no_bid=completed_quotes["no_bid"],
+                    no_ask=completed_quotes["no_ask"],
+                    no_mid=completed_quotes["no_mid"],
+                    no_bid_size=completed_quotes["no_bid_size"],
+                    no_ask_size=completed_quotes["no_ask_size"],
                     latest_quote_time=latest_quote_time,
                 )
             )

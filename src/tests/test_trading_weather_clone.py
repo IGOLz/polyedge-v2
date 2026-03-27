@@ -15,10 +15,17 @@ from trading_weather.clone_engine import (
     clone_cycle_status_message,
     evaluate_clone_cycle,
     plan_directional_entry,
+    plan_paired_entry,
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
 )
-from trading_weather.main import _minimum_buy_order_shares, _normalize_buy_order_shares, _normalize_order_price
+from trading_weather.main import (
+    _clone_guard_resolution,
+    _minimum_buy_order_shares,
+    _normalize_buy_order_shares,
+    _normalize_order_price,
+    _select_clone_persistence_rows,
+)
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -160,7 +167,10 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(self.config["mode"], "coldmath_weather_clone")
         self.assertEqual(self.config["execution_mode"], "shadow_only")
         self.assertIn("paired_under_par", self.config["playbooks"])
+        self.assertIn("cheap_bucket_accumulation", self.config["playbooks"])
         self.assertTrue(self.config["playbooks"]["tail_bucket_accumulation"]["enabled"])
+        self.assertTrue(self.config["playbooks"]["cheap_bucket_accumulation"]["live_enabled"])
+        self.assertTrue(self.config["playbooks"]["high_prob_bucket_accumulation"]["live_enabled"])
 
     def test_preflight_clone_health_reports_auth_status(self):
         healthy = preflight_clone_health(_HealthyClob(), dry_run=False)
@@ -191,9 +201,10 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(context.markets[0].yes_ask, 0.49)
         self.assertEqual(context.markets[0].no_ask, 0.51)
 
-    def test_evaluate_clone_cycle_detects_paired_tail_and_high_prob_playbooks(self):
+    def test_evaluate_clone_cycle_detects_paired_cheap_tail_and_high_prob_playbooks(self):
         markets = [
             _market("paired", bucket_order=1, yes_ask=0.49, no_ask=0.50),
+            _market("cheap", bucket_order=1, yes_ask=0.04, no_ask=0.96),
             _market("tail", bucket_order=0, yes_ask=0.03, no_ask=0.97),
             _market("high", bucket_order=2, yes_ask=0.97, no_ask=0.03),
         ]
@@ -213,8 +224,38 @@ class TradingWeatherCloneTests(unittest.TestCase):
 
         playbooks = {(row["playbook_key"], row.get("market_id"), row.get("side")) for row in report["candidates"]}
         self.assertIn(("paired_under_par", "paired", None), playbooks)
+        self.assertIn(("cheap_bucket_accumulation", "cheap", "yes"), playbooks)
         self.assertIn(("tail_bucket_accumulation", "tail", "yes"), playbooks)
         self.assertIn(("high_prob_bucket_accumulation", "high", "yes"), playbooks)
+
+    def test_high_prob_playbook_allows_non_dominant_bucket_when_complementary_side_is_cheap(self):
+        markets = [
+            _market("high-a", bucket_order=1, yes_ask=0.96, no_ask=0.04),
+            _market("high-b", bucket_order=2, yes_ask=0.97, no_ask=0.03),
+        ]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=build_clone_runtime(self.config, dry_run=False),
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+
+        candidate = next(
+            row
+            for row in report["candidates"]
+            if row["playbook_key"] == "high_prob_bucket_accumulation"
+            and row["market_id"] == "high-a"
+            and row["side"] == "yes"
+        )
+        self.assertTrue(candidate["qualifies"])
 
     def test_sequence_state_moves_from_watching_to_paired(self):
         sequence_state: dict[str, dict] = {}
@@ -380,6 +421,215 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(plan["sequence_budget_usd"], 5.0)
         self.assertEqual(plan["target_shares"], 250)
 
+    def test_plan_directional_entry_supports_cheap_bucket_playbook(self):
+        markets = [
+            _market("low", bucket_order=0, yes_ask=0.01, no_ask=0.99, yes_ask_size=50.0, no_ask_size=10.0),
+            _market("cheap", bucket_order=1, yes_ask=0.02, no_ask=0.98, yes_ask_size=300.0, no_ask_size=10.0),
+            _market("high", bucket_order=2, yes_ask=0.40, no_ask=0.60, yes_ask_size=50.0, no_ask_size=50.0),
+        ]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=self.runtime,
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+        candidate = next(
+            row
+            for row in report["candidates"]
+            if row["playbook_key"] == "cheap_bucket_accumulation" and row["side"] == "yes"
+        )
+
+        plan = plan_directional_entry(candidate, build_clone_runtime(self.config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["playbook_key"], "cheap_bucket_accumulation")
+        self.assertEqual(plan["sequence_budget_usd"], 3.0)
+        self.assertEqual(plan["target_shares"], 150)
+
+    def test_plan_directional_entry_can_fall_back_when_quote_size_is_missing(self):
+        markets = [
+            _market("tail-low", bucket_order=0, yes_ask=0.01, no_ask=0.99, yes_ask_size=50.0, no_ask_size=10.0),
+            _market("cheap", bucket_order=1, yes_ask=0.02, no_ask=0.98, yes_ask_size=None, no_ask_size=None),
+            _market("tail-high", bucket_order=2, yes_ask=0.40, no_ask=0.60, yes_ask_size=50.0, no_ask_size=50.0),
+        ]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=self.runtime,
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+        candidate = next(
+            row
+            for row in report["candidates"]
+            if row["playbook_key"] == "cheap_bucket_accumulation" and row["side"] == "yes"
+        )
+
+        plan = plan_directional_entry(candidate, build_clone_runtime(self.config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertGreater(plan["target_shares"], 0)
+
+    def test_paired_under_par_clone_signal_does_not_require_size_pair(self):
+        markets = [_market("paired", bucket_order=1, yes_ask=0.49, no_ask=0.50, yes_ask_size=None, no_ask_size=None)]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=build_clone_runtime(self.config, dry_run=False),
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+        candidate = next(row for row in report["candidates"] if row["playbook_key"] == "paired_under_par")
+
+        plan = plan_paired_entry(candidate, build_clone_runtime(self.config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertTrue(candidate["qualifies"])
+        self.assertIsNotNone(plan)
+        self.assertGreater(plan["target_shares"], 0)
+
+    def test_paired_under_par_can_reenter_active_market(self):
+        markets = [_market("paired", bucket_order=1, yes_ask=0.49, no_ask=0.50, yes_ask_size=None, no_ask_size=None)]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=build_clone_runtime(self.config, dry_run=False),
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids={"paired"},
+        )
+
+        candidate = next(row for row in report["cycle_rows"] if row["playbook_key"] == "paired_under_par")
+
+        self.assertTrue(candidate["qualifies"])
+        self.assertNotIn("market_already_active", candidate["rejection_reasons"])
+
+    def test_plan_paired_entry_uses_playbook_budget(self):
+        config = normalize_clone_bot_config(_merge_config())
+        config["playbooks"]["paired_under_par"]["sequence_budget_usd"] = 50.0
+        config["runtime"]["max_total_exposure_usd"] = 50.0
+        candidate = {
+            "playbook_key": "paired_under_par",
+            "market_id": "paired",
+            "event_id": "evt-1",
+            "event_slug": "highest-temperature-in-rome-on-march-24-2026",
+            "city": "Rome",
+            "local_date": date(2026, 3, 24),
+            "bucket_label": "16C",
+            "neg_risk": True,
+            "yes_token_id": "paired-yes",
+            "no_token_id": "paired-no",
+            "yes_ask": 0.972,
+            "no_ask": 0.027,
+            "yes_ask_size": None,
+            "no_ask_size": None,
+            "combined_cost": 0.999,
+            "candidate_score": 0.1,
+            "signal_data": {},
+            "sequence_data": {},
+            "quote_snapshot": {},
+        }
+
+        plan = plan_paired_entry(candidate, build_clone_runtime(config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["sequence_budget_usd"], 50.0)
+        self.assertEqual(plan["target_shares"], 50)
+
+    def test_plan_paired_entry_allows_slightly_above_par_when_threshold_allows_it(self):
+        config = normalize_clone_bot_config(_merge_config())
+        config["playbooks"]["paired_under_par"]["sequence_budget_usd"] = 50.0
+        config["playbooks"]["paired_under_par"]["synthetic_pair_cost_lte"] = 1.02
+        config["runtime"]["max_total_exposure_usd"] = 50.0
+        candidate = {
+            "playbook_key": "paired_under_par",
+            "market_id": "paired",
+            "event_id": "evt-1",
+            "event_slug": "highest-temperature-in-rome-on-march-24-2026",
+            "city": "Rome",
+            "local_date": date(2026, 3, 24),
+            "bucket_label": "16C",
+            "neg_risk": True,
+            "yes_token_id": "paired-yes",
+            "no_token_id": "paired-no",
+            "yes_ask": 0.973,
+            "no_ask": 0.028,
+            "yes_ask_size": None,
+            "no_ask_size": None,
+            "combined_cost": 1.001,
+            "candidate_score": 0.1,
+            "signal_data": {},
+            "sequence_data": {},
+            "quote_snapshot": {},
+        }
+
+        plan = plan_paired_entry(candidate, build_clone_runtime(config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["target_shares"], 40)
+
+    def test_plan_paired_entry_supports_asymmetric_pair_targets(self):
+        config = normalize_clone_bot_config(_merge_config())
+        config["playbooks"]["asymmetric_paired_accumulation"]["enabled"] = True
+        config["playbooks"]["asymmetric_paired_accumulation"]["live_enabled"] = True
+        config["playbooks"]["asymmetric_paired_accumulation"]["sequence_budget_usd"] = 100.0
+        config["runtime"]["max_total_exposure_usd"] = 100.0
+        candidate = {
+            "playbook_key": "asymmetric_paired_accumulation",
+            "market_id": "paired",
+            "event_id": "evt-1",
+            "event_slug": "highest-temperature-in-rome-on-march-24-2026",
+            "city": "Rome",
+            "local_date": date(2026, 3, 24),
+            "bucket_label": "16C",
+            "neg_risk": True,
+            "yes_token_id": "paired-yes",
+            "no_token_id": "paired-no",
+            "yes_ask": 0.05,
+            "no_ask": 0.95,
+            "yes_ask_size": None,
+            "no_ask_size": None,
+            "combined_cost": 1.0,
+            "candidate_score": 0.1,
+            "signal_data": {},
+            "sequence_data": {},
+            "quote_snapshot": {},
+        }
+
+        plan = plan_paired_entry(candidate, build_clone_runtime(config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["target_shares"], 98)
+        self.assertEqual(plan["yes_target_shares"], 120)
+        self.assertEqual(plan["no_target_shares"], 98)
+
     def test_normalize_order_price_preserves_low_tick_prices(self):
         self.assertEqual(_normalize_order_price(0.001), 0.001)
         self.assertEqual(_normalize_order_price(0.002), 0.002)
@@ -419,6 +669,59 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertIn("spent=7.50/30.00", message)
         self.assertIn("exposure=3.25", message)
         self.assertIn("stand_down=foreign_wallet_activity_detected", message)
+
+    def test_clone_cycle_status_message_includes_guard_warning(self):
+        message = clone_cycle_status_message(
+            {
+                "execution_allowed": True,
+                "execution_health": "healthy",
+                "market_data_health": "healthy",
+                "quote_coverage_ratio": 0.8,
+                "total_spent_usd": 0.0,
+                "total_spend_limit_usd": 30.0,
+                "context_count": 4,
+                "market_count": 44,
+                "candidate_count": 2,
+                "sequence_count": 5,
+                "active_positions": 1,
+                "active_exposure_usd": 3.25,
+                "entry_attempts": 0,
+                "guard_warning_reason": "orphaned_weather_inventory_detected",
+            }
+        )
+
+        self.assertIn("guard_warning=orphaned_weather_inventory_detected", message)
+
+    def test_clone_guard_resolution_treats_orphaned_weather_as_warning(self):
+        block_reason, warning_reason = _clone_guard_resolution(
+            {"ready": False, "reason": "orphaned_weather_inventory_detected"}
+        )
+
+        self.assertIsNone(block_reason)
+        self.assertEqual(warning_reason, "orphaned_weather_inventory_detected")
+
+    def test_select_clone_persistence_rows_caps_output(self):
+        report = {
+            "cycle_rows": [
+                {"playbook_key": "cheap_bucket_accumulation", "qualifies": True, "candidate_score": 0.4, "sequence_data": {"sequence_key": "a"}},
+                {"playbook_key": "paired_under_par", "qualifies": True, "candidate_score": 0.6, "sequence_data": {"sequence_key": "b"}},
+                {"playbook_key": "tail_bucket_accumulation", "qualifies": False, "candidate_score": 0.3, "sequence_data": {"sequence_key": "c"}},
+            ]
+        }
+
+        rows, sequences = _select_clone_persistence_rows(
+            report,
+            health_config={
+                "persist_all_market_rows": True,
+                "persist_all_scans": True,
+                "max_persisted_market_rows_per_cycle": 2,
+                "max_persisted_sequences_per_cycle": 1,
+            },
+        )
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["playbook_key"], "paired_under_par")
+        self.assertEqual(len(sequences), 1)
 
 
 if __name__ == "__main__":

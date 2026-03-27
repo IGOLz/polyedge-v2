@@ -117,3 +117,56 @@ class WeatherDecision:
     fair_probabilities: dict[str, float]
     signals: list[Signal] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
+
+
+def complete_neg_risk_quotes(
+    *,
+    neg_risk: bool,
+    yes_bid: float | None,
+    yes_ask: float | None,
+    yes_mid: float | None,
+    yes_bid_size: float | None,
+    yes_ask_size: float | None,
+    no_bid: float | None,
+    no_ask: float | None,
+    no_mid: float | None,
+    no_bid_size: float | None,
+    no_ask_size: float | None,
+) -> dict[str, float | None]:
+    if neg_risk:
+        if yes_bid is None and no_ask is not None:
+            yes_bid = max(0.0, min(1.0, 1.0 - no_ask))
+        if yes_ask is None and no_bid is not None:
+            yes_ask = max(0.0, min(1.0, 1.0 - no_bid))
+        if no_bid is None and yes_ask is not None:
+            no_bid = max(0.0, min(1.0, 1.0 - yes_ask))
+        if no_ask is None and yes_bid is not None:
+            no_ask = max(0.0, min(1.0, 1.0 - yes_bid))
+        if yes_mid is None and no_mid is not None:
+            yes_mid = max(0.0, min(1.0, 1.0 - no_mid))
+        if no_mid is None and yes_mid is not None:
+            no_mid = max(0.0, min(1.0, 1.0 - yes_mid))
+        if yes_bid_size is None and no_ask_size is not None:
+            yes_bid_size = no_ask_size
+        if yes_ask_size is None and no_bid_size is not None:
+            yes_ask_size = no_bid_size
+        if no_bid_size is None and yes_ask_size is not None:
+            no_bid_size = yes_ask_size
+        if no_ask_size is None and yes_bid_size is not None:
+            no_ask_size = yes_bid_size
+    if yes_mid is None and yes_bid is not None and yes_ask is not None:
+        yes_mid = (yes_bid + yes_ask) / 2.0
+    if no_mid is None and no_bid is not None and no_ask is not None:
+        no_mid = (no_bid + no_ask) / 2.0
+    return {
+        "yes_bid": yes_bid,
+        "yes_ask": yes_ask,
+        "yes_mid": yes_mid,
+        "yes_bid_size": yes_bid_size,
+        "yes_ask_size": yes_ask_size,
+        "no_bid": no_bid,
+        "no_ask": no_ask,
+        "no_mid": no_mid,
+        "no_bid_size": no_bid_size,
+        "no_ask_size": no_ask_size,
+    }

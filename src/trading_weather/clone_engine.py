@@ -11,7 +11,7 @@ from typing import Any
 
 from analysis.wallet_forensics.paper_scan import _evaluate_inventory_merge_candidate
 from analysis.wallet_forensics.utils import safe_float
-from trading_weather.clone_config import PLAYBOOK_ORDER, playbook_enabled
+from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, PLAYBOOK_ORDER, playbook_enabled
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -75,6 +75,55 @@ def _minimum_pair_target_shares(yes_price: float, no_price: float) -> int:
     if remainder == 0:
         return minimum
     return minimum + (step - remainder)
+
+
+def _is_pair_playbook(playbook_key: str) -> bool:
+    return playbook_key in PAIR_PLAYBOOK_KEYS
+
+
+def _planned_pair_target_shares(plan: dict[str, Any]) -> int:
+    yes_target = int(plan.get("yes_target_shares") or 0)
+    no_target = int(plan.get("no_target_shares") or 0)
+    if yes_target > 0 and no_target > 0:
+        return min(yes_target, no_target)
+    return int(plan.get("target_shares") or 0)
+
+
+def _pair_side_targets_from_budget(
+    *,
+    yes_price: float,
+    no_price: float,
+    budget: float,
+    yes_ask_size: float | None,
+    no_ask_size: float | None,
+    dominant_leg_budget_fraction: float | None,
+) -> tuple[int, int]:
+    if budget <= 0:
+        return 0, 0
+    if dominant_leg_budget_fraction is None:
+        target_shares = math.floor(budget / (yes_price + no_price))
+        size_cap = min(yes_ask_size, no_ask_size) if yes_ask_size is not None and no_ask_size is not None else None
+        if size_cap is not None:
+            target_shares = min(target_shares, math.floor(size_cap))
+        target_shares = _normalize_pair_target_shares(yes_price, no_price, target_shares)
+        return target_shares, target_shares
+
+    dominant_fraction = min(max(float(dominant_leg_budget_fraction), 0.5), 0.995)
+    dominant_side = "yes" if yes_price >= no_price else "no"
+    dominant_budget = budget * dominant_fraction
+    complement_budget = max(0.0, budget - dominant_budget)
+    yes_budget = dominant_budget if dominant_side == "yes" else complement_budget
+    no_budget = dominant_budget if dominant_side == "no" else complement_budget
+
+    yes_target = _normalize_buy_target_shares(yes_price, math.floor(yes_budget / yes_price))
+    no_target = _normalize_buy_target_shares(no_price, math.floor(no_budget / no_price))
+    if yes_ask_size is not None:
+        yes_target = min(yes_target, math.floor(yes_ask_size))
+        yes_target = _normalize_buy_target_shares(yes_price, yes_target)
+    if no_ask_size is not None:
+        no_target = min(no_target, math.floor(no_ask_size))
+        no_target = _normalize_buy_target_shares(no_price, no_target)
+    return yes_target, no_target
 
 
 def preflight_clone_health(clob, *, dry_run: bool) -> dict[str, Any]:
@@ -209,12 +258,40 @@ def evaluate_clone_cycle(
                 _evaluate_paired_under_par(
                     context=context,
                     market=market,
+                    playbook_key="paired_under_par",
                     playbook=playbooks.get("paired_under_par") or {},
                     runtime=runtime,
                     captured_at=captured_at,
                     health_state=health_state,
                     sequence_state=sequence_state,
                     active_market_ids=active_market_ids,
+                )
+            )
+            rows_for_market.append(
+                _evaluate_paired_under_par(
+                    context=context,
+                    market=market,
+                    playbook_key="asymmetric_paired_accumulation",
+                    playbook=playbooks.get("asymmetric_paired_accumulation") or {},
+                    runtime=runtime,
+                    captured_at=captured_at,
+                    health_state=health_state,
+                    sequence_state=sequence_state,
+                    active_market_ids=active_market_ids,
+                )
+            )
+            rows_for_market.extend(
+                _evaluate_directional_playbook(
+                    context=context,
+                    market=market,
+                    playbook_key="cheap_bucket_accumulation",
+                    playbook=playbooks.get("cheap_bucket_accumulation") or {},
+                    runtime=runtime,
+                    captured_at=captured_at,
+                    health_state=health_state,
+                    sequence_state=sequence_state,
+                    extremes=context_bucket_extremes.get(context.event_id) or {},
+                    directional_ranges=directional_ranges.get(context.event_id) or {},
                 )
             )
             rows_for_market.extend(
@@ -293,48 +370,74 @@ def plan_paired_entry(
     *,
     active_exposure_usd: float,
 ) -> dict[str, Any] | None:
+    playbook_key = str(candidate.get("playbook_key") or "")
     combined_cost = safe_float(candidate.get("combined_cost"))
     yes_ask = safe_float(candidate.get("yes_ask"))
     no_ask = safe_float(candidate.get("no_ask"))
     yes_ask_size = safe_float(candidate.get("yes_ask_size"))
     no_ask_size = safe_float(candidate.get("no_ask_size"))
     if (
-        candidate.get("playbook_key") != "paired_under_par"
+        not _is_pair_playbook(playbook_key)
         or combined_cost is None
         or yes_ask is None
         or no_ask is None
-        or yes_ask_size is None
-        or no_ask_size is None
         or combined_cost <= 0
     ):
         return None
 
+    playbook = ((runtime.config.get("playbooks") or {}).get(playbook_key) or {})
+    playbook_budget = float(playbook.get("sequence_budget_usd") or runtime.runtime.get("sequence_budget_usd") or 0.0)
     budget = max(
         0.0,
         min(
-            float(runtime.runtime.get("sequence_budget_usd") or 0.0),
+            playbook_budget,
             float(runtime.runtime.get("max_total_exposure_usd") or 0.0) - active_exposure_usd,
         ),
     )
     if budget <= 0:
         return None
-    target_shares = min(math.floor(budget / combined_cost), math.floor(min(yes_ask_size, no_ask_size)))
-    target_shares = _normalize_pair_target_shares(yes_ask, no_ask, target_shares)
-    min_target_shares = max(
+    dominant_leg_budget_fraction = None
+    if playbook_key == "asymmetric_paired_accumulation":
+        dominant_leg_budget_fraction = safe_float(playbook.get("dominant_leg_budget_fraction")) or 0.94
+    yes_target_shares, no_target_shares = _pair_side_targets_from_budget(
+        yes_price=yes_ask,
+        no_price=no_ask,
+        budget=budget,
+        yes_ask_size=yes_ask_size,
+        no_ask_size=no_ask_size,
+        dominant_leg_budget_fraction=dominant_leg_budget_fraction,
+    )
+    min_pair_target = max(
         1,
         int(runtime.runtime.get("min_target_shares") or 1),
         _minimum_pair_target_shares(yes_ask, no_ask),
     )
-    if target_shares < min_target_shares:
+    if playbook_key == "asymmetric_paired_accumulation":
+        if yes_target_shares < max(1, _minimum_buy_target_shares(yes_ask)):
+            return None
+        if no_target_shares < max(1, _minimum_buy_target_shares(no_ask)):
+            return None
+    else:
+        if yes_target_shares < min_pair_target or no_target_shares < min_pair_target:
+            return None
+    paired_target_shares = min(yes_target_shares, no_target_shares)
+    if paired_target_shares <= 0:
         return None
-    edge_per_share = 1.0 - combined_cost
-    expected_edge_usd = round(edge_per_share * target_shares, 6)
+    threshold = float(playbook.get("synthetic_pair_cost_lte") or 1.0)
+    edge_per_share = max(0.0, max(1.0, threshold) - combined_cost)
+    expected_edge_usd = round(edge_per_share * paired_target_shares, 6)
     if expected_edge_usd < float(runtime.runtime.get("min_expected_edge_usd") or 0.0):
         return None
-    first_side = "yes" if yes_ask_size <= no_ask_size else "no"
+    yes_notional = round(yes_ask * yes_target_shares, 6)
+    no_notional = round(no_ask * no_target_shares, 6)
+    if yes_notional <= no_notional:
+        first_side = "yes"
+    else:
+        first_side = "no"
     second_side = "no" if first_side == "yes" else "yes"
+    total_target_cost = round(yes_notional + no_notional, 6)
     return {
-        "playbook_key": "paired_under_par",
+        "playbook_key": playbook_key,
         "strategy_name": runtime.strategy_name,
         "market_id": candidate["market_id"],
         "event_id": candidate["event_id"],
@@ -351,7 +454,10 @@ def plan_paired_entry(
         "yes_ask_size": yes_ask_size,
         "no_ask_size": no_ask_size,
         "combined_cost": round(combined_cost, 6),
-        "target_shares": target_shares,
+        "target_shares": paired_target_shares,
+        "yes_target_shares": yes_target_shares,
+        "no_target_shares": no_target_shares,
+        "total_target_cost": total_target_cost,
         "expected_edge_usd": expected_edge_usd,
         "signal_score": safe_float(candidate.get("candidate_score")) or 0.0,
         "sequence_budget_usd": round(budget, 2),
@@ -370,7 +476,7 @@ def plan_directional_entry(
     active_exposure_usd: float,
 ) -> dict[str, Any] | None:
     playbook_key = str(candidate.get("playbook_key") or "")
-    if playbook_key not in {"tail_bucket_accumulation", "high_prob_bucket_accumulation"}:
+    if playbook_key not in {"cheap_bucket_accumulation", "tail_bucket_accumulation", "high_prob_bucket_accumulation"}:
         return None
     side = str(candidate.get("side") or "").lower()
     if side not in {"yes", "no"}:
@@ -384,8 +490,6 @@ def plan_directional_entry(
     available_size = safe_float(
         quote_snapshot.get("yes_ask_size") if side == "yes" else quote_snapshot.get("no_ask_size")
     )
-    if available_size is None or available_size <= 0:
-        return None
 
     playbook = ((runtime.config.get("playbooks") or {}).get(playbook_key) or {})
     playbook_budget = float(playbook.get("sequence_budget_usd") or runtime.runtime.get("sequence_budget_usd") or 0.0)
@@ -394,7 +498,9 @@ def plan_directional_entry(
     if budget <= 0:
         return None
 
-    target_shares = min(math.floor(budget / price), math.floor(available_size))
+    target_shares = math.floor(budget / price)
+    if available_size is not None and available_size > 0:
+        target_shares = min(target_shares, math.floor(available_size))
     target_shares = _normalize_buy_target_shares(price, target_shares)
     min_target_shares = max(
         1,
@@ -405,6 +511,7 @@ def plan_directional_entry(
         return None
 
     profit_take_price = safe_float(playbook.get("profit_take_price"))
+    minimum_hold_seconds = safe_float(playbook.get("minimum_hold_seconds")) or 0.0
     expected_edge_usd = 0.0
     if profit_take_price is not None and profit_take_price > price:
         expected_edge_usd = round((profit_take_price - price) * target_shares, 6)
@@ -435,6 +542,7 @@ def plan_directional_entry(
         "signal_score": safe_float(candidate.get("candidate_score")) or 0.0,
         "sequence_budget_usd": round(budget, 2),
         "profit_take_price": profit_take_price,
+        "minimum_hold_seconds": minimum_hold_seconds,
         "signal_data": candidate.get("signal_data") or {},
         "sequence_data": candidate.get("sequence_data") or {},
         "quote_snapshot": quote_snapshot,
@@ -497,6 +605,9 @@ def clone_cycle_status_message(summary: dict[str, Any]) -> str:
     stand_down_reason = str(summary.get("stand_down_reason") or "").strip()
     if stand_down_reason:
         message += f" | stand_down={stand_down_reason}"
+    guard_warning_reason = str(summary.get("guard_warning_reason") or "").strip()
+    if guard_warning_reason:
+        message += f" | guard_warning={guard_warning_reason}"
     top_candidate = summary.get("top_candidate") or {}
     if top_candidate:
         if top_candidate.get("playbook_key") == "paired_under_par":
@@ -621,6 +732,7 @@ def _evaluate_paired_under_par(
     *,
     context: WeatherMarketContext,
     market: WeatherBucketMarket,
+    playbook_key: str,
     playbook: dict[str, Any],
     runtime: CloneRuntime,
     captured_at: datetime,
@@ -628,35 +740,142 @@ def _evaluate_paired_under_par(
     sequence_state: dict[str, dict[str, Any]],
     active_market_ids: set[str],
 ) -> dict[str, Any]:
-    playbook_key = "paired_under_par"
-    live_rules = {
-        "strategy_name": runtime.strategy_name,
-        "complete_set_cost_lte": safe_float(playbook.get("synthetic_pair_cost_lte")) or 0.995,
-        "max_inventory_imbalance_ratio": safe_float(playbook.get("max_inventory_imbalance_ratio")),
-        "min_matched_size": safe_float(playbook.get("min_mergeable_size")) or 0.0,
-        "max_quote_age_seconds": safe_float(playbook.get("max_quote_age_seconds")) or 120.0,
-        "max_leg_spread": safe_float(playbook.get("max_leg_spread")) or 0.08,
-        "require_full_quote_pair": bool(
-            playbook.get("live_requires_full_quote_pair")
-            if runtime.live_requested
-            else playbook.get("shadow_requires_full_quote_pair")
-        ),
-        "midpoint_confirmation_required": bool(playbook.get("midpoint_confirmation_required", False)),
-    }
-    base = _evaluate_inventory_merge_candidate(
-        context=context,
-        market=market,
-        live_rules=live_rules,
-        captured_at=captured_at,
+    yes_bid = safe_float(market.yes_bid)
+    yes_ask = safe_float(market.yes_ask)
+    no_bid = safe_float(market.no_bid)
+    no_ask = safe_float(market.no_ask)
+    yes_mid = safe_float(market.yes_mid)
+    no_mid = safe_float(market.no_mid)
+    yes_ask_size = safe_float(market.yes_ask_size)
+    no_ask_size = safe_float(market.no_ask_size)
+    combined_cost = (yes_ask + no_ask) if yes_ask is not None and no_ask is not None else None
+    combined_mid_cost = (yes_mid + no_mid) if yes_mid is not None and no_mid is not None else None
+    quote_age_seconds = _quote_age_seconds(market.latest_quote_time, captured_at)
+    max_quote_age_seconds = safe_float(playbook.get("max_quote_age_seconds") or 120.0)
+    require_full_quote_pair = bool(
+        playbook.get("live_requires_full_quote_pair")
+        if runtime.live_requested
+        else playbook.get("shadow_requires_full_quote_pair")
     )
-    if str(base.get("market_id") or "") in active_market_ids:
-        base["qualifies"] = False
-        base["rejection_reasons"] = list(base.get("rejection_reasons") or []) + ["market_already_active"]
+    stale_recovery_tolerance = safe_float(playbook.get("stale_pair_recovery_tolerance")) or 0.03
+    threshold = safe_float(playbook.get("synthetic_pair_cost_lte")) or 0.995
+    effective_threshold = threshold + (stale_recovery_tolerance if bool(playbook.get("allow_stale_pair_recovery", True)) else 0.0)
+    max_mergeable_size = (
+        min(yes_ask_size, no_ask_size)
+        if yes_ask_size is not None and no_ask_size is not None
+        else None
+    )
+    leg_spreads = [
+        spread
+        for spread in (_quote_spread(yes_bid, yes_ask), _quote_spread(no_bid, no_ask))
+        if spread is not None
+    ]
+    max_leg_spread = max(leg_spreads, default=None)
+    rejection_reasons: list[str] = []
+    if yes_ask is None or no_ask is None:
+        rejection_reasons.append("missing_pair_ask")
+    if require_full_quote_pair and any(value is None for value in (yes_bid, yes_ask, no_bid, no_ask)):
+        rejection_reasons.append("missing_full_quote_pair")
+    if quote_age_seconds is None:
+        rejection_reasons.append("missing_quote_time")
+    elif max_quote_age_seconds is not None and quote_age_seconds > max_quote_age_seconds:
+        rejection_reasons.append("stale_quote")
+    if combined_cost is None:
+        rejection_reasons.append("missing_complete_set_cost")
+    elif combined_cost > effective_threshold:
+        rejection_reasons.append("complete_set_cost_above_threshold")
+    if combined_mid_cost is None and bool(playbook.get("midpoint_confirmation_required", False)):
+        rejection_reasons.append("missing_midpoint_confirmation")
+    elif (
+        combined_mid_cost is not None
+        and bool(playbook.get("midpoint_confirmation_required", False))
+        and combined_mid_cost >= 1.0
+        and (combined_cost is None or combined_cost > effective_threshold)
+    ):
+        rejection_reasons.append("no_midpoint_under_par_confirmation")
+    configured_max_leg_spread = safe_float(playbook.get("max_leg_spread")) or 0.08
+    min_leg_price_gte = safe_float(playbook.get("min_leg_price_gte"))
+    max_leg_price_lte = safe_float(playbook.get("max_leg_price_lte"))
+    if configured_max_leg_spread is not None:
+        if max_leg_spread is None:
+            rejection_reasons.append("missing_leg_spread")
+        elif max_leg_spread > configured_max_leg_spread:
+            rejection_reasons.append("wide_leg_spread")
+    leg_prices = [price for price in (yes_ask, no_ask) if price is not None]
+    if leg_prices:
+        min_leg_price = min(leg_prices)
+        max_leg_price = max(leg_prices)
+        if min_leg_price_gte is not None and min(leg_prices) < min_leg_price_gte:
+            rejection_reasons.append("leg_price_below_floor")
+        if max_leg_price_lte is not None and max(leg_prices) > max_leg_price_lte:
+            rejection_reasons.append("leg_price_above_ceiling")
+        if playbook_key == "asymmetric_paired_accumulation":
+            dominant_leg_price_gte = safe_float(playbook.get("dominant_leg_price_gte"))
+            complementary_leg_price_lte = safe_float(playbook.get("complementary_leg_price_lte"))
+            if dominant_leg_price_gte is not None and max(leg_prices) < dominant_leg_price_gte:
+                rejection_reasons.append("leg_price_below_floor")
+            if complementary_leg_price_lte is not None and min(leg_prices) > complementary_leg_price_lte:
+                rejection_reasons.append("leg_price_above_ceiling")
+        else:
+            if max_leg_price >= 0.90 and min_leg_price <= 0.10:
+                rejection_reasons.append("routed_to_asymmetric_pair_playbook")
+    allow_active_market_reentry = bool(playbook.get("allow_active_market_reentry", True))
+    if str(market.market_id or "") in active_market_ids and not allow_active_market_reentry:
+        rejection_reasons.append("market_already_active")
 
-    combined_cost = safe_float(base.get("combined_cost"))
-    merge_edge = safe_float(base.get("merge_edge")) or 0.0
+    qualifies = not rejection_reasons
+    merge_edge = round(1.0 - combined_cost, 6) if combined_cost is not None else None
+    leg_prices = [price for price in (yes_ask, no_ask) if price is not None]
+    min_leg_price = min(leg_prices) if leg_prices else 0.0
+    max_leg_price = max(leg_prices) if leg_prices else 1.0
+    if playbook_key == "asymmetric_paired_accumulation":
+        dominance_multiplier = max(1.0, max_leg_price / max(min_leg_price, 0.001))
+        moderation_multiplier = max(1.0, dominance_multiplier)
+    else:
+        moderation_multiplier = max(1.0, max(0.001, min_leg_price) * max(0.001, 1.0 - max_leg_price) * 10_000.0)
+    candidate_score = round(
+        max(0.0, effective_threshold - (combined_cost or effective_threshold))
+        * max(1.0, max_mergeable_size or 1.0)
+        * moderation_multiplier,
+        6,
+    )
+    base = {
+        "event_id": context.event_id,
+        "event_slug": context.event_slug,
+        "city": context.city,
+        "local_date": context.local_date,
+        "market_id": market.market_id,
+        "market_slug": market.market_slug,
+        "yes_token_id": market.yes_token_id,
+        "no_token_id": market.no_token_id,
+        "neg_risk": bool(market.neg_risk),
+        "bucket_label": market.bucket_label,
+        "question": market.question,
+        "yes_bid": yes_bid,
+        "yes_ask": yes_ask,
+        "yes_mid": yes_mid,
+        "yes_ask_size": yes_ask_size,
+        "no_bid": no_bid,
+        "no_ask": no_ask,
+        "no_mid": no_mid,
+        "no_ask_size": no_ask_size,
+        "combined_cost": combined_cost,
+        "combined_mid_cost": combined_mid_cost,
+        "merge_edge": merge_edge,
+        "midpoint_edge": round(1.0 - combined_mid_cost, 6) if combined_mid_cost is not None else None,
+        "max_mergeable_size": max_mergeable_size,
+        "inventory_imbalance_ratio": None,
+        "yes_spread": _quote_spread(yes_bid, yes_ask),
+        "no_spread": _quote_spread(no_bid, no_ask),
+        "max_leg_spread": max_leg_spread,
+        "quote_age_seconds": quote_age_seconds,
+        "quote_pair_available": all(value is not None for value in (yes_bid, yes_ask, no_bid, no_ask)),
+        "quote_quality_label": "paired_clone_signal" if qualifies else "paired_clone_watch",
+        "latest_quote_time": market.latest_quote_time.isoformat() if market.latest_quote_time else None,
+        "qualifies": qualifies,
+        "rejection_reasons": rejection_reasons,
+    }
     mergeable_size = safe_float(base.get("max_mergeable_size")) or 0.0
-    candidate_score = round(max(0.0, merge_edge) * max(1.0, mergeable_size), 6)
     sequence_key = f"{playbook_key}:{market.market_id}"
     sequence = _update_sequence_state(
         sequence_state=sequence_state,
@@ -675,8 +894,9 @@ def _evaluate_paired_under_par(
             "combined_cost": combined_cost,
             "merge_edge": merge_edge,
             "mergeable_size": mergeable_size,
-            "inventory_imbalance_ratio": base.get("inventory_imbalance_ratio"),
+            "inventory_imbalance_ratio": None,
             "quote_quality_label": base.get("quote_quality_label"),
+            "effective_threshold": effective_threshold,
         },
         state=_paired_sequence_label(base),
         strategy_name=runtime.strategy_name,
@@ -721,6 +941,7 @@ def _evaluate_directional_playbook(
         return rows
     for side in playbook.get("target_sides") or ["yes", "no"]:
         directional_price = safe_float(market.yes_ask if side == "yes" else market.no_ask)
+        complementary_price = safe_float(market.no_ask if side == "yes" else market.yes_ask)
         quote_age_seconds = _quote_age_seconds(market.latest_quote_time, captured_at)
         rejection_reasons: list[str] = []
         if directional_price is None:
@@ -737,18 +958,45 @@ def _evaluate_directional_playbook(
             threshold = safe_float(playbook.get("directional_price_lte"))
             if directional_price is not None and threshold is not None and directional_price > threshold:
                 rejection_reasons.append("directional_price_above_threshold")
+        elif playbook_key == "cheap_bucket_accumulation":
+            if market.bucket_order in {extremes.get("min_order"), extremes.get("max_order")}:
+                rejection_reasons.append("tail_bucket_routed_to_tail_playbook")
+            threshold = safe_float(playbook.get("directional_price_lte"))
+            complementary_threshold = safe_float(playbook.get("complementary_price_gte"))
+            if directional_price is not None and threshold is not None and directional_price > threshold:
+                rejection_reasons.append("directional_price_above_threshold")
+            if complementary_threshold is not None:
+                if complementary_price is None:
+                    rejection_reasons.append("missing_complementary_ask")
+                elif complementary_price < complementary_threshold:
+                    rejection_reasons.append("complementary_price_below_threshold")
         else:
             min_price = safe_float(playbook.get("directional_price_gte"))
             max_price = safe_float(playbook.get("directional_price_lte"))
+            complementary_threshold = safe_float(playbook.get("complementary_price_lte"))
             if directional_price is not None and min_price is not None and directional_price < min_price:
                 rejection_reasons.append("directional_price_below_threshold")
             if directional_price is not None and max_price is not None and directional_price > max_price:
                 rejection_reasons.append("directional_price_above_threshold")
             best_for_side = safe_float((directional_ranges.get(side) or {}).get("max_price"))
-            if directional_price is not None and best_for_side is not None and directional_price + 1e-9 < best_for_side:
+            if (
+                bool(playbook.get("require_dominant_bucket", False))
+                and directional_price is not None
+                and best_for_side is not None
+                and directional_price + 1e-9 < best_for_side
+            ):
                 rejection_reasons.append("not_dominant_bucket")
+            if complementary_threshold is not None:
+                if complementary_price is None:
+                    rejection_reasons.append("missing_complementary_ask")
+                elif complementary_price > complementary_threshold:
+                    rejection_reasons.append("complementary_price_above_threshold")
         qualifies = not rejection_reasons
-        candidate_score = _directional_score(playbook_key=playbook_key, directional_price=directional_price)
+        candidate_score = _directional_score(
+            playbook_key=playbook_key,
+            directional_price=directional_price,
+            complementary_price=complementary_price,
+        )
         sequence_key = f"{playbook_key}:{market.market_id}:{side}"
         sequence = _update_sequence_state(
             sequence_state=sequence_state,
@@ -765,6 +1013,7 @@ def _evaluate_directional_playbook(
             quote_snapshot=_quote_snapshot(market, captured_at=captured_at),
             signal_data={
                 "directional_price": directional_price,
+                "complementary_price": complementary_price,
                 "quote_age_seconds": quote_age_seconds,
                 "bucket_order": market.bucket_order,
                 "min_bucket_order": extremes.get("min_order"),
@@ -791,6 +1040,7 @@ def _evaluate_directional_playbook(
                 "playbook_key": playbook_key,
                 "side": side,
                 "directional_price": directional_price,
+                "complementary_price": complementary_price,
                 "available_size": safe_float(market.yes_ask_size if side == "yes" else market.no_ask_size),
                 "quote_age_seconds": quote_age_seconds,
                 "qualifies": qualifies,
@@ -1073,6 +1323,12 @@ def _quote_age_seconds(latest_quote_time: datetime | None, captured_at: datetime
     return round((captured_at - quote_time).total_seconds(), 6)
 
 
+def _quote_spread(best_bid: float | None, best_ask: float | None) -> float | None:
+    if best_bid is None or best_ask is None:
+        return None
+    return round(max(0.0, float(best_ask) - float(best_bid)), 6)
+
+
 def _bucket_extremes(context: WeatherMarketContext) -> dict[str, Any]:
     orders = [market.bucket_order for market in context.markets]
     if not orders:
@@ -1089,11 +1345,20 @@ def _directional_side_ranges(context: WeatherMarketContext) -> dict[str, Any]:
     }
 
 
-def _directional_score(*, playbook_key: str, directional_price: float | None) -> float:
+def _directional_score(
+    *,
+    playbook_key: str,
+    directional_price: float | None,
+    complementary_price: float | None = None,
+) -> float:
     if directional_price is None:
         return 0.0
     if playbook_key == "tail_bucket_accumulation":
         return round(max(0.0, 0.10 - directional_price), 6)
+    if playbook_key == "cheap_bucket_accumulation":
+        return round(max(0.0, 0.08 - directional_price) + max(0.0, (complementary_price or 0.0) - 0.90), 6)
+    if playbook_key == "high_prob_bucket_accumulation":
+        return round(max(0.0, directional_price - 0.90) + max(0.0, 0.08 - (complementary_price or 1.0)), 6)
     return round(max(0.0, directional_price - 0.90), 6)
 
 
