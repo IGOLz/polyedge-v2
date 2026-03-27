@@ -24,7 +24,7 @@ from analysis.db_sync import get_connection
 from analysis.wallet_forensics.db import load_rows
 from analysis.wallet_forensics.fetchers import WalletForensicsClient
 from analysis.wallet_forensics.utils import ensure_dir, parse_iso_datetime, safe_float
-from trading_weather.clone_config import normalize_clone_bot_config
+from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, normalize_clone_bot_config
 from trading_weather.clone_engine import (
     build_clone_runtime,
     evaluate_clone_cycle,
@@ -70,11 +70,16 @@ MISS_BUCKETS = {
 
 PLAYBOOK_REJECTION_BUCKETS = {
     "paired_under_par": "paired_under_par_rejected",
+    "asymmetric_paired_accumulation": "paired_under_par_rejected",
     "cheap_bucket_accumulation": "cheap_bucket_rejected",
     "high_prob_bucket_accumulation": "high_prob_rejected",
     "tail_bucket_accumulation": "tail_bucket_rejected",
     "inventory_rebalance_and_exit": "closeout_rule_mismatch",
 }
+
+
+def _is_pair_playbook(playbook_key: str) -> bool:
+    return playbook_key in PAIR_PLAYBOOK_KEYS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -581,13 +586,12 @@ def _infer_public_sequence_label(trade_rows: list[dict[str, Any]], context) -> s
     trade_type = str(trade_rows[0].get("trade_type") or "")
     if trade_type == "sell":
         return "inventory_rebalance_and_exit"
-    prices_by_outcome: dict[str, list[float]] = {}
-    for row in trade_rows:
-        outcome = str(row.get("outcome") or "")
-        prices_by_outcome.setdefault(outcome, []).append(safe_float(row.get("price")) or 0.0)
-    if prices_by_outcome.get("yes") and prices_by_outcome.get("no"):
-        pair_cost = min(prices_by_outcome["yes"]) + min(prices_by_outcome["no"])
+    pair_profile = _paired_sequence_profile(trade_rows)
+    if pair_profile is not None:
+        pair_cost = pair_profile["min_yes_price"] + pair_profile["min_no_price"]
         if pair_cost <= 1.01:
+            if pair_profile["dominant_notional_fraction"] >= 0.85:
+                return "asymmetric_paired_accumulation"
             return "paired_under_par"
     if any(_trade_is_tail_bucket(row, context) and (safe_float(row.get("price")) or 1.0) <= 0.10 for row in trade_rows):
         return "tail_bucket_accumulation"
@@ -603,7 +607,7 @@ def _infer_public_trade_playbook(trade_row: dict[str, Any], *, context) -> str:
     if str(trade_row.get("trade_type") or "") == "sell":
         return "inventory_rebalance_and_exit"
     sequence_label = str(trade_row.get("public_playbook") or "")
-    if sequence_label == "paired_under_par":
+    if _is_pair_playbook(sequence_label):
         return sequence_label
     price = safe_float(trade_row.get("price")) or 0.0
     if _trade_is_tail_bucket(trade_row, context) and price <= 0.10:
@@ -613,6 +617,38 @@ def _infer_public_trade_playbook(trade_row: dict[str, Any], *, context) -> str:
     if price >= 0.90:
         return "high_prob_bucket_accumulation"
     return "unsupported_public_behavior"
+
+
+def _paired_sequence_profile(trade_rows: list[dict[str, Any]]) -> dict[str, float] | None:
+    prices_by_outcome: dict[str, list[float]] = {}
+    sizes_by_outcome: dict[str, float] = {"yes": 0.0, "no": 0.0}
+    notionals_by_outcome: dict[str, float] = {"yes": 0.0, "no": 0.0}
+    for row in trade_rows:
+        outcome = str(row.get("outcome") or "")
+        if outcome not in {"yes", "no"}:
+            continue
+        price = safe_float(row.get("price"))
+        size = safe_float(row.get("size"))
+        if price is None or size is None or price <= 0 or size <= 0:
+            continue
+        prices_by_outcome.setdefault(outcome, []).append(price)
+        sizes_by_outcome[outcome] += size
+        notionals_by_outcome[outcome] += price * size
+    if not prices_by_outcome.get("yes") or not prices_by_outcome.get("no"):
+        return None
+    total_notional = notionals_by_outcome["yes"] + notionals_by_outcome["no"]
+    dominant_notional = max(notionals_by_outcome["yes"], notionals_by_outcome["no"])
+    dominant_side = "yes" if notionals_by_outcome["yes"] >= notionals_by_outcome["no"] else "no"
+    return {
+        "min_yes_price": min(prices_by_outcome["yes"]),
+        "min_no_price": min(prices_by_outcome["no"]),
+        "yes_size": sizes_by_outcome["yes"],
+        "no_size": sizes_by_outcome["no"],
+        "yes_notional": notionals_by_outcome["yes"],
+        "no_notional": notionals_by_outcome["no"],
+        "dominant_side": dominant_side,
+        "dominant_notional_fraction": (dominant_notional / total_notional) if total_notional > 0 else 0.0,
+    }
 
 
 def _trade_is_tail_bucket(trade_row: dict[str, Any], context) -> bool:
@@ -650,20 +686,37 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
 
     notional_by_playbook: dict[str, list[float]] = {}
     paired_sequence_notionals: dict[str, float] = {}
+    asymmetric_dominant_fractions: list[float] = []
+    pair_sequence_profiles: dict[str, dict[str, float]] = {}
+    for row in covered_rows:
+        if str(row.get("public_playbook") or "") in PAIR_PLAYBOOK_KEYS:
+            sequence_id = str(row.get("sequence_id") or "")
+            if sequence_id and sequence_id not in pair_sequence_profiles:
+                pair_rows = [
+                    candidate
+                    for candidate in covered_rows
+                    if str(candidate.get("sequence_id") or "") == sequence_id
+                ]
+                profile = _paired_sequence_profile(pair_rows)
+                if profile is not None:
+                    pair_sequence_profiles[sequence_id] = profile
     for row in covered_rows:
         playbook = str(row.get("public_playbook") or "")
         price = safe_float(row.get("price")) or 0.0
         size = safe_float(row.get("size")) or 0.0
         if playbook and price > 0 and size > 0:
             notional_by_playbook.setdefault(playbook, []).append(price * size)
-            if playbook == "paired_under_par":
+            if playbook in PAIR_PLAYBOOK_KEYS:
                 sequence_id = str(row.get("sequence_id") or "")
                 if sequence_id:
                     paired_sequence_notionals[sequence_id] = paired_sequence_notionals.get(sequence_id, 0.0) + (price * size)
+                    profile = pair_sequence_profiles.get(sequence_id)
+                    if playbook == "asymmetric_paired_accumulation" and profile is not None:
+                        asymmetric_dominant_fractions.append(profile["dominant_notional_fraction"])
 
     for playbook_key, playbook in (config.get("playbooks") or {}).items():
         notionals = sorted(notional_by_playbook.get(playbook_key) or [])
-        if playbook_key == "paired_under_par":
+        if playbook_key in PAIR_PLAYBOOK_KEYS:
             sequence_notionals = sorted(value for value in paired_sequence_notionals.values() if value > 0)
             if sequence_notionals:
                 idx = min(len(sequence_notionals) - 1, max(0, int(round((len(sequence_notionals) - 1) * 0.75))))
@@ -678,6 +731,16 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
             playbook["synthetic_pair_cost_lte"] = max(float(playbook.get("synthetic_pair_cost_lte") or 0.995), 1.02)
             playbook["stale_pair_recovery_tolerance"] = max(float(playbook.get("stale_pair_recovery_tolerance") or 0.0), 0.03)
             playbook["midpoint_confirmation_required"] = False
+        if playbook_key == "asymmetric_paired_accumulation":
+            dominant = sorted(value for value in asymmetric_dominant_fractions if 0.5 <= value < 1.0)
+            if dominant:
+                idx = min(len(dominant) - 1, max(0, int(round((len(dominant) - 1) * 0.50))))
+                playbook["dominant_leg_budget_fraction"] = round(dominant[idx], 6)
+            playbook["synthetic_pair_cost_lte"] = max(float(playbook.get("synthetic_pair_cost_lte") or 1.0), 1.02)
+            playbook["dominant_leg_price_gte"] = min(float(playbook.get("dominant_leg_price_gte") or 0.90), 0.90)
+            playbook["complementary_leg_price_lte"] = max(float(playbook.get("complementary_leg_price_lte") or 0.10), 0.10)
+            playbook["midpoint_confirmation_required"] = False
+            playbook["live_enabled"] = True
     return config
 
 
@@ -808,13 +871,20 @@ def _evaluate_trade_time_parity(
 def _match_trade_to_candidate(market_rows: list[dict[str, Any]], trade: dict[str, Any]) -> dict[str, Any] | None:
     trade_type = str(trade.get("trade_type") or "")
     outcome = str(trade.get("outcome") or "")
+    public_playbook = str(trade.get("public_playbook") or "")
     if trade_type == "sell":
         return None
     for row in market_rows:
         if not bool(row.get("qualifies")):
             continue
         playbook_key = str(row.get("playbook_key") or "")
-        if playbook_key == "paired_under_par":
+        if _is_pair_playbook(playbook_key) and playbook_key == public_playbook:
+            return row
+    for row in market_rows:
+        if not bool(row.get("qualifies")):
+            continue
+        playbook_key = str(row.get("playbook_key") or "")
+        if _is_pair_playbook(playbook_key):
             return row
         if str(row.get("side") or "") == outcome:
             return row
@@ -845,8 +915,9 @@ def _default_size_model(clone_config: dict[str, Any]) -> dict[str, Any]:
                 "max_ask_size_fraction": 1.0,
                 "reentry_scale": 1.0,
                 "sequence_budget_usd": float((playbooks.get(key) or {}).get("sequence_budget_usd") or 0.0),
+                "dominant_leg_budget_fraction": float((playbooks.get(key) or {}).get("dominant_leg_budget_fraction") or 0.94),
             }
-            for key in ("paired_under_par", "cheap_bucket_accumulation", "high_prob_bucket_accumulation", "tail_bucket_accumulation")
+            for key in ("paired_under_par", "asymmetric_paired_accumulation", "cheap_bucket_accumulation", "high_prob_bucket_accumulation", "tail_bucket_accumulation")
         },
     }
 
@@ -874,6 +945,9 @@ def _tune_clone_strategy(
         ("playbooks.paired_under_par.synthetic_pair_cost_lte", [0.99, 0.995, 1.0, 1.01, 1.02, 1.03]),
         ("playbooks.paired_under_par.min_leg_price_gte", [0.0, 0.01, 0.02, 0.03]),
         ("playbooks.paired_under_par.max_leg_price_lte", [1.0, 0.99, 0.985, 0.98, 0.975]),
+        ("playbooks.asymmetric_paired_accumulation.synthetic_pair_cost_lte", [0.995, 1.0, 1.01, 1.02, 1.03]),
+        ("playbooks.asymmetric_paired_accumulation.dominant_leg_price_gte", [0.88, 0.90, 0.92, 0.94]),
+        ("playbooks.asymmetric_paired_accumulation.complementary_leg_price_lte", [0.04, 0.06, 0.08, 0.10]),
         ("playbooks.cheap_bucket_accumulation.directional_price_lte", [0.04, 0.06, 0.08, 0.10]),
         ("playbooks.cheap_bucket_accumulation.complementary_price_gte", [0.90, 0.92, 0.94, 0.96]),
         ("playbooks.high_prob_bucket_accumulation.directional_price_gte", [0.90, 0.92, 0.94, 0.96]),
@@ -920,6 +994,8 @@ def _tune_clone_strategy(
     size_grid = [
         ("repeat_entry_cooldown_seconds", [0, 15, 30, 60, 120]),
         ("per_playbook.paired_under_par.sequence_budget_usd", [5.0, 10.0, 25.0, 50.0, 100.0]),
+        ("per_playbook.asymmetric_paired_accumulation.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0, 250.0]),
+        ("per_playbook.asymmetric_paired_accumulation.dominant_leg_budget_fraction", [0.80, 0.85, 0.90, 0.94, 0.97]),
         ("per_playbook.cheap_bucket_accumulation.sequence_budget_usd", [3.0, 5.0, 10.0, 25.0, 50.0]),
         ("per_playbook.high_prob_bucket_accumulation.sequence_budget_usd", [3.0, 5.0, 10.0, 25.0, 50.0]),
         ("per_playbook.tail_bucket_accumulation.sequence_budget_usd", [2.0, 5.0, 10.0, 20.0]),
@@ -965,6 +1041,51 @@ def _tune_clone_strategy(
     )
 
     event_bounds = _event_quote_bounds(catalog_by_event=catalog_by_event, quote_series=quote_series)
+    best_replay_metrics = _run_full_replay(
+        trade_rows=training_rows,
+        clone_config=clone_config,
+        size_model=size_model,
+        catalog_by_event=catalog_by_event,
+        quote_series=quote_series,
+        event_bounds=event_bounds,
+        quote_window_seconds=quote_window_seconds,
+        match_window_seconds=match_window_seconds,
+    )["metrics"]
+    replay_grid = [
+        ("repeat_entry_cooldown_seconds", [0, 5, 10, 15, 30, 60]),
+        ("per_playbook.asymmetric_paired_accumulation.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0, 250.0, 425.0]),
+        ("per_playbook.asymmetric_paired_accumulation.reentry_scale", [1.0, 1.25, 1.5, 2.0]),
+        ("per_playbook.asymmetric_paired_accumulation.dominant_leg_budget_fraction", [0.85, 0.90, 0.92, 0.94, 0.97]),
+    ]
+    for _ in range(2):
+        improved = False
+        for path, values in replay_grid:
+            for value in values:
+                candidate_size = deepcopy(size_model)
+                _set_nested_value(candidate_size, path, value)
+                metrics = _run_full_replay(
+                    trade_rows=training_rows,
+                    clone_config=clone_config,
+                    size_model=candidate_size,
+                    catalog_by_event=catalog_by_event,
+                    quote_series=quote_series,
+                    event_bounds=event_bounds,
+                    quote_window_seconds=quote_window_seconds,
+                    match_window_seconds=match_window_seconds,
+                )["metrics"]
+                if _parity_score(metrics) > _parity_score(best_replay_metrics):
+                    size_model = candidate_size
+                    best_replay_metrics = metrics
+                    improved = True
+        if not improved:
+            break
+    logger.info(
+        "Replay tuning complete: match_rate=%.4f playbook_rate=%.4f size_error=%.4f",
+        float(best_replay_metrics.get("covered_trade_match_rate_condition_side") or 0.0),
+        float(best_replay_metrics.get("covered_trade_match_rate_playbook") or 0.0),
+        float(best_replay_metrics.get("median_size_error_ratio") or 0.0),
+    )
+
     training_metrics = _run_full_replay(
         trade_rows=training_rows,
         clone_config=clone_config,
@@ -1063,7 +1184,7 @@ def _evaluate_size_fit(
         matched_condition_side += 1
         if str(candidate.get("playbook_key") or "") == public_playbook:
             matched_playbook += 1
-        if str(candidate.get("playbook_key") or "") == "paired_under_par":
+        if _is_pair_playbook(str(candidate.get("playbook_key") or "")):
             plan = plan_paired_entry(candidate, runtime, active_exposure_usd=0.0)
         else:
             plan = plan_directional_entry(candidate, runtime, active_exposure_usd=0.0)
@@ -1074,11 +1195,11 @@ def _evaluate_size_fit(
         if adjusted is None:
             size_errors.append(1.0)
             continue
-        simulated_size = safe_float(adjusted.get("target_shares")) or 0.0
+        simulated_size = _planned_trade_size_for_outcome(adjusted, str(trade.get("outcome") or ""))
         public_size = safe_float(trade.get("size")) or 0.0
         if public_size > 0:
             size_errors.append(abs(simulated_size - public_size) / public_size)
-        outcome_key = "paired" if str(candidate.get("playbook_key") or "") == "paired_under_par" else str(trade.get("outcome") or "")
+        outcome_key = "paired" if _is_pair_playbook(str(candidate.get("playbook_key") or "")) else str(trade.get("outcome") or "")
         entry_key = (str(trade.get("condition_id") or ""), outcome_key, str(candidate.get("playbook_key") or ""))
         entry_counts[entry_key] = entry_counts.get(entry_key, 0) + 1
     covered_count = len(trade_rows)
@@ -1200,7 +1321,7 @@ def _run_full_replay(
             if total_spend_limit > 0 and spent_usd >= total_spend_limit:
                 blocked_candidates.append({**_candidate_brief(candidate), "timestamp_utc": captured_at, "block_reason": "exposure_or_spend_cap_blocked"})
                 continue
-            if str(candidate.get("playbook_key") or "") == "paired_under_par":
+            if _is_pair_playbook(str(candidate.get("playbook_key") or "")):
                 plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
             else:
                 plan = plan_directional_entry(candidate, runtime, active_exposure_usd=active_exposure)
@@ -1288,6 +1409,51 @@ def _reentry_cooldown_blocked(*, replay_trades: list[dict[str, Any]], cooldown_k
     return False
 
 
+def _pair_targets_from_budget(
+    *,
+    yes_price: float,
+    no_price: float,
+    yes_ask_size: float | None,
+    no_ask_size: float | None,
+    sequence_budget: float,
+    max_fraction: float,
+    reentry_scale: float,
+    dominant_leg_budget_fraction: float | None,
+) -> tuple[int, int]:
+    if sequence_budget <= 0:
+        return 0, 0
+    effective_budget = max(0.0, sequence_budget * reentry_scale)
+    if dominant_leg_budget_fraction is None:
+        target_shares = floor(effective_budget / (yes_price + no_price))
+        size_cap = min(yes_ask_size, no_ask_size) if yes_ask_size is not None and no_ask_size is not None else None
+        if size_cap is not None:
+            target_shares = min(target_shares, floor(size_cap * max_fraction))
+        target_shares = target_shares - (target_shares % 1)
+        return target_shares, target_shares
+
+    dominant_fraction = min(max(float(dominant_leg_budget_fraction), 0.5), 0.995)
+    dominant_side = "yes" if yes_price >= no_price else "no"
+    yes_budget = effective_budget * (dominant_fraction if dominant_side == "yes" else (1.0 - dominant_fraction))
+    no_budget = effective_budget * (dominant_fraction if dominant_side == "no" else (1.0 - dominant_fraction))
+
+    yes_target = floor(yes_budget / yes_price)
+    no_target = floor(no_budget / no_price)
+    if yes_ask_size is not None:
+        yes_target = min(yes_target, floor(yes_ask_size * max_fraction))
+    if no_ask_size is not None:
+        no_target = min(no_target, floor(no_ask_size * max_fraction))
+    return yes_target, no_target
+
+
+def _planned_trade_size_for_outcome(plan: dict[str, Any], outcome: str) -> float:
+    if _is_pair_playbook(str(plan.get("playbook_key") or "")):
+        if outcome == "yes":
+            return safe_float(plan.get("yes_target_shares")) or safe_float(plan.get("target_shares")) or 0.0
+        if outcome == "no":
+            return safe_float(plan.get("no_target_shares")) or safe_float(plan.get("target_shares")) or 0.0
+    return safe_float(plan.get("target_shares")) or 0.0
+
+
 def _apply_size_model(
     plan: dict[str, Any],
     *,
@@ -1300,10 +1466,9 @@ def _apply_size_model(
     sequence_budget = safe_float(settings.get("sequence_budget_usd")) or safe_float(plan.get("sequence_budget_usd")) or 0.0
     max_fraction = safe_float(settings.get("max_ask_size_fraction")) or 1.0
     reentry_scale = safe_float(settings.get("reentry_scale")) or 1.0
-    if playbook_key == "paired_under_par":
+    if _is_pair_playbook(playbook_key):
         yes_size = safe_float(candidate.get("yes_ask_size"))
         no_size = safe_float(candidate.get("no_ask_size"))
-        available_size = min(yes_size, no_size) if yes_size is not None and no_size is not None else None
         cost_per_share = safe_float(plan.get("combined_cost")) or 0.0
         entry_key = (str(plan.get("condition_id") or ""), "paired", playbook_key)
     else:
@@ -1315,19 +1480,49 @@ def _apply_size_model(
     if cost_per_share <= 0:
         return None
     repeat_count = entry_counts.get(entry_key, 0)
-    target_shares = int(plan.get("target_shares") or 0)
-    target_shares = floor(target_shares * (reentry_scale ** repeat_count))
-    if available_size is not None and available_size > 0:
-        target_shares = min(target_shares, floor(available_size * max_fraction))
-    target_shares = min(target_shares, floor(sequence_budget / cost_per_share)) if sequence_budget > 0 else target_shares
-    if target_shares <= 0:
-        return None
     adjusted = dict(plan)
-    adjusted["target_shares"] = target_shares
     adjusted["sequence_budget_usd"] = sequence_budget
-    if playbook_key == "paired_under_par":
-        adjusted["expected_edge_usd"] = round((1.0 - cost_per_share) * target_shares, 6)
+    if _is_pair_playbook(playbook_key):
+        yes_price = safe_float(plan.get("yes_price"))
+        no_price = safe_float(plan.get("no_price"))
+        if yes_price is None:
+            yes_price = safe_float(candidate.get("yes_ask"))
+        if no_price is None:
+            no_price = safe_float(candidate.get("no_ask"))
+        yes_price = yes_price or 0.0
+        no_price = no_price or 0.0
+        if yes_price <= 0 or no_price <= 0:
+            return None
+        dominant_fraction = safe_float(settings.get("dominant_leg_budget_fraction"))
+        if playbook_key == "asymmetric_paired_accumulation" and dominant_fraction is None:
+            dominant_fraction = safe_float(plan.get("dominant_leg_budget_fraction")) or 0.94
+        yes_target_shares, no_target_shares = _pair_targets_from_budget(
+            yes_price=yes_price,
+            no_price=no_price,
+            yes_ask_size=yes_size,
+            no_ask_size=no_size,
+            sequence_budget=sequence_budget,
+            max_fraction=max_fraction,
+            reentry_scale=reentry_scale ** repeat_count,
+            dominant_leg_budget_fraction=dominant_fraction if playbook_key == "asymmetric_paired_accumulation" else None,
+        )
+        paired_target_shares = min(yes_target_shares, no_target_shares)
+        if paired_target_shares <= 0:
+            return None
+        adjusted["yes_target_shares"] = yes_target_shares
+        adjusted["no_target_shares"] = no_target_shares
+        adjusted["target_shares"] = paired_target_shares
+        adjusted["total_target_cost"] = round((yes_target_shares * yes_price) + (no_target_shares * no_price), 6)
+        adjusted["expected_edge_usd"] = round((1.0 - cost_per_share) * paired_target_shares, 6)
     else:
+        target_shares = int(plan.get("target_shares") or 0)
+        target_shares = floor(target_shares * (reentry_scale ** repeat_count))
+        if available_size is not None and available_size > 0:
+            target_shares = min(target_shares, floor(available_size * max_fraction))
+        target_shares = min(target_shares, floor(sequence_budget / cost_per_share)) if sequence_budget > 0 else target_shares
+        if target_shares <= 0:
+            return None
+        adjusted["target_shares"] = target_shares
         profit_take = safe_float(plan.get("profit_take_price"))
         adjusted["expected_edge_usd"] = round(max(0.0, (profit_take or cost_per_share) - cost_per_share) * target_shares, 6)
     return adjusted
@@ -1338,9 +1533,11 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
     target_shares = int(plan.get("target_shares") or 0)
     if target_shares <= 0:
         return [], None
-    if playbook_key == "paired_under_par":
+    if _is_pair_playbook(playbook_key):
         yes_price = safe_float(plan.get("yes_price")) or 0.0
         no_price = safe_float(plan.get("no_price")) or 0.0
+        yes_target_shares = int(plan.get("yes_target_shares") or target_shares)
+        no_target_shares = int(plan.get("no_target_shares") or target_shares)
         if yes_price <= 0 or no_price <= 0:
             return [], None
         rows = [
@@ -1354,7 +1551,7 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
                 playbook_key=playbook_key,
                 trade_type="buy",
                 outcome="yes",
-                size=target_shares,
+                size=yes_target_shares,
                 price=yes_price,
             ),
             _replay_trade_row(
@@ -1367,7 +1564,7 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
                 playbook_key=playbook_key,
                 trade_type="buy",
                 outcome="no",
-                size=target_shares,
+                size=no_target_shares,
                 price=no_price,
             ),
         ]
@@ -1382,7 +1579,7 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
             "status": "open_paired",
             "opened_at": captured_at,
             "closed_at": None,
-            "total_entry_cost": round((yes_price + no_price) * target_shares, 6),
+            "total_entry_cost": round((yes_price * yes_target_shares) + (no_price * no_target_shares), 6),
         }
         return rows, position
     side = str(plan.get("side") or "")

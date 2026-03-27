@@ -11,7 +11,7 @@ from typing import Any
 
 from analysis.wallet_forensics.paper_scan import _evaluate_inventory_merge_candidate
 from analysis.wallet_forensics.utils import safe_float
-from trading_weather.clone_config import PLAYBOOK_ORDER, playbook_enabled
+from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, PLAYBOOK_ORDER, playbook_enabled
 from weather.models import WeatherBucketMarket, WeatherMarketContext
 
 
@@ -75,6 +75,55 @@ def _minimum_pair_target_shares(yes_price: float, no_price: float) -> int:
     if remainder == 0:
         return minimum
     return minimum + (step - remainder)
+
+
+def _is_pair_playbook(playbook_key: str) -> bool:
+    return playbook_key in PAIR_PLAYBOOK_KEYS
+
+
+def _planned_pair_target_shares(plan: dict[str, Any]) -> int:
+    yes_target = int(plan.get("yes_target_shares") or 0)
+    no_target = int(plan.get("no_target_shares") or 0)
+    if yes_target > 0 and no_target > 0:
+        return min(yes_target, no_target)
+    return int(plan.get("target_shares") or 0)
+
+
+def _pair_side_targets_from_budget(
+    *,
+    yes_price: float,
+    no_price: float,
+    budget: float,
+    yes_ask_size: float | None,
+    no_ask_size: float | None,
+    dominant_leg_budget_fraction: float | None,
+) -> tuple[int, int]:
+    if budget <= 0:
+        return 0, 0
+    if dominant_leg_budget_fraction is None:
+        target_shares = math.floor(budget / (yes_price + no_price))
+        size_cap = min(yes_ask_size, no_ask_size) if yes_ask_size is not None and no_ask_size is not None else None
+        if size_cap is not None:
+            target_shares = min(target_shares, math.floor(size_cap))
+        target_shares = _normalize_pair_target_shares(yes_price, no_price, target_shares)
+        return target_shares, target_shares
+
+    dominant_fraction = min(max(float(dominant_leg_budget_fraction), 0.5), 0.995)
+    dominant_side = "yes" if yes_price >= no_price else "no"
+    dominant_budget = budget * dominant_fraction
+    complement_budget = max(0.0, budget - dominant_budget)
+    yes_budget = dominant_budget if dominant_side == "yes" else complement_budget
+    no_budget = dominant_budget if dominant_side == "no" else complement_budget
+
+    yes_target = _normalize_buy_target_shares(yes_price, math.floor(yes_budget / yes_price))
+    no_target = _normalize_buy_target_shares(no_price, math.floor(no_budget / no_price))
+    if yes_ask_size is not None:
+        yes_target = min(yes_target, math.floor(yes_ask_size))
+        yes_target = _normalize_buy_target_shares(yes_price, yes_target)
+    if no_ask_size is not None:
+        no_target = min(no_target, math.floor(no_ask_size))
+        no_target = _normalize_buy_target_shares(no_price, no_target)
+    return yes_target, no_target
 
 
 def preflight_clone_health(clob, *, dry_run: bool) -> dict[str, Any]:
@@ -209,7 +258,21 @@ def evaluate_clone_cycle(
                 _evaluate_paired_under_par(
                     context=context,
                     market=market,
+                    playbook_key="paired_under_par",
                     playbook=playbooks.get("paired_under_par") or {},
+                    runtime=runtime,
+                    captured_at=captured_at,
+                    health_state=health_state,
+                    sequence_state=sequence_state,
+                    active_market_ids=active_market_ids,
+                )
+            )
+            rows_for_market.append(
+                _evaluate_paired_under_par(
+                    context=context,
+                    market=market,
+                    playbook_key="asymmetric_paired_accumulation",
+                    playbook=playbooks.get("asymmetric_paired_accumulation") or {},
                     runtime=runtime,
                     captured_at=captured_at,
                     health_state=health_state,
@@ -307,13 +370,14 @@ def plan_paired_entry(
     *,
     active_exposure_usd: float,
 ) -> dict[str, Any] | None:
+    playbook_key = str(candidate.get("playbook_key") or "")
     combined_cost = safe_float(candidate.get("combined_cost"))
     yes_ask = safe_float(candidate.get("yes_ask"))
     no_ask = safe_float(candidate.get("no_ask"))
     yes_ask_size = safe_float(candidate.get("yes_ask_size"))
     no_ask_size = safe_float(candidate.get("no_ask_size"))
     if (
-        candidate.get("playbook_key") != "paired_under_par"
+        not _is_pair_playbook(playbook_key)
         or combined_cost is None
         or yes_ask is None
         or no_ask is None
@@ -321,7 +385,7 @@ def plan_paired_entry(
     ):
         return None
 
-    playbook = ((runtime.config.get("playbooks") or {}).get("paired_under_par") or {})
+    playbook = ((runtime.config.get("playbooks") or {}).get(playbook_key) or {})
     playbook_budget = float(playbook.get("sequence_budget_usd") or runtime.runtime.get("sequence_budget_usd") or 0.0)
     budget = max(
         0.0,
@@ -332,34 +396,48 @@ def plan_paired_entry(
     )
     if budget <= 0:
         return None
-    size_cap = min(yes_ask_size, no_ask_size) if yes_ask_size is not None and no_ask_size is not None else None
-    target_shares = math.floor(budget / combined_cost)
-    if size_cap is not None:
-        target_shares = min(target_shares, math.floor(size_cap))
-    target_shares = _normalize_pair_target_shares(yes_ask, no_ask, target_shares)
-    min_target_shares = max(
+    dominant_leg_budget_fraction = None
+    if playbook_key == "asymmetric_paired_accumulation":
+        dominant_leg_budget_fraction = safe_float(playbook.get("dominant_leg_budget_fraction")) or 0.94
+    yes_target_shares, no_target_shares = _pair_side_targets_from_budget(
+        yes_price=yes_ask,
+        no_price=no_ask,
+        budget=budget,
+        yes_ask_size=yes_ask_size,
+        no_ask_size=no_ask_size,
+        dominant_leg_budget_fraction=dominant_leg_budget_fraction,
+    )
+    min_pair_target = max(
         1,
         int(runtime.runtime.get("min_target_shares") or 1),
         _minimum_pair_target_shares(yes_ask, no_ask),
     )
-    if target_shares < min_target_shares:
+    if playbook_key == "asymmetric_paired_accumulation":
+        if yes_target_shares < max(1, _minimum_buy_target_shares(yes_ask)):
+            return None
+        if no_target_shares < max(1, _minimum_buy_target_shares(no_ask)):
+            return None
+    else:
+        if yes_target_shares < min_pair_target or no_target_shares < min_pair_target:
+            return None
+    paired_target_shares = min(yes_target_shares, no_target_shares)
+    if paired_target_shares <= 0:
         return None
     threshold = float(playbook.get("synthetic_pair_cost_lte") or 1.0)
     edge_per_share = max(0.0, max(1.0, threshold) - combined_cost)
-    expected_edge_usd = round(edge_per_share * target_shares, 6)
+    expected_edge_usd = round(edge_per_share * paired_target_shares, 6)
     if expected_edge_usd < float(runtime.runtime.get("min_expected_edge_usd") or 0.0):
         return None
-    if yes_ask_size is None and no_ask_size is None:
-        first_side = "yes" if yes_ask <= no_ask else "no"
-    elif yes_ask_size is None:
-        first_side = "no"
-    elif no_ask_size is None:
+    yes_notional = round(yes_ask * yes_target_shares, 6)
+    no_notional = round(no_ask * no_target_shares, 6)
+    if yes_notional <= no_notional:
         first_side = "yes"
     else:
-        first_side = "yes" if yes_ask_size <= no_ask_size else "no"
+        first_side = "no"
     second_side = "no" if first_side == "yes" else "yes"
+    total_target_cost = round(yes_notional + no_notional, 6)
     return {
-        "playbook_key": "paired_under_par",
+        "playbook_key": playbook_key,
         "strategy_name": runtime.strategy_name,
         "market_id": candidate["market_id"],
         "event_id": candidate["event_id"],
@@ -376,7 +454,10 @@ def plan_paired_entry(
         "yes_ask_size": yes_ask_size,
         "no_ask_size": no_ask_size,
         "combined_cost": round(combined_cost, 6),
-        "target_shares": target_shares,
+        "target_shares": paired_target_shares,
+        "yes_target_shares": yes_target_shares,
+        "no_target_shares": no_target_shares,
+        "total_target_cost": total_target_cost,
         "expected_edge_usd": expected_edge_usd,
         "signal_score": safe_float(candidate.get("candidate_score")) or 0.0,
         "sequence_budget_usd": round(budget, 2),
@@ -651,6 +732,7 @@ def _evaluate_paired_under_par(
     *,
     context: WeatherMarketContext,
     market: WeatherBucketMarket,
+    playbook_key: str,
     playbook: dict[str, Any],
     runtime: CloneRuntime,
     captured_at: datetime,
@@ -658,7 +740,6 @@ def _evaluate_paired_under_par(
     sequence_state: dict[str, dict[str, Any]],
     active_market_ids: set[str],
 ) -> dict[str, Any]:
-    playbook_key = "paired_under_par"
     yes_bid = safe_float(market.yes_bid)
     yes_ask = safe_float(market.yes_ask)
     no_bid = safe_float(market.no_bid)
@@ -722,10 +803,22 @@ def _evaluate_paired_under_par(
             rejection_reasons.append("wide_leg_spread")
     leg_prices = [price for price in (yes_ask, no_ask) if price is not None]
     if leg_prices:
+        min_leg_price = min(leg_prices)
+        max_leg_price = max(leg_prices)
         if min_leg_price_gte is not None and min(leg_prices) < min_leg_price_gte:
             rejection_reasons.append("leg_price_below_floor")
         if max_leg_price_lte is not None and max(leg_prices) > max_leg_price_lte:
             rejection_reasons.append("leg_price_above_ceiling")
+        if playbook_key == "asymmetric_paired_accumulation":
+            dominant_leg_price_gte = safe_float(playbook.get("dominant_leg_price_gte"))
+            complementary_leg_price_lte = safe_float(playbook.get("complementary_leg_price_lte"))
+            if dominant_leg_price_gte is not None and max(leg_prices) < dominant_leg_price_gte:
+                rejection_reasons.append("leg_price_below_floor")
+            if complementary_leg_price_lte is not None and min(leg_prices) > complementary_leg_price_lte:
+                rejection_reasons.append("leg_price_above_ceiling")
+        else:
+            if max_leg_price >= 0.90 and min_leg_price <= 0.10:
+                rejection_reasons.append("routed_to_asymmetric_pair_playbook")
     allow_active_market_reentry = bool(playbook.get("allow_active_market_reentry", True))
     if str(market.market_id or "") in active_market_ids and not allow_active_market_reentry:
         rejection_reasons.append("market_already_active")
@@ -735,7 +828,11 @@ def _evaluate_paired_under_par(
     leg_prices = [price for price in (yes_ask, no_ask) if price is not None]
     min_leg_price = min(leg_prices) if leg_prices else 0.0
     max_leg_price = max(leg_prices) if leg_prices else 1.0
-    moderation_multiplier = max(1.0, max(0.001, min_leg_price) * max(0.001, 1.0 - max_leg_price) * 10_000.0)
+    if playbook_key == "asymmetric_paired_accumulation":
+        dominance_multiplier = max(1.0, max_leg_price / max(min_leg_price, 0.001))
+        moderation_multiplier = max(1.0, dominance_multiplier)
+    else:
+        moderation_multiplier = max(1.0, max(0.001, min_leg_price) * max(0.001, 1.0 - max_leg_price) * 10_000.0)
     candidate_score = round(
         max(0.0, effective_threshold - (combined_cost or effective_threshold))
         * max(1.0, max_mergeable_size or 1.0)

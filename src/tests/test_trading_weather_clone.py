@@ -595,6 +595,41 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertIsNotNone(plan)
         self.assertEqual(plan["target_shares"], 40)
 
+    def test_plan_paired_entry_supports_asymmetric_pair_targets(self):
+        config = normalize_clone_bot_config(_merge_config())
+        config["playbooks"]["asymmetric_paired_accumulation"]["enabled"] = True
+        config["playbooks"]["asymmetric_paired_accumulation"]["live_enabled"] = True
+        config["playbooks"]["asymmetric_paired_accumulation"]["sequence_budget_usd"] = 100.0
+        config["runtime"]["max_total_exposure_usd"] = 100.0
+        candidate = {
+            "playbook_key": "asymmetric_paired_accumulation",
+            "market_id": "paired",
+            "event_id": "evt-1",
+            "event_slug": "highest-temperature-in-rome-on-march-24-2026",
+            "city": "Rome",
+            "local_date": date(2026, 3, 24),
+            "bucket_label": "16C",
+            "neg_risk": True,
+            "yes_token_id": "paired-yes",
+            "no_token_id": "paired-no",
+            "yes_ask": 0.05,
+            "no_ask": 0.95,
+            "yes_ask_size": None,
+            "no_ask_size": None,
+            "combined_cost": 1.0,
+            "candidate_score": 0.1,
+            "signal_data": {},
+            "sequence_data": {},
+            "quote_snapshot": {},
+        }
+
+        plan = plan_paired_entry(candidate, build_clone_runtime(config, dry_run=False), active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan["target_shares"], 98)
+        self.assertEqual(plan["yes_target_shares"], 120)
+        self.assertEqual(plan["no_target_shares"], 98)
+
     def test_normalize_order_price_preserves_low_tick_prices(self):
         self.assertEqual(_normalize_order_price(0.001), 0.001)
         self.assertEqual(_normalize_order_price(0.002), 0.002)

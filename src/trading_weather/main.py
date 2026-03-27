@@ -494,6 +494,8 @@ def _plan_brief(plan: dict[str, Any] | None) -> dict[str, Any] | None:
         "local_date": plan.get("local_date"),
         "bucket_label": plan.get("bucket_label"),
         "target_shares": int(plan.get("target_shares") or 0),
+        "yes_target_shares": int(plan.get("yes_target_shares") or 0),
+        "no_target_shares": int(plan.get("no_target_shares") or 0),
         "combined_cost": _round_value(plan.get("combined_cost"), 4),
         "expected_edge_usd": _round_value(plan.get("expected_edge_usd"), 4),
         "first_side": plan.get("first_side"),
@@ -1015,6 +1017,9 @@ async def _attempt_clone_paired_entry(
     *,
     shadow_only: bool,
 ) -> None:
+    yes_target_shares = int(plan.get("yes_target_shares") or plan.get("target_shares") or 0)
+    no_target_shares = int(plan.get("no_target_shares") or plan.get("target_shares") or 0)
+    pair_target_shares = int(plan.get("target_shares") or min(yes_target_shares, no_target_shares))
     position_id = await insert_clone_position(
         strategy_name=plan["strategy_name"],
         playbook_key=plan["playbook_key"],
@@ -1031,11 +1036,15 @@ async def _attempt_clone_paired_entry(
         no_token_id=plan.get("no_token_id"),
         status="pending_entry",
         shadow_only=shadow_only,
-        target_shares=float(plan["target_shares"]),
+        target_shares=float(pair_target_shares),
         signal_score=float(plan.get("signal_score") or 0.0),
         expected_edge_usd=safe_float(plan.get("expected_edge_usd")),
         quote_snapshot=plan.get("quote_snapshot") or {},
-        signal_data=plan.get("signal_data") or {},
+        signal_data={
+            **(plan.get("signal_data") or {}),
+            "yes_target_shares": yes_target_shares,
+            "no_target_shares": no_target_shares,
+        },
         sequence_data=plan.get("sequence_data") or {},
     )
     if shadow_only:
@@ -1050,7 +1059,7 @@ async def _attempt_clone_paired_entry(
             (
                 "[WEATHER-CLONE] Shadow entry | "
                 f"{plan['playbook_key']} {plan['city']} {plan['bucket_label']} "
-                f"shares={plan['target_shares']} cost={plan['combined_cost']:.4f}"
+                f"yes_shares={yes_target_shares} no_shares={no_target_shares} cost={plan['combined_cost']:.4f}"
             ),
             _json_safe_payload({"position_id": position_id, "plan": plan}),
             echo=False,
@@ -1063,13 +1072,14 @@ async def _attempt_clone_paired_entry(
     second_token = plan["yes_token_id"] if second_side == "yes" else plan["no_token_id"]
     first_price = plan["yes_price"] if first_side == "yes" else plan["no_price"]
     second_price = plan["yes_price"] if second_side == "yes" else plan["no_price"]
-    target_shares = int(plan["target_shares"])
+    first_target_shares = yes_target_shares if first_side == "yes" else no_target_shares
+    second_target_shares = yes_target_shares if second_side == "yes" else no_target_shares
     first_fill = await asyncio.to_thread(
         _place_fok_order,
         clob,
         first_token,
         price=first_price,
-        shares=target_shares,
+        shares=first_target_shares,
         side="BUY",
     )
     if not first_fill:
@@ -1081,7 +1091,7 @@ async def _attempt_clone_paired_entry(
         clob,
         second_token,
         price=second_price,
-        shares=first_fill["fill_shares"],
+        shares=second_target_shares,
         side="BUY",
     )
     if not second_fill:
@@ -1122,7 +1132,7 @@ async def _attempt_clone_paired_entry(
     await update_clone_position_fill(
         position_id,
         filled_shares=filled_shares,
-        avg_entry_price=float(total_cost / max(filled_shares * 2.0, 1.0)),
+        avg_entry_price=float(total_cost / max(first_fill["fill_shares"] + second_fill["fill_shares"], 1.0)),
         total_entry_cost=total_cost,
         yes_shares=float(second_fill["fill_shares"] if second_side == "yes" else first_fill["fill_shares"]),
         no_shares=float(second_fill["fill_shares"] if second_side == "no" else first_fill["fill_shares"]),
@@ -1134,7 +1144,9 @@ async def _attempt_clone_paired_entry(
         (
             "[WEATHER-CLONE] Entered | "
             f"{plan['city']} {plan['bucket_label']} "
-            f"pairs={filled_shares:.0f} cost={total_cost / max(filled_shares, 1.0):.4f}"
+            f"yes_shares={first_fill['fill_shares'] if first_side == 'yes' else second_fill['fill_shares']:.0f} "
+            f"no_shares={first_fill['fill_shares'] if first_side == 'no' else second_fill['fill_shares']:.0f} "
+            f"pair_shares={filled_shares:.0f} cost={total_cost / max(first_fill['fill_shares'] + second_fill['fill_shares'], 1.0):.4f}"
         ),
         _json_safe_payload({"position_id": position_id, "plan": plan, "total_cost": round(total_cost, 6)}),
         echo=False,

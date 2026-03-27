@@ -95,13 +95,23 @@ class ColdMathPublicParityTests(unittest.TestCase):
 
     def test_infer_public_sequence_label_detects_paired_under_par(self):
         rows = [
-            {"trade_type": "buy", "outcome": "yes", "price": 0.04},
-            {"trade_type": "buy", "outcome": "no", "price": 0.95},
+            {"trade_type": "buy", "outcome": "yes", "price": 0.49, "size": 10.0},
+            {"trade_type": "buy", "outcome": "no", "price": 0.50, "size": 10.0},
         ]
 
         label = _infer_public_sequence_label(rows, None)
 
         self.assertEqual(label, "paired_under_par")
+
+    def test_infer_public_sequence_label_detects_asymmetric_paired_accumulation(self):
+        rows = [
+            {"trade_type": "buy", "outcome": "yes", "price": 0.05, "size": 600.0},
+            {"trade_type": "buy", "outcome": "no", "price": 0.95, "size": 400.0},
+        ]
+
+        label = _infer_public_sequence_label(rows, None)
+
+        self.assertEqual(label, "asymmetric_paired_accumulation")
 
     def test_apply_size_model_caps_by_ask_fraction_and_reentry_scale(self):
         plan = {
@@ -141,11 +151,15 @@ class ColdMathPublicParityTests(unittest.TestCase):
         plan = {
             "playbook_key": "paired_under_par",
             "condition_id": "cond-1",
+            "yes_price": 0.972,
+            "no_price": 0.027,
             "combined_cost": 0.999,
             "target_shares": 50,
             "sequence_budget_usd": 50.0,
         }
         candidate = {
+            "yes_ask": 0.972,
+            "no_ask": 0.027,
             "yes_ask_size": None,
             "no_ask_size": None,
         }
@@ -169,6 +183,46 @@ class ColdMathPublicParityTests(unittest.TestCase):
 
         self.assertIsNotNone(adjusted)
         self.assertEqual(adjusted["target_shares"], 50)
+
+    def test_apply_size_model_supports_asymmetric_pair_targets(self):
+        plan = {
+            "playbook_key": "asymmetric_paired_accumulation",
+            "condition_id": "cond-1",
+            "yes_price": 0.05,
+            "no_price": 0.95,
+            "combined_cost": 1.0,
+            "target_shares": 20,
+            "yes_target_shares": 100,
+            "no_target_shares": 100,
+            "sequence_budget_usd": 100.0,
+        }
+        candidate = {
+            "yes_ask_size": None,
+            "no_ask_size": None,
+        }
+        size_model = {
+            "repeat_entry_cooldown_seconds": 60,
+            "per_playbook": {
+                "asymmetric_paired_accumulation": {
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
+                    "sequence_budget_usd": 100.0,
+                    "dominant_leg_budget_fraction": 0.95,
+                }
+            },
+        }
+
+        adjusted = _apply_size_model(
+            plan,
+            candidate=candidate,
+            size_model=size_model,
+            entry_counts={},
+        )
+
+        self.assertIsNotNone(adjusted)
+        self.assertEqual(adjusted["yes_target_shares"], 100)
+        self.assertEqual(adjusted["no_target_shares"], 100)
+        self.assertEqual(adjusted["target_shares"], 100)
 
     def test_compare_replay_to_public_reports_match_and_size_error(self):
         public_rows = [
