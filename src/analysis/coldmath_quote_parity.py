@@ -15,10 +15,10 @@ from analysis.coldmath_window_compare import DEFAULT_LOG_PATH, _derive_weather_t
 from analysis.db_sync import get_connection
 from analysis.wallet_forensics.db import load_rows
 from analysis.wallet_forensics.utils import ensure_dir, parse_iso_datetime, safe_float, safe_int
-from trading_weather.clone_config import normalize_clone_bot_config
+from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, normalize_clone_bot_config
 from trading_weather.clone_engine import build_clone_runtime, evaluate_clone_cycle
 from trading_weather.strategy import build_runtime_config, scan_live_market_report
-from weather.models import WeatherBucketMarket, WeatherMarketContext
+from weather.models import WeatherBucketMarket, WeatherMarketContext, complete_neg_risk_quotes
 
 logger = logging.getLogger(__name__)
 
@@ -484,6 +484,19 @@ def _build_context_for_event(
             quote_window_seconds=quote_window_seconds,
         )
         latest_quote_time = (up or {}).get("time") or (down or {}).get("time")
+        completed_quotes = complete_neg_risk_quotes(
+            neg_risk=bool(row.get("neg_risk")),
+            yes_bid=_float_value((up or {}).get("best_bid")),
+            yes_ask=_float_value((up or {}).get("best_ask")),
+            yes_mid=_float_value((up or {}).get("mid")),
+            yes_bid_size=_float_value((up or {}).get("best_bid_size")),
+            yes_ask_size=_float_value((up or {}).get("best_ask_size")),
+            no_bid=_float_value((down or {}).get("best_bid")),
+            no_ask=_float_value((down or {}).get("best_ask")),
+            no_mid=_float_value((down or {}).get("mid")),
+            no_bid_size=_float_value((down or {}).get("best_bid_size")),
+            no_ask_size=_float_value((down or {}).get("best_ask_size")),
+        )
         markets.append(
             WeatherBucketMarket(
                 market_id=str(row["market_id"]),
@@ -515,16 +528,16 @@ def _build_context_for_event(
                 no_token_id=row.get("no_token_id"),
                 started_at=row.get("started_at"),
                 ended_at=row.get("ended_at"),
-                yes_bid=_float_value((up or {}).get("best_bid")),
-                yes_ask=_float_value((up or {}).get("best_ask")),
-                yes_mid=_float_value((up or {}).get("mid")),
-                yes_bid_size=_float_value((up or {}).get("best_bid_size")),
-                yes_ask_size=_float_value((up or {}).get("best_ask_size")),
-                no_bid=_float_value((down or {}).get("best_bid")),
-                no_ask=_float_value((down or {}).get("best_ask")),
-                no_mid=_float_value((down or {}).get("mid")),
-                no_bid_size=_float_value((down or {}).get("best_bid_size")),
-                no_ask_size=_float_value((down or {}).get("best_ask_size")),
+                yes_bid=completed_quotes["yes_bid"],
+                yes_ask=completed_quotes["yes_ask"],
+                yes_mid=completed_quotes["yes_mid"],
+                yes_bid_size=completed_quotes["yes_bid_size"],
+                yes_ask_size=completed_quotes["yes_ask_size"],
+                no_bid=completed_quotes["no_bid"],
+                no_ask=completed_quotes["no_ask"],
+                no_mid=completed_quotes["no_mid"],
+                no_bid_size=completed_quotes["no_bid_size"],
+                no_ask_size=completed_quotes["no_ask_size"],
                 latest_quote_time=latest_quote_time,
             )
         )
@@ -653,7 +666,7 @@ def _row_by_market_id(rows: list[dict[str, Any]], market_id: str) -> dict[str, A
 
 def _match_clone_trade_row(rows: list[dict[str, Any]], *, trade_outcome: str) -> dict[str, Any] | None:
     for row in rows:
-        if bool(row.get("qualifies")) and str(row.get("playbook_key") or "") == "paired_under_par":
+        if bool(row.get("qualifies")) and str(row.get("playbook_key") or "") in PAIR_PLAYBOOK_KEYS:
             return row
     for row in rows:
         if not bool(row.get("qualifies")):
@@ -666,7 +679,7 @@ def _match_clone_trade_row(rows: list[dict[str, Any]], *, trade_outcome: str) ->
 def _clone_reason(rows: list[dict[str, Any]], *, trade_outcome: str) -> str:
     if not rows:
         return "market_not_evaluated"
-    paired = [row for row in rows if str(row.get("playbook_key") or "") == "paired_under_par"]
+    paired = [row for row in rows if str(row.get("playbook_key") or "") in PAIR_PLAYBOOK_KEYS]
     if paired:
         return _first_reason(paired[0]) or "paired_under_par_not_qualified"
     sided = [row for row in rows if str(row.get("side") or "").strip().lower() == trade_outcome]
