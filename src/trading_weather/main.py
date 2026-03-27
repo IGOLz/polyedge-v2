@@ -2320,25 +2320,29 @@ async def _run_clone_cycle(
     )
 
     entry_attempts = 0
+    max_entry_attempts = int(runtime.runtime.get("max_entry_attempts") or config.DEFAULT_MAX_ENTRY_ATTEMPTS or 1)
     if stand_down_reason is None and report["candidates"]:
         for candidate in report["candidates"]:
             if not (candidate.get("qualifies") and candidate.get("live_eligible")):
                 continue
+            playbook_key = str(candidate.get("playbook_key") or "")
             active_positions = await get_open_clone_positions()
             active_exposure = _clone_active_exposure_usd(active_positions)
             total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
             if config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
                 stand_down_reason = "total_spend_limit_reached"
                 break
+            if max_entry_attempts > 0 and entry_attempts >= max_entry_attempts:
+                break
             plan = None
-            if candidate.get("playbook_key") == "paired_under_par":
+            if playbook_key == "paired_under_par":
                 plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
             else:
                 plan = plan_directional_entry(candidate, runtime, active_exposure_usd=active_exposure)
             if plan is None:
                 continue
             entry_attempts += 1
-            if candidate.get("playbook_key") == "paired_under_par":
+            if playbook_key == "paired_under_par":
                 await _attempt_clone_paired_entry(
                     clob,
                     plan,
@@ -2350,7 +2354,6 @@ async def _run_clone_cycle(
                     plan,
                     shadow_only=not bool(health_state.get("execution_allowed")),
                 )
-            break
 
     active_positions = await get_open_clone_positions()
     summary = build_clone_cycle_summary(

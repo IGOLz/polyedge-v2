@@ -137,6 +137,39 @@ class ColdMathPublicParityTests(unittest.TestCase):
         self.assertEqual(adjusted["target_shares"], 150)
         self.assertEqual(adjusted["sequence_budget_usd"], 3.0)
 
+    def test_apply_size_model_falls_back_to_budget_when_quote_size_is_missing(self):
+        plan = {
+            "playbook_key": "paired_under_par",
+            "condition_id": "cond-1",
+            "combined_cost": 0.999,
+            "target_shares": 50,
+            "sequence_budget_usd": 50.0,
+        }
+        candidate = {
+            "yes_ask_size": None,
+            "no_ask_size": None,
+        }
+        size_model = {
+            "repeat_entry_cooldown_seconds": 60,
+            "per_playbook": {
+                "paired_under_par": {
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
+                    "sequence_budget_usd": 50.0,
+                }
+            },
+        }
+
+        adjusted = _apply_size_model(
+            plan,
+            candidate=candidate,
+            size_model=size_model,
+            entry_counts={},
+        )
+
+        self.assertIsNotNone(adjusted)
+        self.assertEqual(adjusted["target_shares"], 50)
+
     def test_compare_replay_to_public_reports_match_and_size_error(self):
         public_rows = [
             {

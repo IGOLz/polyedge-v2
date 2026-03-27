@@ -175,6 +175,7 @@ def _normalize_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         "daily_loss_limit_usd": float(runtime.get("daily_loss_limit_usd") or runtime_config.DEFAULT_DAILY_LOSS_LIMIT_USD or 12.0),
         "min_expected_edge_usd": float(runtime.get("min_expected_edge_usd") or runtime_config.DEFAULT_MIN_EXPECTED_EDGE_USD),
         "max_concurrent_positions": int(runtime.get("max_concurrent_positions") or runtime_config.DEFAULT_MAX_CONCURRENT_POSITIONS or 2),
+        "max_entry_attempts": int(runtime.get("max_entry_attempts") or runtime_config.DEFAULT_MAX_ENTRY_ATTEMPTS or 1),
         "min_target_shares": int(runtime.get("min_target_shares") or runtime_config.DEFAULT_MIN_TARGET_SHARES),
     }
 
@@ -224,6 +225,9 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "max_inventory_imbalance_ratio": 0.65,
                 "max_quote_age_seconds": 120.0,
                 "max_leg_spread": 0.08,
+                "min_leg_price_gte": 0.0,
+                "max_leg_price_lte": 1.0,
+                "allow_active_market_reentry": True,
                 "allow_stale_pair_recovery": True,
                 "shadow_requires_full_quote_pair": False,
                 "live_requires_full_quote_pair": False,
@@ -236,6 +240,7 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "directional_price_lte": 0.05,
                 "profit_take_price": 0.12,
                 "force_flatten_minutes_before_end": 120,
+                "minimum_hold_seconds": 300.0,
                 "min_quote_age_seconds": 0.0,
             }
         )
@@ -247,6 +252,7 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "complementary_price_gte": 0.94,
                 "profit_take_price": 0.12,
                 "force_flatten_minutes_before_end": 120,
+                "minimum_hold_seconds": 300.0,
                 "min_quote_age_seconds": 0.0,
             }
         )
@@ -260,6 +266,7 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "require_dominant_bucket": False,
                 "profit_take_price": 0.985,
                 "force_flatten_minutes_before_end": 120,
+                "minimum_hold_seconds": 300.0,
                 "min_quote_age_seconds": 0.0,
             }
         )

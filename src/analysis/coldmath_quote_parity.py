@@ -564,7 +564,9 @@ def _nearest_quote_row(
     rows = series["rows"]
     index = bisect_left(times, captured_at)
     candidates: list[tuple[float, dict[str, Any]]] = []
-    for candidate_index in {index - 1, index}:
+    lower = max(0, index - 6)
+    upper = min(len(times), index + 6)
+    for candidate_index in range(lower, upper):
         if 0 <= candidate_index < len(times):
             row = rows[candidate_index]
             delta = abs((row["time"] - captured_at).total_seconds())
@@ -572,8 +574,52 @@ def _nearest_quote_row(
                 candidates.append((delta, row))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[0])
+    candidates.sort(
+        key=lambda item: (
+            _quote_row_quality_rank(item[1]),
+            _quote_row_spread_penalty(item[1]),
+            item[0],
+            -_quote_row_richness(item[1]),
+        )
+    )
     return candidates[0][1]
+
+
+def _quote_row_quality_rank(row: dict[str, Any]) -> int:
+    best_bid = _float_value(row.get("best_bid"))
+    best_ask = _float_value(row.get("best_ask"))
+    if best_bid is not None and best_ask is not None:
+        return 0
+    if best_ask is not None:
+        return 1
+    if best_bid is not None:
+        return 2
+    if row.get("mid") is not None:
+        return 3
+    return 4
+
+
+def _quote_row_spread_penalty(row: dict[str, Any]) -> float:
+    best_bid = _float_value(row.get("best_bid"))
+    best_ask = _float_value(row.get("best_ask"))
+    if best_bid is None or best_ask is None:
+        return 999.0
+    return round(max(0.0, best_ask - best_bid), 6)
+
+
+def _quote_row_richness(row: dict[str, Any]) -> int:
+    score = 0
+    if row.get("best_bid") is not None:
+        score += 1
+    if row.get("best_ask") is not None:
+        score += 1
+    if row.get("mid") is not None:
+        score += 1
+    if row.get("best_bid_size") is not None:
+        score += 1
+    if row.get("best_ask_size") is not None:
+        score += 1
+    return score
 
 
 def _date_value(value: Any) -> date | None:

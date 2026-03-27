@@ -72,6 +72,63 @@ class ColdMathQuoteParityTests(unittest.TestCase):
 
         self.assertEqual(row["best_ask"], 0.06)
 
+    def test_nearest_quote_row_prefers_richer_snapshot_when_timestamps_are_nearby(self):
+        target = datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC)
+        series = {
+            "times": [
+                datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC),
+                datetime(2026, 3, 25, 22, 7, 8, 900000, tzinfo=UTC),
+            ],
+            "rows": [
+                {"time": datetime(2026, 3, 25, 22, 7, 9, tzinfo=UTC), "best_ask": None, "best_bid": None, "mid": 0.05},
+                {
+                    "time": datetime(2026, 3, 25, 22, 7, 8, 900000, tzinfo=UTC),
+                    "best_ask": 0.06,
+                    "best_bid": 0.05,
+                    "best_ask_size": 100.0,
+                    "best_bid_size": 90.0,
+                    "mid": 0.055,
+                },
+            ],
+        }
+
+        row = _nearest_quote_row(series, captured_at=target, quote_window_seconds=10)
+
+        self.assertEqual(row["best_ask"], 0.06)
+        self.assertEqual(row["best_ask_size"], 100.0)
+
+    def test_nearest_quote_row_prefers_narrow_spread_book_over_pathological_full_depth(self):
+        target = datetime(2026, 3, 26, 21, 25, 33, tzinfo=UTC)
+        series = {
+            "times": [
+                datetime(2026, 3, 26, 21, 25, 30, 28221, tzinfo=UTC),
+                datetime(2026, 3, 26, 21, 25, 30, 32462, tzinfo=UTC),
+            ],
+            "rows": [
+                {
+                    "time": datetime(2026, 3, 26, 21, 25, 30, 28221, tzinfo=UTC),
+                    "best_bid": 0.972,
+                    "best_ask": 0.973,
+                    "mid": 0.9725,
+                    "best_bid_size": None,
+                    "best_ask_size": None,
+                },
+                {
+                    "time": datetime(2026, 3, 26, 21, 25, 30, 32462, tzinfo=UTC),
+                    "best_bid": 0.001,
+                    "best_ask": 0.999,
+                    "mid": 0.5,
+                    "best_bid_size": 4265.59,
+                    "best_ask_size": 2098.25,
+                },
+            ],
+        }
+
+        row = _nearest_quote_row(series, captured_at=target, quote_window_seconds=10)
+
+        self.assertEqual(row["best_bid"], 0.972)
+        self.assertEqual(row["best_ask"], 0.973)
+
     def test_match_clone_trade_row_prefers_paired_over_directional_side_matching(self):
         rows = [
             {"playbook_key": "tail_bucket_accumulation", "side": "yes", "qualifies": True},
