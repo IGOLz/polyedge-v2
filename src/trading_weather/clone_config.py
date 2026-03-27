@@ -10,6 +10,7 @@ from trading_weather import config as runtime_config
 DEFAULT_CLONE_MODE = "coldmath_weather_clone"
 PLAYBOOK_ORDER = (
     "paired_under_par",
+    "cheap_bucket_accumulation",
     "tail_bucket_accumulation",
     "high_prob_bucket_accumulation",
     "inventory_exit_and_closeout",
@@ -103,14 +104,31 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "force_flatten_minutes_before_end": 120,
                 },
             ),
+            "cheap_bucket_accumulation": _normalize_playbook(
+                "cheap_bucket_accumulation",
+                {
+                    "enabled": True,
+                    "shadow_enabled": True,
+                    "live_enabled": True,
+                    "directional_price_lte": 0.06,
+                    "complementary_price_gte": 0.94,
+                    "target_sides": ["yes", "no"],
+                    "rolling_window_seconds": 60,
+                    "sequence_budget_usd": 3.0,
+                    "profit_take_price": 0.12,
+                    "force_flatten_minutes_before_end": 120,
+                },
+            ),
             "high_prob_bucket_accumulation": _normalize_playbook(
                 "high_prob_bucket_accumulation",
                 {
                     "enabled": True,
                     "shadow_enabled": True,
-                    "live_enabled": False,
-                    "directional_price_gte": 0.95,
+                    "live_enabled": True,
+                    "directional_price_gte": 0.94,
                     "directional_price_lte": 0.995,
+                    "complementary_price_lte": 0.06,
+                    "require_dominant_bucket": False,
                     "target_sides": ["yes", "no"],
                     "rolling_window_seconds": 60,
                     "sequence_budget_usd": 5.0,
@@ -172,6 +190,9 @@ def _normalize_health(health: dict[str, Any]) -> dict[str, Any]:
         "min_quote_coverage_ratio": float(health.get("min_quote_coverage_ratio") or 0.4),
         "persist_all_scans": bool(health.get("persist_all_scans", True)),
         "persist_all_market_rows": bool(health.get("persist_all_market_rows", True)),
+        "max_persisted_market_rows_per_cycle": int(health.get("max_persisted_market_rows_per_cycle") or 250),
+        "max_persisted_sequences_per_cycle": int(health.get("max_persisted_sequences_per_cycle") or 400),
+        "persist_timeout_seconds": float(health.get("persist_timeout_seconds") or 5.0),
     }
 
 
@@ -218,11 +239,25 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "min_quote_age_seconds": 0.0,
             }
         )
+    elif playbook_key == "cheap_bucket_accumulation":
+        defaults.update(
+            {
+                "live_enabled": True,
+                "directional_price_lte": 0.06,
+                "complementary_price_gte": 0.94,
+                "profit_take_price": 0.12,
+                "force_flatten_minutes_before_end": 120,
+                "min_quote_age_seconds": 0.0,
+            }
+        )
     elif playbook_key == "high_prob_bucket_accumulation":
         defaults.update(
             {
-                "directional_price_gte": 0.95,
+                "live_enabled": True,
+                "directional_price_gte": 0.94,
                 "directional_price_lte": 0.995,
+                "complementary_price_lte": 0.06,
+                "require_dominant_bucket": False,
                 "profit_take_price": 0.985,
                 "force_flatten_minutes_before_end": 120,
                 "min_quote_age_seconds": 0.0,

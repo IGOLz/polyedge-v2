@@ -20,7 +20,7 @@ from shared.db import close_pool, create_weather_tables, init_pool
 from trading import config as trading_config
 from trading import db as trading_db
 from trading.utils import log
-from trading_weather.clone_config import is_clone_bot_config, normalize_clone_bot_config
+from trading_weather.clone_config import PLAYBOOK_ORDER, is_clone_bot_config, normalize_clone_bot_config
 from trading_weather.clone_db import (
     close_clone_position,
     create_weather_clone_tables,
@@ -857,6 +857,118 @@ def _clone_candidate_signature(report: dict[str, Any]) -> str | None:
         "directional_price": _round_value(top.get("directional_price"), 4),
     }
     return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _clone_guard_resolution(guard_report: dict[str, Any]) -> tuple[str | None, str | None]:
+    reason = str(guard_report.get("reason") or "").strip() or None
+    if not reason:
+        return None, None
+    if reason == "orphaned_weather_inventory_detected":
+        return None, reason
+    return reason, None
+
+
+def _clone_persist_sort_key(row: dict[str, Any]) -> tuple[int, int, float]:
+    playbook_key = str(row.get("playbook_key") or "")
+    playbook_rank = PLAYBOOK_ORDER.index(playbook_key) if playbook_key in PLAYBOOK_ORDER else 999
+    return (
+        1 if bool(row.get("qualifies")) else 0,
+        -playbook_rank,
+        float(row.get("candidate_score") or 0.0),
+    )
+
+
+def _select_clone_persistence_rows(
+    report: dict[str, Any],
+    *,
+    health_config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows = list(report.get("cycle_rows") or [])
+    max_market_rows = max(0, int(health_config.get("max_persisted_market_rows_per_cycle") or 0))
+    max_sequences = max(0, int(health_config.get("max_persisted_sequences_per_cycle") or 0))
+    persist_all_market_rows = bool(health_config.get("persist_all_market_rows", True))
+    persist_all_scans = bool(health_config.get("persist_all_scans", True))
+
+    ordered_rows = sorted(rows, key=_clone_persist_sort_key, reverse=True)
+    if not persist_all_market_rows:
+        ordered_rows = [row for row in ordered_rows if bool(row.get("qualifies"))][: max_market_rows or None]
+    elif max_market_rows > 0:
+        ordered_rows = ordered_rows[:max_market_rows]
+
+    sequence_rows: list[dict[str, Any]]
+    if persist_all_scans:
+        sequence_rows = [row.get("sequence_data") or {} for row in ordered_rows]
+    else:
+        sequence_rows = [row.get("sequence_data") or {} for row in ordered_rows if bool(row.get("qualifies"))]
+
+    unique_sequences: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+    for row in sequence_rows:
+        sequence_key = str(row.get("sequence_key") or "").strip()
+        if not sequence_key or sequence_key in seen_keys:
+            continue
+        unique_sequences.append(row)
+        seen_keys.add(sequence_key)
+        if max_sequences > 0 and len(unique_sequences) >= max_sequences:
+            break
+    return ordered_rows, unique_sequences
+
+
+async def _persist_clone_cycle_state(
+    *,
+    captured_at: datetime,
+    strategy_name: str,
+    dry_run: bool,
+    health_state: dict[str, Any],
+    summary: dict[str, Any],
+    report: dict[str, Any],
+    health_config: dict[str, Any],
+) -> None:
+    persist_timeout = float(health_config.get("persist_timeout_seconds") or 5.0)
+    cycle_id: int | None = None
+    persisted_rows, persisted_sequences = _select_clone_persistence_rows(report, health_config=health_config)
+    try:
+        cycle_id = await asyncio.wait_for(
+            insert_clone_cycle(
+                captured_at=captured_at,
+                strategy_name=strategy_name,
+                dry_run=dry_run,
+                execution_allowed=bool(health_state.get("execution_allowed")),
+                execution_health=str((health_state.get("execution_auth") or {}).get("status") or ""),
+                market_data_health=str((health_state.get("market_data") or {}).get("status") or ""),
+                quote_coverage_ratio=float(health_state.get("quote_coverage_ratio") or 0.0),
+                context_count=int(report.get("context_count") or 0),
+                market_count=int(report.get("market_count") or 0),
+                candidate_count=int(report.get("candidate_count") or 0),
+                sequence_count=len(persisted_sequences),
+                entry_attempt_count=int(summary.get("entry_attempts") or 0),
+                top_rejection_reasons=report.get("top_rejection_reasons") or [],
+                health_data=health_state,
+                summary_data=summary,
+            ),
+            timeout=persist_timeout,
+        )
+    except Exception as exc:
+        log.warning("[WEATHER-CLONE] Failed to persist cycle summary: %s: %s", type(exc).__name__, exc)
+        cycle_id = None
+
+    if cycle_id is not None and persisted_rows:
+        try:
+            await asyncio.wait_for(
+                insert_clone_market_scans(cycle_id, persisted_rows, captured_at=captured_at),
+                timeout=persist_timeout,
+            )
+        except Exception as exc:
+            log.warning("[WEATHER-CLONE] Failed to persist market scans: %s: %s", type(exc).__name__, exc)
+
+    if persisted_sequences:
+        try:
+            await asyncio.wait_for(
+                upsert_clone_sequences(persisted_sequences),
+                timeout=persist_timeout,
+            )
+        except Exception as exc:
+            log.warning("[WEATHER-CLONE] Failed to persist sequence state: %s: %s", type(exc).__name__, exc)
 
 
 async def _emit_clone_cycle_telemetry(
@@ -2184,8 +2296,9 @@ async def _run_clone_cycle(
     )
     total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
     stand_down_reason: str | None = None
+    guard_warning_reason: str | None = None
     if not guard_report.get("ready"):
-        stand_down_reason = str(guard_report.get("reason") or "wallet_audit_error")
+        stand_down_reason, guard_warning_reason = _clone_guard_resolution(guard_report)
     elif config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
         stand_down_reason = "total_spend_limit_reached"
     elif len(active_positions) >= int(runtime.runtime.get("max_concurrent_positions") or 1):
@@ -2249,31 +2362,22 @@ async def _run_clone_cycle(
     summary.update(
         {
             "stand_down_reason": stand_down_reason,
+            "guard_warning_reason": guard_warning_reason,
             "total_spent_usd": round(total_spent_usd, 6),
             "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
             "wallet_guard": guard_report,
             "active_exposure_usd": round(active_exposure, 6),
         }
     )
-    cycle_id = await insert_clone_cycle(
+    await _persist_clone_cycle_state(
         captured_at=captured_at,
         strategy_name=runtime.strategy_name,
         dry_run=dry_run,
-        execution_allowed=bool(health_state.get("execution_allowed")),
-        execution_health=str((health_state.get("execution_auth") or {}).get("status") or ""),
-        market_data_health=str((health_state.get("market_data") or {}).get("status") or ""),
-        quote_coverage_ratio=float(health_state.get("quote_coverage_ratio") or 0.0),
-        context_count=int(report.get("context_count") or 0),
-        market_count=int(report.get("market_count") or 0),
-        candidate_count=int(report.get("candidate_count") or 0),
-        sequence_count=len(report.get("sequence_snapshots") or []),
-        entry_attempt_count=entry_attempts,
-        top_rejection_reasons=report.get("top_rejection_reasons") or [],
-        health_data=health_state,
-        summary_data=summary,
+        health_state=health_state,
+        summary=summary,
+        report=report,
+        health_config=bot_config.get("health") or {},
     )
-    await insert_clone_market_scans(cycle_id, report.get("cycle_rows") or [], captured_at=captured_at)
-    await upsert_clone_sequences(report.get("sequence_snapshots") or [])
     await _emit_clone_cycle_telemetry(summary, report, telemetry)
     return {
         "summary": summary,

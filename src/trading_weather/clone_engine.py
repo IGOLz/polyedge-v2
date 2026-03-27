@@ -221,6 +221,20 @@ def evaluate_clone_cycle(
                 _evaluate_directional_playbook(
                     context=context,
                     market=market,
+                    playbook_key="cheap_bucket_accumulation",
+                    playbook=playbooks.get("cheap_bucket_accumulation") or {},
+                    runtime=runtime,
+                    captured_at=captured_at,
+                    health_state=health_state,
+                    sequence_state=sequence_state,
+                    extremes=context_bucket_extremes.get(context.event_id) or {},
+                    directional_ranges=directional_ranges.get(context.event_id) or {},
+                )
+            )
+            rows_for_market.extend(
+                _evaluate_directional_playbook(
+                    context=context,
+                    market=market,
                     playbook_key="tail_bucket_accumulation",
                     playbook=playbooks.get("tail_bucket_accumulation") or {},
                     runtime=runtime,
@@ -370,7 +384,7 @@ def plan_directional_entry(
     active_exposure_usd: float,
 ) -> dict[str, Any] | None:
     playbook_key = str(candidate.get("playbook_key") or "")
-    if playbook_key not in {"tail_bucket_accumulation", "high_prob_bucket_accumulation"}:
+    if playbook_key not in {"cheap_bucket_accumulation", "tail_bucket_accumulation", "high_prob_bucket_accumulation"}:
         return None
     side = str(candidate.get("side") or "").lower()
     if side not in {"yes", "no"}:
@@ -497,6 +511,9 @@ def clone_cycle_status_message(summary: dict[str, Any]) -> str:
     stand_down_reason = str(summary.get("stand_down_reason") or "").strip()
     if stand_down_reason:
         message += f" | stand_down={stand_down_reason}"
+    guard_warning_reason = str(summary.get("guard_warning_reason") or "").strip()
+    if guard_warning_reason:
+        message += f" | guard_warning={guard_warning_reason}"
     top_candidate = summary.get("top_candidate") or {}
     if top_candidate:
         if top_candidate.get("playbook_key") == "paired_under_par":
@@ -721,6 +738,7 @@ def _evaluate_directional_playbook(
         return rows
     for side in playbook.get("target_sides") or ["yes", "no"]:
         directional_price = safe_float(market.yes_ask if side == "yes" else market.no_ask)
+        complementary_price = safe_float(market.no_ask if side == "yes" else market.yes_ask)
         quote_age_seconds = _quote_age_seconds(market.latest_quote_time, captured_at)
         rejection_reasons: list[str] = []
         if directional_price is None:
@@ -737,18 +755,45 @@ def _evaluate_directional_playbook(
             threshold = safe_float(playbook.get("directional_price_lte"))
             if directional_price is not None and threshold is not None and directional_price > threshold:
                 rejection_reasons.append("directional_price_above_threshold")
+        elif playbook_key == "cheap_bucket_accumulation":
+            if market.bucket_order in {extremes.get("min_order"), extremes.get("max_order")}:
+                rejection_reasons.append("tail_bucket_routed_to_tail_playbook")
+            threshold = safe_float(playbook.get("directional_price_lte"))
+            complementary_threshold = safe_float(playbook.get("complementary_price_gte"))
+            if directional_price is not None and threshold is not None and directional_price > threshold:
+                rejection_reasons.append("directional_price_above_threshold")
+            if complementary_threshold is not None:
+                if complementary_price is None:
+                    rejection_reasons.append("missing_complementary_ask")
+                elif complementary_price < complementary_threshold:
+                    rejection_reasons.append("complementary_price_below_threshold")
         else:
             min_price = safe_float(playbook.get("directional_price_gte"))
             max_price = safe_float(playbook.get("directional_price_lte"))
+            complementary_threshold = safe_float(playbook.get("complementary_price_lte"))
             if directional_price is not None and min_price is not None and directional_price < min_price:
                 rejection_reasons.append("directional_price_below_threshold")
             if directional_price is not None and max_price is not None and directional_price > max_price:
                 rejection_reasons.append("directional_price_above_threshold")
             best_for_side = safe_float((directional_ranges.get(side) or {}).get("max_price"))
-            if directional_price is not None and best_for_side is not None and directional_price + 1e-9 < best_for_side:
+            if (
+                bool(playbook.get("require_dominant_bucket", False))
+                and directional_price is not None
+                and best_for_side is not None
+                and directional_price + 1e-9 < best_for_side
+            ):
                 rejection_reasons.append("not_dominant_bucket")
+            if complementary_threshold is not None:
+                if complementary_price is None:
+                    rejection_reasons.append("missing_complementary_ask")
+                elif complementary_price > complementary_threshold:
+                    rejection_reasons.append("complementary_price_above_threshold")
         qualifies = not rejection_reasons
-        candidate_score = _directional_score(playbook_key=playbook_key, directional_price=directional_price)
+        candidate_score = _directional_score(
+            playbook_key=playbook_key,
+            directional_price=directional_price,
+            complementary_price=complementary_price,
+        )
         sequence_key = f"{playbook_key}:{market.market_id}:{side}"
         sequence = _update_sequence_state(
             sequence_state=sequence_state,
@@ -765,6 +810,7 @@ def _evaluate_directional_playbook(
             quote_snapshot=_quote_snapshot(market, captured_at=captured_at),
             signal_data={
                 "directional_price": directional_price,
+                "complementary_price": complementary_price,
                 "quote_age_seconds": quote_age_seconds,
                 "bucket_order": market.bucket_order,
                 "min_bucket_order": extremes.get("min_order"),
@@ -791,6 +837,7 @@ def _evaluate_directional_playbook(
                 "playbook_key": playbook_key,
                 "side": side,
                 "directional_price": directional_price,
+                "complementary_price": complementary_price,
                 "available_size": safe_float(market.yes_ask_size if side == "yes" else market.no_ask_size),
                 "quote_age_seconds": quote_age_seconds,
                 "qualifies": qualifies,
@@ -1089,11 +1136,20 @@ def _directional_side_ranges(context: WeatherMarketContext) -> dict[str, Any]:
     }
 
 
-def _directional_score(*, playbook_key: str, directional_price: float | None) -> float:
+def _directional_score(
+    *,
+    playbook_key: str,
+    directional_price: float | None,
+    complementary_price: float | None = None,
+) -> float:
     if directional_price is None:
         return 0.0
     if playbook_key == "tail_bucket_accumulation":
         return round(max(0.0, 0.10 - directional_price), 6)
+    if playbook_key == "cheap_bucket_accumulation":
+        return round(max(0.0, 0.08 - directional_price) + max(0.0, (complementary_price or 0.0) - 0.90), 6)
+    if playbook_key == "high_prob_bucket_accumulation":
+        return round(max(0.0, directional_price - 0.90) + max(0.0, 0.08 - (complementary_price or 1.0)), 6)
     return round(max(0.0, directional_price - 0.90), 6)
 
 
