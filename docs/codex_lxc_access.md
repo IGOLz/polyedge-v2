@@ -79,9 +79,11 @@ ssh polyedge-lxc-codex safe-update
 ```bash
 ssh polyedge-lxc-codex build trading
 ssh polyedge-lxc-codex build trading-weather
+ssh polyedge-lxc-codex build wallet-tracker
 ssh polyedge-lxc-codex build trading trading-weather dashboard
 ssh polyedge-lxc-codex up trading
 ssh polyedge-lxc-codex up trading-weather
+ssh polyedge-lxc-codex up wallet-tracker
 ssh polyedge-lxc-codex up trading trading-weather
 ```
 
@@ -94,9 +96,11 @@ ssh polyedge-lxc-codex up trading trading-weather
 ```bash
 ssh polyedge-lxc-codex down trading
 ssh polyedge-lxc-codex down trading-weather
+ssh polyedge-lxc-codex down wallet-tracker
 ssh polyedge-lxc-codex down trading trading-weather
 ssh polyedge-lxc-codex restart trading
 ssh polyedge-lxc-codex restart trading-weather
+ssh polyedge-lxc-codex restart wallet-tracker
 ```
 
 - `down <service>` is the restricted stop command for an individual service.
@@ -108,6 +112,7 @@ ssh polyedge-lxc-codex restart trading-weather
 ```bash
 ssh polyedge-lxc-codex logs trading 100
 ssh polyedge-lxc-codex logs trading-weather 100
+ssh polyedge-lxc-codex logs wallet-tracker 100
 ssh polyedge-lxc-codex logs dashboard 200
 ```
 
@@ -123,7 +128,12 @@ The current allowlist is:
 - `dashboard`
 - `weather`
 - `trading-weather`
+- `wallet-tracker`
 - `core-debug`
+
+## Updating The Remote Helper
+
+The restricted LXC gate/helper is installed as a root-owned copy in `/usr/local/bin`, not as a live wrapper around the repo files. After changing `ops/codex-lxc/polyedge-codex-gate.sh` or `ops/codex-lxc/polyedge-codex-compose.sh`, you must rerun the admin bootstrap/install flow so the remote helper picks up the new allowlist.
 
 ## Blocked actions
 

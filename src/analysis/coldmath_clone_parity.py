@@ -45,6 +45,15 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _maybe_json(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
 def run_clone_parity(args: argparse.Namespace | list[str] | None = None) -> dict[str, Any]:
     if not isinstance(args, argparse.Namespace):
         args = build_parser().parse_args(args)
@@ -117,8 +126,15 @@ def _load_clone_signals(*, window_start_utc: datetime, window_end_utc: datetime)
                 m.rejection_reasons,
                 m.signal_data,
                 m.sequence_data,
-                m.health_data
+                m.health_data,
+                c.execution_allowed,
+                c.execution_health,
+                c.market_data_health,
+                c.summary_data->>'stand_down_reason' AS stand_down_reason,
+                c.summary_data->>'guard_warning_reason' AS guard_warning_reason,
+                c.summary_data->'wallet_guard' AS wallet_guard
             FROM weather_clone_market_scans m
+            JOIN weather_clone_cycles c ON c.id = m.cycle_id
             WHERE m.captured_at BETWEEN %s AND %s
             ORDER BY m.captured_at ASC
             """,
@@ -127,6 +143,55 @@ def _load_clone_signals(*, window_start_utc: datetime, window_end_utc: datetime)
     finally:
         conn.close()
     return rows
+
+
+def _miss_classification(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "not_in_scope"
+
+    rejection_reasons = {
+        str(reason)
+        for row in rows
+        for reason in (row.get("rejection_reasons") or [])
+        if str(reason)
+    }
+    stand_down_reasons = {
+        str(row.get("stand_down_reason") or "")
+        for row in rows
+        if str(row.get("stand_down_reason") or "")
+    }
+    guard_warning_reasons = {
+        str(row.get("guard_warning_reason") or "")
+        for row in rows
+        if str(row.get("guard_warning_reason") or "")
+    }
+    wallet_guard_reasons = {
+        str((_maybe_json(row.get("wallet_guard")) or {}).get("reason") or "")
+        for row in rows
+        if str((_maybe_json(row.get("wallet_guard")) or {}).get("reason") or "")
+    }
+    if stand_down_reasons or guard_warning_reasons or wallet_guard_reasons:
+        return "missed_by_guard"
+
+    missing_data_reasons = {
+        "missing_pair_ask",
+        "missing_full_quote_pair",
+        "missing_quote_time",
+        "missing_directional_ask",
+        "missing_complementary_ask",
+        "stale_quote",
+    }
+    if rejection_reasons & missing_data_reasons:
+        return "missed_by_missing_data"
+
+    if any(not bool(row.get("execution_allowed")) for row in rows):
+        return "missed_by_health"
+    if any(str(row.get("execution_health") or "") not in {"", "healthy", "shadow_only"} for row in rows):
+        return "missed_by_health"
+    if any(str(row.get("market_data_health") or "") not in {"", "healthy"} for row in rows):
+        return "missed_by_health"
+
+    return "missed_by_rule"
 
 
 def _match_signals_to_trades(
@@ -143,6 +208,10 @@ def _match_signals_to_trades(
     time_deltas: list[float] = []
 
     rejection_buckets: dict[str, int] = defaultdict(int)
+    classification_counts: dict[str, int] = defaultdict(int)
+    playbook_metrics: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"trade_count": 0, "matched_trade_count": 0, "missed_trade_count": 0}
+    )
 
     for trade in trade_rows:
         trade_ts = trade["timestamp_utc"]
@@ -166,27 +235,40 @@ def _match_signals_to_trades(
             best_delta, best_idx, best_signal = matching[0]
             matched_signal_ids.add(best_idx)
             time_deltas.append(best_delta)
+            playbook_key = str(best_signal.get("playbook_key") or "unknown")
+            classification_counts["matched"] += 1
+            playbook_metrics[playbook_key]["trade_count"] += 1
+            playbook_metrics[playbook_key]["matched_trade_count"] += 1
             matched_trades.append(
                 {
                     "timestamp_utc": trade_ts,
                     "market_id": trade_market,
                     "city": trade.get("city"),
                     "bucket_label": trade.get("bucket_label"),
-                    "playbook_key": best_signal.get("playbook_key"),
+                    "playbook_key": playbook_key,
                     "signal_time_utc": best_signal.get("captured_at"),
                     "delta_seconds": round(best_delta, 3),
+                    "classification": "matched",
                 }
             )
         else:
             for row in nearby_nonqualifying:
                 for reason in row.get("rejection_reasons") or []:
                     rejection_buckets[str(reason)] += 1
+            classification = _miss_classification(nearby_nonqualifying)
+            classification_counts[classification] += 1
+            nearby_playbooks = sorted({str(row.get("playbook_key") or "unknown") for row in nearby_nonqualifying}) or ["unknown"]
+            for playbook_key in nearby_playbooks:
+                playbook_metrics[playbook_key]["trade_count"] += 1
+                playbook_metrics[playbook_key]["missed_trade_count"] += 1
             missed_trades.append(
                 {
                     "timestamp_utc": trade_ts,
                     "market_id": trade_market,
                     "city": trade.get("city"),
                     "bucket_label": trade.get("bucket_label"),
+                    "classification": classification,
+                    "playbook_keys": nearby_playbooks,
                     "rejection_reasons": sorted(
                         {str(reason) for row in nearby_nonqualifying for reason in (row.get("rejection_reasons") or [])}
                     ),
@@ -215,6 +297,11 @@ def _match_signals_to_trades(
             "false_positive_condition_count": len(false_positive_conditions),
             "matched_trade_ratio": round(matched_ratio, 6),
             "average_time_delta_seconds": round(sum(time_deltas) / len(time_deltas), 6) if time_deltas else None,
+            "classification_counts": dict(sorted(classification_counts.items())),
+            "playbook_metrics": [
+                {"playbook_key": playbook_key, **metrics}
+                for playbook_key, metrics in sorted(playbook_metrics.items())
+            ],
             "top_miss_reasons": [
                 {"reason": reason, "count": count}
                 for reason, count in sorted(rejection_buckets.items(), key=lambda item: (-item[1], item[0]))[:10]
@@ -243,8 +330,36 @@ def _build_markdown_report(*, comparison_result: dict[str, Any], parity: dict[st
         f"- Matched trade ratio: `{summary['matched_trade_ratio']}`",
         f"- Average time delta seconds: `{summary['average_time_delta_seconds']}`",
         "",
-        "## Top Miss Reasons",
+        "## Classification Counts",
     ]
+    classification_counts = summary.get("classification_counts") or {}
+    if not classification_counts:
+        lines.append("- None")
+    else:
+        for classification, count in classification_counts.items():
+            lines.append(f"- `{classification}`: `{count}`")
+
+    lines.extend(
+        [
+            "",
+            "## Playbook Metrics",
+        ]
+    )
+    playbook_metrics = summary.get("playbook_metrics") or []
+    if not playbook_metrics:
+        lines.append("- None")
+    else:
+        for item in playbook_metrics:
+            lines.append(
+                f"- `{item['playbook_key']}`: trades=`{item['trade_count']}` matched=`{item['matched_trade_count']}` missed=`{item['missed_trade_count']}`"
+            )
+
+    lines.extend(
+        [
+            "",
+        "## Top Miss Reasons",
+        ]
+    )
     top_reasons = summary.get("top_miss_reasons") or []
     if not top_reasons:
         lines.append("- None")
@@ -262,6 +377,7 @@ def _build_markdown_report(*, comparison_result: dict[str, Any], parity: dict[st
                 f"`{row['timestamp_utc'].isoformat()}` | "
                 f"`{row['city']}` `{row['bucket_label']}` | "
                 f"`{row['market_id']}` | "
+                f"`{row.get('classification')}` | "
                 f"`{', '.join(row.get('rejection_reasons') or ['no_nearby_signal'])}`"
             )
 

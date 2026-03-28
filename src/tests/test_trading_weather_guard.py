@@ -218,6 +218,30 @@ class TradingWeatherGuardTests(unittest.TestCase):
         self.assertTrue(telemetry["code_fingerprint"])
         self.assertTrue(telemetry["config_fingerprint"])
 
+    def test_startup_telemetry_uses_clone_runtime_caps(self):
+        telemetry = build_startup_telemetry(
+            config_path="/tmp/weather-clone.json",
+            dry_run=False,
+            bot_config={
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "coldmath_weather_clone_v1",
+                "runtime": {
+                    "sequence_budget_usd": 6,
+                    "max_total_exposure_usd": 30,
+                    "daily_loss_limit_usd": 30,
+                    "daily_spend_limit_usd": 30,
+                    "loop_interval_seconds": 5,
+                    "summary_interval_seconds": 60,
+                },
+            },
+        )
+
+        self.assertEqual(telemetry["sequence_budget_usd"], 6.0)
+        self.assertEqual(telemetry["max_total_exposure_usd"], 30.0)
+        self.assertEqual(telemetry["daily_loss_limit_usd"], 30.0)
+        self.assertEqual(telemetry["daily_spend_limit_usd"], 30.0)
+        self.assertEqual(telemetry["total_spend_limit_usd"], 30.0)
+
     def test_cycle_status_message_includes_wallet_guard_block(self):
         message = _cycle_status_message(
             {

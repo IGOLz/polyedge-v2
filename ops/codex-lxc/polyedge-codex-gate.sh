@@ -12,6 +12,7 @@ readonly -a ALLOWED_SERVICES=(
   "dashboard"
   "weather"
   "trading-weather"
+  "wallet-tracker"
   "core-debug"
 )
 readonly -a SAFE_UPDATE_SERVICES=(
@@ -20,6 +21,7 @@ readonly -a SAFE_UPDATE_SERVICES=(
   "dashboard"
   "weather"
   "trading-weather"
+  "wallet-tracker"
 )
 
 die() {

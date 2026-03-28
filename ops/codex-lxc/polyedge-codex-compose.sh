@@ -11,6 +11,7 @@ readonly -a ALLOWED_SERVICES=(
   "dashboard"
   "weather"
   "trading-weather"
+  "wallet-tracker"
   "core-debug"
 )
 

@@ -55,9 +55,14 @@ def _normalize_explicit_clone_config(config: dict[str, Any]) -> dict[str, Any]:
     }
     playbooks = config.get("playbooks") or {}
     for playbook_key in PLAYBOOK_ORDER:
+        playbook_config = (
+            playbooks.get(playbook_key)
+            if playbook_key in playbooks
+            else {"enabled": False, "shadow_enabled": False, "live_enabled": False}
+        ) or {}
         result["playbooks"][playbook_key] = _normalize_playbook(
             playbook_key,
-            playbooks.get(playbook_key) or {},
+            playbook_config,
         )
     return result
 
@@ -184,6 +189,7 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                 "sequence_budget_usd": runtime_config.DEFAULT_SEQUENCE_BUDGET_USD,
                 "max_total_exposure_usd": runtime_config.DEFAULT_MAX_TOTAL_EXPOSURE_USD,
                 "daily_loss_limit_usd": runtime_config.DEFAULT_DAILY_LOSS_LIMIT_USD,
+                "daily_spend_limit_usd": runtime_config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
                 "min_expected_edge_usd": runtime_config.DEFAULT_MIN_EXPECTED_EDGE_USD,
                 "max_concurrent_positions": runtime_config.DEFAULT_MAX_CONCURRENT_POSITIONS,
                 "min_target_shares": runtime_config.DEFAULT_MIN_TARGET_SHARES,
@@ -201,6 +207,7 @@ def _normalize_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         "sequence_budget_usd": float(runtime.get("sequence_budget_usd") or runtime_config.DEFAULT_SEQUENCE_BUDGET_USD or 8.0),
         "max_total_exposure_usd": float(runtime.get("max_total_exposure_usd") or runtime_config.DEFAULT_MAX_TOTAL_EXPOSURE_USD or 24.0),
         "daily_loss_limit_usd": float(runtime.get("daily_loss_limit_usd") or runtime_config.DEFAULT_DAILY_LOSS_LIMIT_USD or 12.0),
+        "daily_spend_limit_usd": float(runtime.get("daily_spend_limit_usd") or runtime_config.DEFAULT_TOTAL_SPEND_LIMIT_USD or 30.0),
         "min_expected_edge_usd": float(runtime.get("min_expected_edge_usd") or runtime_config.DEFAULT_MIN_EXPECTED_EDGE_USD),
         "max_concurrent_positions": int(runtime.get("max_concurrent_positions") or runtime_config.DEFAULT_MAX_CONCURRENT_POSITIONS or 2),
         "max_entry_attempts": int(runtime.get("max_entry_attempts") or runtime_config.DEFAULT_MAX_ENTRY_ATTEMPTS or 1),
@@ -215,6 +222,7 @@ def _normalize_health(health: dict[str, Any]) -> dict[str, Any]:
         "direct_quote_fallback_enabled": bool(health.get("direct_quote_fallback_enabled", True)),
         "direct_quote_cache_seconds": float(health.get("direct_quote_cache_seconds") or 10.0),
         "direct_quote_max_age_seconds": float(health.get("direct_quote_max_age_seconds") or 20.0),
+        "direct_quote_timeout_seconds": float(health.get("direct_quote_timeout_seconds") or 8.0),
         "max_direct_quote_markets_per_cycle": int(health.get("max_direct_quote_markets_per_cycle") or 120),
         "min_quote_coverage_ratio": float(health.get("min_quote_coverage_ratio") or 0.4),
         "persist_all_scans": bool(health.get("persist_all_scans", True)),

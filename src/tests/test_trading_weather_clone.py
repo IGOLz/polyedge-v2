@@ -172,6 +172,33 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertTrue(self.config["playbooks"]["cheap_bucket_accumulation"]["live_enabled"])
         self.assertTrue(self.config["playbooks"]["high_prob_bucket_accumulation"]["live_enabled"])
 
+    def test_explicit_clone_config_keeps_omitted_playbooks_disabled(self):
+        config = normalize_clone_bot_config(
+            {
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "coldmath_weather_clone_v1",
+                "execution_mode": "live_small",
+                "playbooks": {
+                    "paired_under_par": {
+                        "enabled": True,
+                        "shadow_enabled": True,
+                        "live_enabled": True,
+                    }
+                },
+                "runtime": {
+                    "sequence_budget_usd": 6.0,
+                    "max_total_exposure_usd": 30.0,
+                    "daily_loss_limit_usd": 30.0,
+                    "daily_spend_limit_usd": 30.0,
+                },
+            }
+        )
+
+        self.assertTrue(config["playbooks"]["paired_under_par"]["enabled"])
+        self.assertFalse(config["playbooks"]["cheap_bucket_accumulation"]["enabled"])
+        self.assertFalse(config["playbooks"]["asymmetric_paired_accumulation"]["enabled"])
+        self.assertEqual(config["runtime"]["daily_spend_limit_usd"], 30.0)
+
     def test_preflight_clone_health_reports_auth_status(self):
         healthy = preflight_clone_health(_HealthyClob(), dry_run=False)
         unhealthy = preflight_clone_health(_UnhealthyClob(), dry_run=False)
@@ -390,6 +417,8 @@ class TradingWeatherCloneTests(unittest.TestCase):
 
         self.assertEqual(result["summary"]["matched_trade_count"], 1)
         self.assertEqual(result["summary"]["missed_high_confidence_trade_count"], 1)
+        self.assertEqual(result["summary"]["classification_counts"]["matched"], 1)
+        self.assertEqual(result["summary"]["classification_counts"]["missed_by_missing_data"], 1)
         self.assertEqual(result["summary"]["top_miss_reasons"][0]["reason"], "missing_full_quote_pair")
 
     def test_plan_directional_entry_uses_playbook_budget(self):

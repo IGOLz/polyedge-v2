@@ -16,6 +16,15 @@ def _json(value: Any) -> str | None:
     return json.dumps(value, default=str)
 
 
+def _utc_day_start(day_start: datetime | None = None) -> datetime:
+    current = day_start or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
+    return current.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 async def create_weather_clone_tables() -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -63,6 +72,34 @@ async def create_weather_clone_tables() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_weather_clone_positions_active
             ON weather_clone_positions (status, playbook_key, market_id, opened_at DESC)
+            """
+        )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_clone_position_events (
+                id SERIAL PRIMARY KEY,
+                position_id INTEGER NOT NULL REFERENCES weather_clone_positions(id) ON DELETE CASCADE,
+                playbook_key TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                status TEXT,
+                side TEXT,
+                target_shares NUMERIC(18,6),
+                filled_shares NUMERIC(18,6),
+                price NUMERIC(12,6),
+                value_usd NUMERIC(18,6),
+                order_id TEXT,
+                tx_hash TEXT,
+                reason TEXT,
+                notes TEXT,
+                raw_payload JSONB,
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_clone_position_events_position
+            ON weather_clone_position_events (position_id, occurred_at DESC)
             """
         )
         await conn.execute(
@@ -457,6 +494,64 @@ async def insert_clone_position(
     return int(row["id"])
 
 
+async def insert_clone_position_event(
+    position_id: int,
+    *,
+    playbook_key: str,
+    event_type: str,
+    status: str | None = None,
+    side: str | None = None,
+    target_shares: float | None = None,
+    filled_shares: float | None = None,
+    price: float | None = None,
+    value_usd: float | None = None,
+    order_id: str | None = None,
+    tx_hash: str | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+    raw_payload: dict[str, Any] | None = None,
+) -> int:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO weather_clone_position_events (
+                position_id,
+                playbook_key,
+                event_type,
+                status,
+                side,
+                target_shares,
+                filled_shares,
+                price,
+                value_usd,
+                order_id,
+                tx_hash,
+                reason,
+                notes,
+                raw_payload
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+            RETURNING id
+            """,
+            position_id,
+            playbook_key,
+            event_type,
+            status,
+            side,
+            Decimal(str(round(target_shares, 6))) if target_shares is not None else None,
+            Decimal(str(round(filled_shares, 6))) if filled_shares is not None else None,
+            Decimal(str(round(price, 6))) if price is not None else None,
+            Decimal(str(round(value_usd, 6))) if value_usd is not None else None,
+            order_id,
+            tx_hash,
+            reason,
+            notes,
+            _json(raw_payload),
+        )
+    return int(row["id"])
+
+
 async def get_open_clone_positions() -> list[dict[str, Any]]:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -517,6 +612,40 @@ async def update_clone_position_fill(
             status,
             notes,
         )
+
+
+async def get_clone_daily_spend_usd(day_start: datetime | None = None) -> float:
+    window_start = _utc_day_start(day_start)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(total_entry_cost), 0) AS gross_spend
+            FROM weather_clone_positions
+            WHERE shadow_only = FALSE
+              AND opened_at >= $1
+              AND total_entry_cost > 0
+            """,
+            window_start,
+        )
+    return float(row["gross_spend"] or 0.0) if row else 0.0
+
+
+async def get_clone_daily_realized_pnl(day_start: datetime | None = None) -> float:
+    window_start = _utc_day_start(day_start)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(COALESCE(realized_exit_value_usd, 0) - COALESCE(total_entry_cost, 0)), 0) AS realized_pnl
+            FROM weather_clone_positions
+            WHERE shadow_only = FALSE
+              AND closed_at >= $1
+              AND realized_exit_value_usd IS NOT NULL
+            """,
+            window_start,
+        )
+    return float(row["realized_pnl"] or 0.0) if row else 0.0
 
 
 async def close_clone_position(

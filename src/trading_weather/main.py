@@ -24,10 +24,13 @@ from trading_weather.clone_config import PLAYBOOK_ORDER, is_clone_bot_config, no
 from trading_weather.clone_db import (
     close_clone_position,
     create_weather_clone_tables,
+    get_clone_daily_realized_pnl,
+    get_clone_daily_spend_usd,
     get_open_clone_positions,
     insert_clone_cycle,
     insert_clone_market_scans,
     insert_clone_position,
+    insert_clone_position_event,
     update_clone_position_fill,
     upsert_clone_sequences,
 )
@@ -257,16 +260,46 @@ def _code_fingerprint() -> str:
     return digest.hexdigest()[:12]
 
 
+def _runtime_float_setting(bot_config: dict[str, Any], key: str, default: float) -> float:
+    runtime = bot_config.get("runtime") or {}
+    value = runtime.get(key)
+    if value is None or value == "":
+        return float(default)
+    return float(value)
+
+
 def build_startup_telemetry(*, config_path: str, dry_run: bool, bot_config: dict[str, Any]) -> dict[str, Any]:
+    history_path = config.DEFAULT_CLONE_HISTORY_PATH if is_clone_bot_config(bot_config) else config.DEFAULT_HISTORY_PATH
     cap_settings = {
-        "sequence_budget_usd": config.DEFAULT_SEQUENCE_BUDGET_USD,
-        "max_total_exposure_usd": config.DEFAULT_MAX_TOTAL_EXPOSURE_USD,
-        "daily_loss_limit_usd": config.DEFAULT_DAILY_LOSS_LIMIT_USD,
-        "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
-        "max_concurrent_positions": config.DEFAULT_MAX_CONCURRENT_POSITIONS,
-        "max_entry_attempts": config.DEFAULT_MAX_ENTRY_ATTEMPTS,
-        "loop_interval_seconds": config.DEFAULT_LOOP_INTERVAL_SECONDS,
-        "summary_interval_seconds": config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
+        "sequence_budget_usd": _runtime_float_setting(bot_config, "sequence_budget_usd", config.DEFAULT_SEQUENCE_BUDGET_USD),
+        "max_total_exposure_usd": _runtime_float_setting(
+            bot_config,
+            "max_total_exposure_usd",
+            config.DEFAULT_MAX_TOTAL_EXPOSURE_USD,
+        ),
+        "daily_loss_limit_usd": _runtime_float_setting(
+            bot_config,
+            "daily_loss_limit_usd",
+            config.DEFAULT_DAILY_LOSS_LIMIT_USD,
+        ),
+        "daily_spend_limit_usd": _runtime_float_setting(
+            bot_config,
+            "daily_spend_limit_usd",
+            config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
+        ),
+        "total_spend_limit_usd": _runtime_float_setting(
+            bot_config,
+            "daily_spend_limit_usd",
+            config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
+        ),
+        "max_concurrent_positions": int((bot_config.get("runtime") or {}).get("max_concurrent_positions") or config.DEFAULT_MAX_CONCURRENT_POSITIONS),
+        "max_entry_attempts": int((bot_config.get("runtime") or {}).get("max_entry_attempts") or config.DEFAULT_MAX_ENTRY_ATTEMPTS),
+        "loop_interval_seconds": _runtime_float_setting(bot_config, "loop_interval_seconds", config.DEFAULT_LOOP_INTERVAL_SECONDS),
+        "summary_interval_seconds": _runtime_float_setting(
+            bot_config,
+            "summary_interval_seconds",
+            config.DEFAULT_SUMMARY_INTERVAL_SECONDS,
+        ),
         "activity_lookback_minutes": config.ACTIVITY_LOOKBACK_MINUTES,
         "require_clean_wallet": config.REQUIRE_CLEAN_WALLET,
         "allow_orphaned_positions": config.ALLOW_ORPHANED_POSITIONS,
@@ -274,7 +307,7 @@ def build_startup_telemetry(*, config_path: str, dry_run: bool, bot_config: dict
     return {
         "dry_run": dry_run,
         "config_path": config_path,
-        "history_path": str(config.DEFAULT_HISTORY_PATH),
+        "history_path": str(history_path),
         "strategy_name": str(bot_config.get("strategy_name") or "coldmath_inventory_rebalancing_merge_v2"),
         "code_fingerprint": _code_fingerprint(),
         "config_fingerprint": _fingerprint_payload(
@@ -550,6 +583,126 @@ def _candidate_signature(report: dict[str, Any]) -> str | None:
 
 def _json_safe_payload(payload: Any) -> Any:
     return json.loads(json.dumps(payload, default=str))
+
+
+def _clone_quote_snapshot_counts(contexts) -> dict[str, int]:
+    total_markets = 0
+    quote_pair_markets = 0
+    for context in contexts:
+        for market in context.markets:
+            total_markets += 1
+            if market.yes_ask is not None and market.no_ask is not None:
+                quote_pair_markets += 1
+    return {
+        "quote_pair_markets": quote_pair_markets,
+        "total_markets": total_markets,
+    }
+
+
+async def _refresh_clone_quotes_with_timeout(
+    clob,
+    contexts,
+    *,
+    captured_at: datetime,
+    health_config: dict[str, Any],
+) -> dict[str, Any]:
+    baseline = {
+        **_clone_quote_snapshot_counts(contexts),
+        "direct_quote_markets": 0,
+        "direct_quote_tokens": 0,
+        "book_errors": [],
+    }
+    timeout_seconds = float(health_config.get("direct_quote_timeout_seconds") or 8.0)
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                refresh_contexts_with_direct_quotes,
+                clob,
+                contexts,
+                captured_at=captured_at,
+                health_config=health_config,
+            ),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        return {
+            **baseline,
+            "book_errors": [f"TimeoutError: direct quote refresh exceeded {timeout_seconds:.1f}s"],
+        }
+    except Exception as exc:
+        return {
+            **baseline,
+            "book_errors": [f"{type(exc).__name__}: {exc}"],
+        }
+
+
+def _clone_trade_event_payload(
+    *,
+    position_id: int,
+    plan: dict[str, Any] | None = None,
+    position: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source = plan or position or {}
+    payload = {
+        "engine": "weather_clone",
+        "weather_clone_position_id": position_id,
+        "strategy_name": source.get("strategy_name"),
+        "playbook_key": source.get("playbook_key"),
+        "event_id": source.get("event_id"),
+        "event_slug": source.get("event_slug"),
+        "market_id": source.get("market_id"),
+        "city": source.get("city"),
+        "local_date": source.get("local_date"),
+        "bucket_label": source.get("bucket_label"),
+        "side": source.get("side"),
+        "condition_id": source.get("condition_id"),
+    }
+    if plan is not None:
+        payload["plan"] = _json_safe_payload(plan)
+    if position is not None:
+        payload["position"] = _json_safe_payload(position)
+    if extra:
+        payload.update(_json_safe_payload(extra))
+    return payload
+
+
+async def _record_clone_position_event(
+    position_id: int,
+    *,
+    playbook_key: str,
+    event_type: str,
+    status: str | None = None,
+    side: str | None = None,
+    target_shares: float | None = None,
+    filled_shares: float | None = None,
+    price: float | None = None,
+    value_usd: float | None = None,
+    order_id: str | None = None,
+    tx_hash: str | None = None,
+    reason: str | None = None,
+    notes: str | None = None,
+    raw_payload: dict[str, Any] | None = None,
+) -> None:
+    try:
+        await insert_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type=event_type,
+            status=status,
+            side=side,
+            target_shares=target_shares,
+            filled_shares=filled_shares,
+            price=price,
+            value_usd=value_usd,
+            order_id=order_id,
+            tx_hash=tx_hash,
+            reason=reason,
+            notes=notes,
+            raw_payload=raw_payload,
+        )
+    except Exception as exc:
+        log.warning("Failed to write weather_clone_position_event: %s", exc)
 
 
 def _stand_down_message(report: dict[str, Any]) -> str:
@@ -1020,9 +1173,10 @@ async def _attempt_clone_paired_entry(
     yes_target_shares = int(plan.get("yes_target_shares") or plan.get("target_shares") or 0)
     no_target_shares = int(plan.get("no_target_shares") or plan.get("target_shares") or 0)
     pair_target_shares = int(plan.get("target_shares") or min(yes_target_shares, no_target_shares))
+    playbook_key = str(plan.get("playbook_key") or "paired_under_par")
     position_id = await insert_clone_position(
         strategy_name=plan["strategy_name"],
-        playbook_key=plan["playbook_key"],
+        playbook_key=playbook_key,
         market_id=plan["market_id"],
         event_id=plan["event_id"],
         event_slug=plan["event_slug"],
@@ -1047,12 +1201,38 @@ async def _attempt_clone_paired_entry(
         },
         sequence_data=plan.get("sequence_data") or {},
     )
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="entry_planned",
+        status="pending_entry",
+        target_shares=float(pair_target_shares),
+        price=safe_float(plan.get("combined_cost")),
+        value_usd=safe_float(plan.get("combined_cost")) * float(pair_target_shares)
+        if safe_float(plan.get("combined_cost")) is not None
+        else None,
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"yes_target_shares": yes_target_shares, "no_target_shares": no_target_shares},
+        ),
+    )
     if shadow_only:
         await close_clone_position(
             position_id,
             status="shadow_detected",
             close_reason="shadow_only",
             notes="Shadow-mode clone candidate recorded",
+        )
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="entry_rejected",
+            status="shadow_detected",
+            target_shares=float(pair_target_shares),
+            reason="shadow_only",
+            notes="Execution disabled; recorded as shadow candidate",
+            raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan),
         )
         await trading_db.log_event(
             "weather_clone_shadow_entry",
@@ -1074,6 +1254,21 @@ async def _attempt_clone_paired_entry(
     second_price = plan["yes_price"] if second_side == "yes" else plan["no_price"]
     first_target_shares = yes_target_shares if first_side == "yes" else no_target_shares
     second_target_shares = yes_target_shares if second_side == "yes" else no_target_shares
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_intent",
+        status="submitted",
+        side=first_side,
+        target_shares=float(first_target_shares),
+        price=float(first_price),
+        value_usd=float(first_target_shares) * float(first_price),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"leg": "first", "token_id": first_token},
+        ),
+    )
     first_fill = await asyncio.to_thread(
         _place_fok_order,
         clob,
@@ -1083,9 +1278,56 @@ async def _attempt_clone_paired_entry(
         side="BUY",
     )
     if not first_fill:
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="order_rejected",
+            status="entry_failed",
+            side=first_side,
+            target_shares=float(first_target_shares),
+            price=float(first_price),
+            reason="first_leg_no_fill",
+            raw_payload=_clone_trade_event_payload(
+                position_id=position_id,
+                plan=plan,
+                extra={"leg": "first", "token_id": first_token},
+            ),
+        )
         await close_clone_position(position_id, status="entry_failed", close_reason="first_leg_no_fill")
         return
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_fill",
+        status="filled",
+        side=first_side,
+        target_shares=float(first_target_shares),
+        filled_shares=float(first_fill["fill_shares"]),
+        price=float(first_fill["fill_price"]),
+        value_usd=float(first_fill["fill_shares"]) * float(first_fill["fill_price"]),
+        order_id=first_fill.get("order_id"),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"leg": "first", "token_id": first_token, "fill": first_fill},
+        ),
+    )
     total_cost = first_fill["fill_shares"] * first_fill["fill_price"]
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_intent",
+        status="submitted",
+        side=second_side,
+        target_shares=float(second_target_shares),
+        price=float(second_price),
+        value_usd=float(second_target_shares) * float(second_price),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"leg": "second", "token_id": second_token},
+        ),
+    )
     second_fill = await asyncio.to_thread(
         _place_fok_order,
         clob,
@@ -1098,7 +1340,37 @@ async def _attempt_clone_paired_entry(
         unwind_token = first_token
         unwind_price = _best_book_price(clob, unwind_token, side="SELL")
         unwind_fill = None
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="order_rejected",
+            status="entry_failed",
+            side=second_side,
+            target_shares=float(second_target_shares),
+            price=float(second_price),
+            reason="second_leg_no_fill",
+            raw_payload=_clone_trade_event_payload(
+                position_id=position_id,
+                plan=plan,
+                extra={"leg": "second", "token_id": second_token},
+            ),
+        )
         if unwind_price is not None:
+            await _record_clone_position_event(
+                position_id,
+                playbook_key=playbook_key,
+                event_type="cleanup_intent",
+                status="submitted",
+                side=first_side,
+                target_shares=float(first_fill["fill_shares"]),
+                price=float(unwind_price),
+                reason="second_leg_no_fill",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=position_id,
+                    plan=plan,
+                    extra={"cleanup": "immediate_unwind", "token_id": unwind_token},
+                ),
+            )
             unwind_fill = await asyncio.to_thread(
                 _place_fok_order,
                 clob,
@@ -1117,6 +1389,41 @@ async def _attempt_clone_paired_entry(
             status="partial_entry",
             notes="First leg filled; second leg failed",
         )
+        if unwind_fill:
+            await _record_clone_position_event(
+                position_id,
+                playbook_key=playbook_key,
+                event_type="cleanup_fill",
+                status="entry_failed",
+                side=first_side,
+                target_shares=float(first_fill["fill_shares"]),
+                filled_shares=float(unwind_fill["fill_shares"]),
+                price=float(unwind_fill["fill_price"]),
+                value_usd=float(unwind_fill["fill_shares"]) * float(unwind_fill["fill_price"]),
+                order_id=unwind_fill.get("order_id"),
+                reason="second_leg_no_fill",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=position_id,
+                    plan=plan,
+                    extra={"cleanup": "immediate_unwind", "fill": unwind_fill},
+                ),
+            )
+        else:
+            await _record_clone_position_event(
+                position_id,
+                playbook_key=playbook_key,
+                event_type="cleanup_rejected",
+                status="entry_failed",
+                side=first_side,
+                target_shares=float(first_fill["fill_shares"]),
+                price=float(unwind_price) if unwind_price is not None else None,
+                reason="immediate_unwind_no_fill" if unwind_price is not None else "immediate_unwind_no_price",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=position_id,
+                    plan=plan,
+                    extra={"cleanup": "immediate_unwind", "token_id": unwind_token},
+                ),
+            )
         await close_clone_position(
             position_id,
             status="entry_failed",
@@ -1126,7 +1433,36 @@ async def _attempt_clone_paired_entry(
             ),
             notes="Second leg failed; attempted immediate unwind",
         )
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="position_closed",
+            status="entry_failed",
+            reason="second_leg_no_fill",
+            value_usd=(
+                float(unwind_fill["fill_shares"]) * float(unwind_fill["fill_price"]) if unwind_fill else None
+            ),
+            notes="Second leg failed; attempted immediate unwind",
+            raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan),
+        )
         return
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_fill",
+        status="filled",
+        side=second_side,
+        target_shares=float(second_target_shares),
+        filled_shares=float(second_fill["fill_shares"]),
+        price=float(second_fill["fill_price"]),
+        value_usd=float(second_fill["fill_shares"]) * float(second_fill["fill_price"]),
+        order_id=second_fill.get("order_id"),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"leg": "second", "token_id": second_token, "fill": second_fill},
+        ),
+    )
     total_cost += second_fill["fill_shares"] * second_fill["fill_price"]
     filled_shares = float(min(first_fill["fill_shares"], second_fill["fill_shares"]))
     await update_clone_position_fill(
@@ -1138,6 +1474,21 @@ async def _attempt_clone_paired_entry(
         no_shares=float(second_fill["fill_shares"] if second_side == "no" else first_fill["fill_shares"]),
         status="open_paired",
         notes="Both legs filled",
+    )
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="position_opened",
+        status="open_paired",
+        target_shares=float(pair_target_shares),
+        filled_shares=filled_shares,
+        price=float(total_cost / max(first_fill["fill_shares"] + second_fill["fill_shares"], 1.0)),
+        value_usd=float(total_cost),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"first_fill": first_fill, "second_fill": second_fill},
+        ),
     )
     await trading_db.log_event(
         "weather_clone_entry",
@@ -1159,9 +1510,10 @@ async def _attempt_clone_directional_entry(
     *,
     shadow_only: bool,
 ) -> None:
+    playbook_key = str(plan.get("playbook_key") or "")
     position_id = await insert_clone_position(
         strategy_name=plan["strategy_name"],
-        playbook_key=plan["playbook_key"],
+        playbook_key=playbook_key,
         market_id=plan["market_id"],
         event_id=plan["event_id"],
         event_slug=plan["event_slug"],
@@ -1182,12 +1534,34 @@ async def _attempt_clone_directional_entry(
         signal_data=plan.get("signal_data") or {},
         sequence_data=plan.get("sequence_data") or {},
     )
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="entry_planned",
+        status="pending_entry",
+        side=plan["side"],
+        target_shares=float(plan["target_shares"]),
+        price=float(plan["price"]),
+        value_usd=float(plan["target_shares"]) * float(plan["price"]),
+        raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan),
+    )
     if shadow_only:
         await close_clone_position(
             position_id,
             status="shadow_detected",
             close_reason="shadow_only",
             notes="Shadow-mode clone directional candidate recorded",
+        )
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="entry_rejected",
+            status="shadow_detected",
+            side=plan["side"],
+            target_shares=float(plan["target_shares"]),
+            price=float(plan["price"]),
+            reason="shadow_only",
+            raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan),
         )
         await trading_db.log_event(
             "weather_clone_shadow_entry",
@@ -1201,6 +1575,21 @@ async def _attempt_clone_directional_entry(
         )
         return
 
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_intent",
+        status="submitted",
+        side=plan["side"],
+        target_shares=float(plan["target_shares"]),
+        price=float(plan["price"]),
+        value_usd=float(plan["target_shares"]) * float(plan["price"]),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"token_id": plan["token_id"]},
+        ),
+    )
     fill = await asyncio.to_thread(
         _place_fok_order,
         clob,
@@ -1210,10 +1599,38 @@ async def _attempt_clone_directional_entry(
         side="BUY",
     )
     if not fill:
+        await _record_clone_position_event(
+            position_id,
+            playbook_key=playbook_key,
+            event_type="order_rejected",
+            status="entry_failed",
+            side=plan["side"],
+            target_shares=float(plan["target_shares"]),
+            price=float(plan["price"]),
+            reason="directional_no_fill",
+            raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan),
+        )
         await close_clone_position(position_id, status="entry_failed", close_reason="directional_no_fill")
         return
 
     total_cost = float(fill["fill_shares"]) * float(fill["fill_price"])
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="order_fill",
+        status="filled",
+        side=plan["side"],
+        target_shares=float(plan["target_shares"]),
+        filled_shares=float(fill["fill_shares"]),
+        price=float(fill["fill_price"]),
+        value_usd=total_cost,
+        order_id=fill.get("order_id"),
+        raw_payload=_clone_trade_event_payload(
+            position_id=position_id,
+            plan=plan,
+            extra={"token_id": plan["token_id"], "fill": fill},
+        ),
+    )
     await update_clone_position_fill(
         position_id,
         filled_shares=float(fill["fill_shares"]),
@@ -1223,6 +1640,18 @@ async def _attempt_clone_directional_entry(
         no_shares=float(fill["fill_shares"] if plan["side"] == "no" else 0.0),
         status="open_directional",
         notes=f"Directional {plan['side']} leg filled",
+    )
+    await _record_clone_position_event(
+        position_id,
+        playbook_key=playbook_key,
+        event_type="position_opened",
+        status="open_directional",
+        side=plan["side"],
+        target_shares=float(plan["target_shares"]),
+        filled_shares=float(fill["fill_shares"]),
+        price=float(fill["fill_price"]),
+        value_usd=total_cost,
+        raw_payload=_clone_trade_event_payload(position_id=position_id, plan=plan, extra={"fill": fill}),
     )
     await trading_db.log_event(
         "weather_clone_entry",
@@ -1239,6 +1668,7 @@ async def _attempt_clone_directional_entry(
 async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> None:
     for position in positions:
         status = str(position.get("status") or "")
+        playbook_key = str(position.get("playbook_key") or "")
         market_id = str(position.get("market_id") or "")
         yes_token_id = position.get("yes_token_id")
         no_token_id = position.get("no_token_id")
@@ -1258,6 +1688,19 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
                 status="entry_failed",
                 close_reason="stale_pending_entry",
                 notes="No balances detected for pending clone entry after 60 seconds",
+            )
+            await _record_clone_position_event(
+                int(position["id"]),
+                playbook_key=playbook_key,
+                event_type="cleanup_close",
+                status="entry_failed",
+                reason="stale_pending_entry",
+                notes="No balances detected for pending clone entry after 60 seconds",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=int(position["id"]),
+                    position=position,
+                    extra={"age_seconds": round(age_seconds, 2)},
+                ),
             )
             await trading_db.log_event(
                 "weather_clone_cleanup",
@@ -1286,6 +1729,29 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
                     realized_exit_value_usd=float(mergeable),
                     notes=f"Merged via {result.mode}",
                 )
+                await _record_clone_position_event(
+                    int(position["id"]),
+                    playbook_key=playbook_key,
+                    event_type="merge_fill",
+                    status="merged_closed",
+                    target_shares=float(mergeable),
+                    filled_shares=float(mergeable),
+                    value_usd=float(mergeable),
+                    tx_hash=result.transaction_hash,
+                    reason="merged",
+                    notes=f"Merged via {result.mode}",
+                    raw_payload=_clone_trade_event_payload(
+                        position_id=int(position["id"]),
+                        position=position,
+                        extra={
+                            "mode": result.mode,
+                            "transaction_hash": result.transaction_hash,
+                            "state": result.state,
+                            "transaction_id": result.transaction_id,
+                            "shares": mergeable,
+                        },
+                    ),
+                )
                 await trading_db.log_event(
                     "weather_clone_exit",
                     f"[WEATHER-CLONE] Exit | merged {position.get('city')} {position.get('bucket_label')} shares={mergeable:.0f}",
@@ -1309,6 +1775,29 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
                 close_reason="redeemed",
                 realized_exit_value_usd=float(redeemed_amount),
                 notes=f"Redeemed via {result.mode}",
+            )
+            await _record_clone_position_event(
+                int(position["id"]),
+                playbook_key=playbook_key,
+                event_type="redeem_fill",
+                status="redeemed_closed",
+                filled_shares=float(redeemed_amount),
+                value_usd=float(redeemed_amount),
+                tx_hash=result.transaction_hash,
+                reason="redeemed",
+                notes=f"Redeemed via {result.mode}",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=int(position["id"]),
+                    position=position,
+                    extra={
+                        "mode": result.mode,
+                        "transaction_hash": result.transaction_hash,
+                        "state": result.state,
+                        "transaction_id": result.transaction_id,
+                        "yes_balance": yes_balance,
+                        "no_balance": no_balance,
+                    },
+                ),
             )
             await trading_db.log_event(
                 "weather_clone_exit",
@@ -2262,8 +2751,12 @@ async def _run_clone_cycle(
             "allowed": dry_run,
         }
     runtime = build_clone_runtime(bot_config, dry_run=dry_run)
+    runtime_limits = runtime.runtime or {}
+    max_total_exposure_usd = float(runtime_limits.get("max_total_exposure_usd") or config.DEFAULT_MAX_TOTAL_EXPOSURE_USD)
+    daily_loss_limit_usd = float(runtime_limits.get("daily_loss_limit_usd") or config.DEFAULT_DAILY_LOSS_LIMIT_USD)
+    daily_spend_limit_usd = float(runtime_limits.get("daily_spend_limit_usd") or config.DEFAULT_TOTAL_SPEND_LIMIT_USD)
     contexts = await fetch_active_weather_contexts(eligible_only=True)
-    direct_quote_result = refresh_contexts_with_direct_quotes(
+    direct_quote_result = await _refresh_clone_quotes_with_timeout(
         clob,
         contexts,
         captured_at=captured_at,
@@ -2306,16 +2799,20 @@ async def _run_clone_cycle(
         wallet_client,
         tracked_weather_market_ids=tracked_weather_market_ids,
     )
-    total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
+    total_spent_usd = await get_clone_daily_spend_usd()
+    daily_realized_pnl = await get_clone_daily_realized_pnl()
+    daily_loss = max(0.0, -daily_realized_pnl)
     stand_down_reason: str | None = None
     guard_warning_reason: str | None = None
     if not guard_report.get("ready"):
         stand_down_reason, guard_warning_reason = _clone_guard_resolution(guard_report)
-    elif config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
+    elif daily_loss_limit_usd > 0 and daily_loss >= daily_loss_limit_usd:
+        stand_down_reason = "daily_loss_limit_reached"
+    elif daily_spend_limit_usd > 0 and total_spent_usd >= daily_spend_limit_usd:
         stand_down_reason = "total_spend_limit_reached"
     elif len(active_positions) >= int(runtime.runtime.get("max_concurrent_positions") or 1):
         stand_down_reason = "capacity_reached"
-    elif active_exposure >= float(runtime.runtime.get("max_total_exposure_usd") or 0.0) > 0.0:
+    elif active_exposure >= max_total_exposure_usd > 0.0:
         stand_down_reason = "capacity_reached"
     if stand_down_reason is not None:
         health_state["execution_allowed"] = False
@@ -2340,8 +2837,13 @@ async def _run_clone_cycle(
             playbook_key = str(candidate.get("playbook_key") or "")
             active_positions = await get_open_clone_positions()
             active_exposure = _clone_active_exposure_usd(active_positions)
-            total_spent_usd = await trading_db.get_cumulative_spend_for_engine("weather_clone")
-            if config.DEFAULT_TOTAL_SPEND_LIMIT_USD > 0 and total_spent_usd >= config.DEFAULT_TOTAL_SPEND_LIMIT_USD:
+            total_spent_usd = await get_clone_daily_spend_usd()
+            daily_realized_pnl = await get_clone_daily_realized_pnl()
+            daily_loss = max(0.0, -daily_realized_pnl)
+            if daily_loss_limit_usd > 0 and daily_loss >= daily_loss_limit_usd:
+                stand_down_reason = "daily_loss_limit_reached"
+                break
+            if daily_spend_limit_usd > 0 and total_spent_usd >= daily_spend_limit_usd:
                 stand_down_reason = "total_spend_limit_reached"
                 break
             if max_entry_attempts > 0 and entry_attempts >= max_entry_attempts:
@@ -2368,6 +2870,10 @@ async def _run_clone_cycle(
                 )
 
     active_positions = await get_open_clone_positions()
+    active_exposure = _clone_active_exposure_usd(active_positions)
+    total_spent_usd = await get_clone_daily_spend_usd()
+    daily_realized_pnl = await get_clone_daily_realized_pnl()
+    daily_loss = max(0.0, -daily_realized_pnl)
     summary = build_clone_cycle_summary(
         report=report,
         health_state=health_state,
@@ -2378,8 +2884,11 @@ async def _run_clone_cycle(
         {
             "stand_down_reason": stand_down_reason,
             "guard_warning_reason": guard_warning_reason,
+            "daily_realized_pnl": round(daily_realized_pnl, 6),
+            "daily_loss": round(daily_loss, 6),
+            "daily_loss_limit_usd": round(daily_loss_limit_usd, 6),
             "total_spent_usd": round(total_spent_usd, 6),
-            "total_spend_limit_usd": config.DEFAULT_TOTAL_SPEND_LIMIT_USD,
+            "total_spend_limit_usd": round(daily_spend_limit_usd, 6),
             "wallet_guard": guard_report,
             "active_exposure_usd": round(active_exposure, 6),
         }

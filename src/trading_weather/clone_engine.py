@@ -593,6 +593,7 @@ def clone_cycle_status_message(summary: dict[str, Any]) -> str:
         f"auth={summary.get('execution_health')} "
         f"market_data={summary.get('market_data_health')} "
         f"quote_coverage={float(summary.get('quote_coverage_ratio') or 0.0):.2f} "
+        f"daily_pnl={float(summary.get('daily_realized_pnl') or 0.0):.2f} "
         f"spent={float(summary.get('total_spent_usd') or 0.0):.2f}/{float(summary.get('total_spend_limit_usd') or 0.0):.2f} "
         f"contexts={int(summary.get('context_count') or 0)} "
         f"markets={int(summary.get('market_count') or 0)} "
