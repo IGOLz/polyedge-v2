@@ -78,6 +78,12 @@ DEFAULT_CLONE_HISTORY_PATH = Path(
         str(REPO_ROOT / "logs" / "trading-weather" / "weather_clone_cycle_history.jsonl"),
     )
 ).expanduser()
+DEFAULT_PAPER_HISTORY_PATH = Path(
+    os.getenv(
+        "WEATHER_PAPER_HISTORY_PATH",
+        str(REPO_ROOT / "logs" / "trading-weather-paper" / "weather_paper_cycle_history.jsonl"),
+    )
+).expanduser()
 CLONE_LIVE_ENABLED = _env_bool("WEATHER_CLONE_ENABLE_LIVE", True)
 AUTO_APPROVE = _env_bool("WEATHER_MERGE_AUTO_APPROVE", True)
 AUTO_MERGE = _env_bool("WEATHER_MERGE_AUTO_MERGE", True)

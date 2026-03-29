@@ -1,0 +1,129 @@
+{
+  "mode": "coldmath_weather_clone",
+  "strategy_name": "coldmath_weather_clone_paper_v1",
+  "execution_mode": "paper_live",
+  "profile_name": "ColdMath",
+  "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+  "playbooks": {
+    "paired_under_par": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": true,
+      "sequence_budget_usd": 6.0,
+      "synthetic_pair_cost_lte": 0.995,
+      "max_inventory_imbalance_ratio": 0.473218,
+      "max_quote_age_seconds": 120.0,
+      "max_leg_spread": 0.08,
+      "allow_stale_pair_recovery": true,
+      "shadow_requires_full_quote_pair": false,
+      "live_requires_full_quote_pair": false
+    },
+    "asymmetric_paired_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "sequence_budget_usd": 8.0,
+      "synthetic_pair_cost_lte": 1.02,
+      "max_inventory_imbalance_ratio": 0.8,
+      "max_quote_age_seconds": 120.0,
+      "max_leg_spread": 0.08,
+      "allow_stale_pair_recovery": true,
+      "allow_active_market_reentry": true,
+      "shadow_requires_full_quote_pair": false,
+      "live_requires_full_quote_pair": false,
+      "dominant_leg_price_gte": 0.9,
+      "complementary_leg_price_lte": 0.1,
+      "dominant_leg_budget_fraction": 0.94
+    },
+    "neg_risk_basket": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "sequence_budget_usd": 25.0,
+      "synthetic_basket_cost_lte": 0.99,
+      "min_distinct_conditions": 3,
+      "max_unmatched_ratio": 0.317073,
+      "max_quote_age_seconds": 120.0,
+      "require_sibling_coverage": true,
+      "force_flatten_minutes_before_end": 120
+    },
+    "tail_bucket_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "sequence_budget_usd": 2.0,
+      "directional_price_lte": 0.001,
+      "profit_take_price": 0.12,
+      "force_flatten_minutes_before_end": 120
+    },
+    "high_prob_bucket_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "sequence_budget_usd": 2.5,
+      "directional_price_gte": 0.95,
+      "directional_price_lte": 0.995,
+      "profit_take_price": 0.985,
+      "force_flatten_minutes_before_end": 120
+    },
+    "inventory_exit_and_closeout": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": true,
+      "partial_repair_window_seconds": 30.0,
+      "max_merge_delay_minutes": 240.0,
+      "force_flatten_minutes_before_end": 120,
+      "directional_take_profit_buffer": 0.01
+    }
+  },
+  "runtime": {
+    "loop_interval_seconds": 30.0,
+    "summary_interval_seconds": 60.0,
+    "sequence_budget_usd": 6.0,
+    "max_total_exposure_usd": 30.0,
+    "daily_loss_limit_usd": 30.0,
+    "daily_spend_limit_usd": 30.0,
+    "min_expected_edge_usd": 0.03,
+    "max_concurrent_positions": 3,
+    "max_entry_attempts": 3,
+    "min_target_shares": 5,
+    "repeat_entry_cooldown_seconds": 15.0
+  },
+  "health": {
+    "require_execution_auth_for_live": true,
+    "allow_shadow_when_auth_unhealthy": true,
+    "direct_quote_fallback_enabled": true,
+    "direct_quote_cache_seconds": 10.0,
+    "direct_quote_max_age_seconds": 20.0,
+    "direct_quote_timeout_seconds": 8.0,
+    "max_direct_quote_markets_per_cycle": 120,
+    "min_quote_coverage_ratio": 0.4,
+    "persist_all_scans": true,
+    "persist_all_market_rows": true
+  },
+  "paper": {
+    "fill_model": "touch_realistic",
+    "snapshot_interval_seconds": 60.0
+  },
+  "parity": {
+    "signal_match_window_seconds": 15.0,
+    "lookback_hours": 24,
+    "high_confidence_playbooks": [
+      "paired_under_par"
+    ],
+    "required_under_par_pair_matches": 21,
+    "enable_live_when_matched_trade_ratio_gte": 0.25,
+    "holdout_condition_side_match_rate_gte": 0.7,
+    "holdout_playbook_match_rate_gte": 0.6,
+    "holdout_median_entry_delta_seconds_lte": 45.0,
+    "holdout_median_size_error_ratio_lte": 0.35,
+    "holdout_replay_pnl_proxy_ratio_gte": 0.75,
+    "holdout_pair_replay_pnl_proxy_ratio_gte": 0.85,
+    "notional_miss_bucket_min_usd": 25.0
+  },
+  "deployment": {
+    "approved_parity_artifact": null,
+    "release_gate_status": "paper_only",
+    "require_approved_parity_for_live": true
+  }
+}

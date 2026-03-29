@@ -182,7 +182,8 @@ services:
       WEATHER_MERGE_REQUIRE_CLEAN_WALLET: "true"
       WEATHER_MERGE_ACTIVITY_LOOKBACK_MINUTES: "60"
       WEATHER_MERGE_ALLOW_ORPHANED_POSITIONS: "false"
-      WEATHER_CLONE_ENABLE_LIVE: "true"
+      WEATHER_CLONE_ENABLE_LIVE: "false"
+      WEATHER_PAPER_HISTORY_PATH: "/app/logs/weather_paper_cycle_history.jsonl"
     command:
       [
         "python",
@@ -192,15 +193,48 @@ services:
         "--engine",
         "auto",
         "--config-path",
-        "/app/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_coldmath_clone_bot_config.json"
+        "/app/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_coldmath_clone_paper_bot_config.json"
       ]
     volumes:
-      - ./logs/trading-weather:/app/logs
+      - ./logs/trading-weather-paper:/app/logs
     restart: unless-stopped
     networks:
       - polyedge
     labels:
       polyedge.role: "trading-weather"
+      polyedge.update: "safe"
+
+  # â”€â”€ Trading Weather Paper: Paper-trading weather clone bot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+  trading-weather-paper:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.trading
+    container_name: polyedge-trading-weather-paper
+    platform: linux/amd64
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      WEATHER_PAPER_HISTORY_PATH: "/app/logs/weather_paper_cycle_history.jsonl"
+    command:
+      [
+        "python",
+        "-u",
+        "-m",
+        "trading_weather.main",
+        "--engine",
+        "auto",
+        "--config-path",
+        "/app/src/results/wallet_forensics/coldmath_resume_smoke_v3/wallet_coldmath_clone_paper_bot_config.json"
+      ]
+    volumes:
+      - ./logs/trading-weather-paper:/app/logs
+    restart: unless-stopped
+    networks:
+      - polyedge
+    labels:
+      polyedge.role: "trading-weather-paper"
       polyedge.update: "safe"
 
   # ── Wallet Tracker: Periodic activity fetcher for tracked profiles ────

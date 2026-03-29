@@ -12,6 +12,7 @@ readonly -a ALLOWED_SERVICES=(
   "dashboard"
   "weather"
   "trading-weather"
+  "trading-weather-paper"
   "wallet-tracker"
   "core-debug"
 )
@@ -21,6 +22,7 @@ readonly -a SAFE_UPDATE_SERVICES=(
   "dashboard"
   "weather"
   "trading-weather"
+  "trading-weather-paper"
   "wallet-tracker"
 )
 

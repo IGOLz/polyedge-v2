@@ -3176,14 +3176,20 @@ async def _run_clone_cycle(
 
 
 async def run_clone(*, config_path: str, dry_run: bool, once: bool) -> None:
+    raw_config = _load_bot_config(config_path)
+    bot_config = normalize_clone_bot_config(raw_config)
+    if str(bot_config.get("execution_mode") or "").strip().lower() == "paper_live":
+        from trading_weather.paper_runtime import run_clone_paper
+
+        await run_clone_paper(config_path=config_path, dry_run=dry_run, once=once)
+        return
+
     trading_config.patch_clob_client_proxy(PROXY_URL)
     await init_pool()
     await trading_db.create_trading_tables()
     await create_weather_tables()
     await create_weather_clone_tables()
 
-    raw_config = _load_bot_config(config_path)
-    bot_config = normalize_clone_bot_config(raw_config)
     clob = _build_clob_client()
     wallet_client = WalletForensicsClient()
     telemetry = WeatherCloneTelemetryState(

@@ -52,6 +52,7 @@ def _normalize_explicit_clone_config(config: dict[str, Any]) -> dict[str, Any]:
         "playbooks": {},
         "runtime": _normalize_runtime(config.get("runtime") or {}),
         "health": _normalize_health(config.get("health") or {}),
+        "paper": _normalize_paper(config.get("paper") or {}),
         "parity": _normalize_parity(config.get("parity") or {}),
         "deployment": _normalize_deployment(config.get("deployment") or {}),
     }
@@ -227,6 +228,7 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
             }
         ),
         "health": _normalize_health({}),
+        "paper": _normalize_paper({}),
         "parity": _normalize_parity({}),
         "deployment": _normalize_deployment({}),
     }
@@ -263,6 +265,15 @@ def _normalize_health(health: dict[str, Any]) -> dict[str, Any]:
         "max_persisted_market_rows_per_cycle": int(health.get("max_persisted_market_rows_per_cycle") or 250),
         "max_persisted_sequences_per_cycle": int(health.get("max_persisted_sequences_per_cycle") or 400),
         "persist_timeout_seconds": float(health.get("persist_timeout_seconds") or 5.0),
+    }
+
+
+def _normalize_paper(paper: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "fill_model": str(paper.get("fill_model") or "touch_realistic"),
+        "snapshot_interval_seconds": float(
+            paper.get("snapshot_interval_seconds") or runtime_config.DEFAULT_SUMMARY_INTERVAL_SECONDS
+        ),
     }
 
 
