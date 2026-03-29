@@ -99,6 +99,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Fallback timezone for naive log timestamps, for example UTC, Europe/Rome, or +01:00",
     )
+    parser.add_argument(
+        "--window-start-utc",
+        type=str,
+        default=None,
+        help="Explicit UTC window start ISO timestamp. Use with --window-end-utc to bypass log-based window detection.",
+    )
+    parser.add_argument(
+        "--window-end-utc",
+        type=str,
+        default=None,
+        help="Explicit UTC window end ISO timestamp. Use with --window-start-utc to bypass log-based window detection.",
+    )
     parser.add_argument("--window-hours", type=float, default=24.0, help="Comparison window size in hours")
     parser.add_argument(
         "--heartbeat-gap-seconds",
@@ -140,7 +152,12 @@ def run_window_comparison(args: argparse.Namespace | list[str] | None = None) ->
         ],
         default_tz=log_tz,
     )
-    window = _determine_window(log_entries=log_entries, window_hours=float(args.window_hours))
+    window = _determine_window(
+        log_entries=log_entries,
+        window_hours=float(args.window_hours),
+        explicit_window_start_utc=args.window_start_utc,
+        explicit_window_end_utc=args.window_end_utc,
+    )
     if window["window_end_utc"] > utc_now():
         raise RuntimeError(
             "The requested comparison window ends in the future relative to the current machine clock"
@@ -346,7 +363,29 @@ def _normalize_log_line(raw_line: str) -> str:
     return text
 
 
-def _determine_window(*, log_entries: list[ParsedLogLine], window_hours: float) -> dict[str, Any]:
+def _determine_window(
+    *,
+    log_entries: list[ParsedLogLine],
+    window_hours: float,
+    explicit_window_start_utc: str | None = None,
+    explicit_window_end_utc: str | None = None,
+) -> dict[str, Any]:
+    if bool(explicit_window_start_utc) != bool(explicit_window_end_utc):
+        raise RuntimeError("Both --window-start-utc and --window-end-utc must be provided together")
+    if explicit_window_start_utc and explicit_window_end_utc:
+        window_start = _parse_iso_timestamp(str(explicit_window_start_utc).strip()).astimezone(UTC)
+        window_end = _parse_iso_timestamp(str(explicit_window_end_utc).strip()).astimezone(UTC)
+        if window_end <= window_start:
+            raise RuntimeError("Explicit window end must be after the explicit window start")
+        return {
+            "window_start_utc": window_start,
+            "window_end_utc": window_end,
+            "start_source_path": "explicit_args",
+            "start_source_line": None,
+            "start_source_timestamp": explicit_window_start_utc,
+            "start_source_message": "explicit window override",
+        }
+
     live_start = next((item for item in log_entries if START_LINE_FRAGMENT in item.message), None)
     if live_start is None:
         raise RuntimeError("Could not find a live bot start line in the provided log files")

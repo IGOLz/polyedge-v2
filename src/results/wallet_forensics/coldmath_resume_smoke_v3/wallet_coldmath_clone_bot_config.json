@@ -28,21 +28,21 @@
     "tail_bucket_accumulation": {
       "enabled": true,
       "shadow_enabled": true,
-      "live_enabled": true,
+      "live_enabled": false,
       "rolling_window_seconds": 60.0,
       "sequence_budget_usd": 2.0,
       "target_sides": [
         "yes",
         "no"
       ],
-      "directional_price_lte": 0.05,
+      "directional_price_lte": 0.001,
       "profit_take_price": 0.12,
       "force_flatten_minutes_before_end": 120
     },
     "high_prob_bucket_accumulation": {
       "enabled": true,
       "shadow_enabled": true,
-      "live_enabled": true,
+      "live_enabled": false,
       "rolling_window_seconds": 60.0,
       "sequence_budget_usd": 2.5,
       "target_sides": [

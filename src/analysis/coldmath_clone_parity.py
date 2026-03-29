@@ -26,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fallback-log-path", type=str, default=None)
     parser.add_argument("--lxc-date-is", type=str, default=None)
     parser.add_argument("--log-timezone", type=str, default=None)
+    parser.add_argument("--window-start-utc", type=str, default=None)
+    parser.add_argument("--window-end-utc", type=str, default=None)
     parser.add_argument("--window-hours", type=float, default=24.0)
     parser.add_argument("--heartbeat-gap-seconds", type=float, default=180.0)
     parser.add_argument("--match-window-seconds", type=float, default=15.0)
@@ -66,6 +68,8 @@ def run_clone_parity(args: argparse.Namespace | list[str] | None = None) -> dict
             fallback_log_path=args.fallback_log_path,
             lxc_date_is=args.lxc_date_is,
             log_timezone=args.log_timezone,
+            window_start_utc=args.window_start_utc,
+            window_end_utc=args.window_end_utc,
             window_hours=args.window_hours,
             heartbeat_gap_seconds=args.heartbeat_gap_seconds,
             output_dir=str(

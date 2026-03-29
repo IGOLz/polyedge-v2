@@ -141,6 +141,21 @@ def _parse_fill_from_resp(resp: dict | None, fallback_shares: int, fallback_pric
     return fill_shares, fill_price
 
 
+def _response_implies_fill(resp: dict | None) -> bool:
+    if not isinstance(resp, dict):
+        return False
+    status = str(resp.get("status") or "").upper()
+    if status in {"MATCHED", "FILLED"}:
+        return True
+    raw_shares = resp.get("size_matched") or resp.get("matched_size") or resp.get("filled")
+    if raw_shares is None:
+        return False
+    try:
+        return float(raw_shares) > 0.0
+    except (TypeError, ValueError):
+        return False
+
+
 def _normalize_order_price(price: float) -> float:
     normalized = round(float(price), 3)
     if normalized < 0.001:
@@ -224,10 +239,21 @@ def _place_fok_order(clob, token_id: str, *, price: float, shares: int, side: st
         size=float(normalized_shares),
         side=side,
     )
-    signed = clob.create_order(order_args)
-    resp = clob.post_order(signed, OrderType.FOK)
-    status = (resp.get("status") or "").upper() if isinstance(resp, dict) else ""
-    if status in {"MATCHED", "FILLED"}:
+    try:
+        signed = clob.create_order(order_args)
+        resp = clob.post_order(signed, OrderType.FOK)
+    except Exception as exc:
+        log.warning(
+            "[WEATHER] FOK order failed | side=%s token=%s price=%.3f shares=%s error=%s: %s",
+            side,
+            token_id,
+            normalized_price,
+            normalized_shares,
+            type(exc).__name__,
+            exc,
+        )
+        return None
+    if _response_implies_fill(resp):
         fill_shares, fill_price = _parse_fill_from_resp(resp, normalized_shares, normalized_price)
         return {
             "order_id": resp.get("orderID") or resp.get("id"),
@@ -1018,9 +1044,56 @@ def _clone_guard_resolution(guard_report: dict[str, Any]) -> tuple[str | None, s
     reason = str(guard_report.get("reason") or "").strip() or None
     if not reason:
         return None, None
-    if reason == "orphaned_weather_inventory_detected":
-        return None, reason
     return reason, None
+
+
+def _clone_position_effective_cost_usd(position: dict[str, Any]) -> float:
+    total_entry_cost = safe_float(position.get("total_entry_cost")) or 0.0
+    if total_entry_cost > 0.0:
+        return round(total_entry_cost, 6)
+
+    avg_entry_price = safe_float(position.get("avg_entry_price")) or 0.0
+    filled_shares = safe_float(position.get("filled_shares")) or 0.0
+    if avg_entry_price > 0.0 and filled_shares > 0.0:
+        return round(avg_entry_price * filled_shares, 6)
+
+    target_shares = safe_float(position.get("target_shares")) or 0.0
+    if target_shares <= 0.0:
+        return 0.0
+
+    quote_snapshot = position.get("quote_snapshot") or {}
+    if isinstance(quote_snapshot, str):
+        try:
+            quote_snapshot = json.loads(quote_snapshot)
+        except json.JSONDecodeError:
+            quote_snapshot = {}
+
+    side = str(position.get("side") or "").strip().lower()
+    planned_price = 0.0
+    if side == "yes":
+        planned_price = safe_float(quote_snapshot.get("yes_ask")) or 0.0
+    elif side == "no":
+        planned_price = safe_float(quote_snapshot.get("no_ask")) or 0.0
+    else:
+        planned_price = (safe_float(quote_snapshot.get("yes_ask")) or 0.0) + (
+            safe_float(quote_snapshot.get("no_ask")) or 0.0
+        )
+
+    if planned_price <= 0.0:
+        return 0.0
+    return round(target_shares * planned_price, 6)
+
+
+def _clone_pending_reserved_spend_usd(positions: list[dict[str, Any]]) -> float:
+    reserved = 0.0
+    for position in positions:
+        if position.get("closed_at") is not None:
+            continue
+        total_entry_cost = safe_float(position.get("total_entry_cost")) or 0.0
+        if total_entry_cost > 0.0:
+            continue
+        reserved += _clone_position_effective_cost_usd(position)
+    return round(reserved, 6)
 
 
 def _clone_persist_sort_key(row: dict[str, Any]) -> tuple[int, int, float]:
@@ -1160,7 +1233,7 @@ def _clone_active_exposure_usd(positions: list[dict[str, Any]]) -> float:
     for position in positions:
         if position.get("closed_at") is not None:
             continue
-        exposure += safe_float(position.get("total_entry_cost")) or 0.0
+        exposure += _clone_position_effective_cost_usd(position)
     return round(exposure, 6)
 
 
@@ -1681,6 +1754,54 @@ async def _reconcile_clone_positions(clob, positions: list[dict[str, Any]]) -> N
             age_seconds = (datetime.now(UTC) - opened_at_utc).total_seconds()
         resolution = await weather_db.get_market_resolution(market_id)
         resolved = bool((resolution or {}).get("resolved"))
+
+        if status == "pending_entry" and age_seconds is not None and age_seconds >= 60 and (yes_balance > 0 or no_balance > 0):
+            estimated_cost = _clone_position_effective_cost_usd(position)
+            await close_clone_position(
+                int(position["id"]),
+                status="entry_failed",
+                close_reason="unreconciled_pending_entry_inventory",
+                notes="Detected token balance for pending clone entry; forcing wallet guard reconciliation",
+            )
+            await _record_clone_position_event(
+                int(position["id"]),
+                playbook_key=playbook_key,
+                event_type="cleanup_close",
+                status="entry_failed",
+                filled_shares=float(max(yes_balance, no_balance)),
+                value_usd=estimated_cost or None,
+                reason="unreconciled_pending_entry_inventory",
+                notes="Detected token balance for pending clone entry; forcing wallet guard reconciliation",
+                raw_payload=_clone_trade_event_payload(
+                    position_id=int(position["id"]),
+                    position=position,
+                    extra={
+                        "age_seconds": round(age_seconds, 2),
+                        "yes_balance": round(yes_balance, 6),
+                        "no_balance": round(no_balance, 6),
+                        "estimated_cost_usd": round(estimated_cost, 6),
+                    },
+                ),
+            )
+            await trading_db.log_event(
+                "weather_clone_cleanup",
+                (
+                    "[WEATHER-CLONE] Cleanup | "
+                    f"closed unreconciled pending entry {position.get('city')} {position.get('bucket_label')}"
+                ),
+                _json_safe_payload(
+                    {
+                        "position_id": position.get("id"),
+                        "status": status,
+                        "age_seconds": round(age_seconds, 2),
+                        "yes_balance": round(yes_balance, 6),
+                        "no_balance": round(no_balance, 6),
+                        "estimated_cost_usd": round(estimated_cost, 6),
+                    }
+                ),
+                echo=False,
+            )
+            continue
 
         if status == "pending_entry" and age_seconds is not None and age_seconds >= 60 and yes_balance <= 0 and no_balance <= 0:
             await close_clone_position(
@@ -2799,7 +2920,9 @@ async def _run_clone_cycle(
         wallet_client,
         tracked_weather_market_ids=tracked_weather_market_ids,
     )
-    total_spent_usd = await get_clone_daily_spend_usd()
+    ledger_spent_usd = await get_clone_daily_spend_usd()
+    reserved_pending_spend_usd = _clone_pending_reserved_spend_usd(active_positions)
+    total_spent_usd = round(ledger_spent_usd + reserved_pending_spend_usd, 6)
     daily_realized_pnl = await get_clone_daily_realized_pnl()
     daily_loss = max(0.0, -daily_realized_pnl)
     stand_down_reason: str | None = None
@@ -2837,7 +2960,9 @@ async def _run_clone_cycle(
             playbook_key = str(candidate.get("playbook_key") or "")
             active_positions = await get_open_clone_positions()
             active_exposure = _clone_active_exposure_usd(active_positions)
-            total_spent_usd = await get_clone_daily_spend_usd()
+            ledger_spent_usd = await get_clone_daily_spend_usd()
+            reserved_pending_spend_usd = _clone_pending_reserved_spend_usd(active_positions)
+            total_spent_usd = round(ledger_spent_usd + reserved_pending_spend_usd, 6)
             daily_realized_pnl = await get_clone_daily_realized_pnl()
             daily_loss = max(0.0, -daily_realized_pnl)
             if daily_loss_limit_usd > 0 and daily_loss >= daily_loss_limit_usd:
@@ -2871,7 +2996,9 @@ async def _run_clone_cycle(
 
     active_positions = await get_open_clone_positions()
     active_exposure = _clone_active_exposure_usd(active_positions)
-    total_spent_usd = await get_clone_daily_spend_usd()
+    ledger_spent_usd = await get_clone_daily_spend_usd()
+    reserved_pending_spend_usd = _clone_pending_reserved_spend_usd(active_positions)
+    total_spent_usd = round(ledger_spent_usd + reserved_pending_spend_usd, 6)
     daily_realized_pnl = await get_clone_daily_realized_pnl()
     daily_loss = max(0.0, -daily_realized_pnl)
     summary = build_clone_cycle_summary(
@@ -2888,6 +3015,8 @@ async def _run_clone_cycle(
             "daily_loss": round(daily_loss, 6),
             "daily_loss_limit_usd": round(daily_loss_limit_usd, 6),
             "total_spent_usd": round(total_spent_usd, 6),
+            "ledger_total_spent_usd": round(ledger_spent_usd, 6),
+            "reserved_pending_spend_usd": round(reserved_pending_spend_usd, 6),
             "total_spend_limit_usd": round(daily_spend_limit_usd, 6),
             "wallet_guard": guard_report,
             "active_exposure_usd": round(active_exposure, 6),

@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 from analysis.coldmath_clone_parity import _match_signals_to_trades
 from trading_weather.clone_config import normalize_clone_bot_config
@@ -20,10 +21,13 @@ from trading_weather.clone_engine import (
     refresh_contexts_with_direct_quotes,
 )
 from trading_weather.main import (
+    _clone_active_exposure_usd,
     _clone_guard_resolution,
     _minimum_buy_order_shares,
     _normalize_buy_order_shares,
     _normalize_order_price,
+    _place_fok_order,
+    _reconcile_clone_positions,
     _select_clone_persistence_rows,
 )
 from weather.models import WeatherBucketMarket, WeatherMarketContext
@@ -155,6 +159,19 @@ class _BookClob:
 
     def get_order_books(self, params):
         return self.summaries
+
+
+class _OrderClob:
+    def __init__(self, response):
+        self.response = response
+
+    def create_order(self, order_args):
+        return order_args
+
+    def post_order(self, signed, order_type):
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
 
 
 class TradingWeatherCloneTests(unittest.TestCase):
@@ -721,13 +738,54 @@ class TradingWeatherCloneTests(unittest.TestCase):
 
         self.assertIn("guard_warning=orphaned_weather_inventory_detected", message)
 
-    def test_clone_guard_resolution_treats_orphaned_weather_as_warning(self):
+    def test_clone_guard_resolution_blocks_orphaned_weather_inventory(self):
         block_reason, warning_reason = _clone_guard_resolution(
             {"ready": False, "reason": "orphaned_weather_inventory_detected"}
         )
 
-        self.assertIsNone(block_reason)
-        self.assertEqual(warning_reason, "orphaned_weather_inventory_detected")
+        self.assertEqual(block_reason, "orphaned_weather_inventory_detected")
+        self.assertIsNone(warning_reason)
+
+    def test_clone_active_exposure_counts_pending_planned_cost(self):
+        exposure = _clone_active_exposure_usd(
+            [
+                {
+                    "closed_at": None,
+                    "status": "pending_entry",
+                    "target_shares": 2000,
+                    "side": "yes",
+                    "total_entry_cost": 0.0,
+                    "quote_snapshot": {"yes_ask": 0.001},
+                }
+            ]
+        )
+
+        self.assertEqual(exposure, 2.0)
+
+    def test_place_fok_order_treats_positive_matched_size_as_fill(self):
+        fill = _place_fok_order(
+            _OrderClob({"status": "LIVE", "matched_size": "2000", "average_price": "0.001", "orderID": "abc"}),
+            "tok-1",
+            price=0.001,
+            shares=2000,
+            side="BUY",
+        )
+
+        self.assertIsNotNone(fill)
+        self.assertEqual(fill["order_id"], "abc")
+        self.assertEqual(fill["fill_shares"], 2000)
+        self.assertEqual(fill["fill_price"], 0.001)
+
+    def test_place_fok_order_returns_none_when_post_order_raises(self):
+        fill = _place_fok_order(
+            _OrderClob(RuntimeError("boom")),
+            "tok-1",
+            price=0.001,
+            shares=2000,
+            side="BUY",
+        )
+
+        self.assertIsNone(fill)
 
     def test_select_clone_persistence_rows_caps_output(self):
         report = {
@@ -751,6 +809,40 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["playbook_key"], "paired_under_par")
         self.assertEqual(len(sequences), 1)
+
+
+class TradingWeatherCloneAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconcile_clone_positions_closes_unreconciled_pending_inventory(self):
+        opened_at = datetime.now(UTC) - timedelta(seconds=120)
+        position = {
+            "id": 99,
+            "status": "pending_entry",
+            "playbook_key": "tail_bucket_accumulation",
+            "market_id": "m1",
+            "yes_token_id": "m1-yes",
+            "no_token_id": "m1-no",
+            "opened_at": opened_at,
+            "city": "Rome",
+            "bucket_label": "16C",
+            "target_shares": 2000,
+            "side": "yes",
+            "quote_snapshot": {"yes_ask": 0.001},
+        }
+
+        with (
+            patch("trading_weather.main._get_token_balance", side_effect=[5.0, 0.0]),
+            patch("trading_weather.main.weather_db.get_market_resolution", new=AsyncMock(return_value={"resolved": False})),
+            patch("trading_weather.main.close_clone_position", new=AsyncMock()) as close_mock,
+            patch("trading_weather.main._record_clone_position_event", new=AsyncMock()) as event_mock,
+            patch("trading_weather.main.trading_db.log_event", new=AsyncMock()) as log_mock,
+        ):
+            await _reconcile_clone_positions(object(), [position])
+
+        close_mock.assert_awaited_once()
+        self.assertEqual(close_mock.await_args.kwargs["close_reason"], "unreconciled_pending_entry_inventory")
+        event_mock.assert_awaited_once()
+        self.assertEqual(event_mock.await_args.kwargs["reason"], "unreconciled_pending_entry_inventory")
+        log_mock.assert_awaited_once()
 
 
 if __name__ == "__main__":
