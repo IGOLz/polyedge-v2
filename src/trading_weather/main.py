@@ -24,6 +24,7 @@ from trading_weather.clone_config import PLAYBOOK_ORDER, is_clone_bot_config, no
 from trading_weather.clone_db import (
     close_clone_position,
     create_weather_clone_tables,
+    get_clone_entry_activity,
     get_clone_daily_realized_pnl,
     get_clone_daily_spend_usd,
     get_open_clone_positions,
@@ -41,6 +42,7 @@ from trading_weather.clone_engine import (
     clone_cycle_status_message,
     evaluate_clone_cycle,
     plan_directional_entry,
+    plan_neg_risk_entry,
     plan_paired_entry,
     preflight_clone_health,
     refresh_contexts_with_direct_quotes,
@@ -1235,6 +1237,106 @@ def _clone_active_exposure_usd(positions: list[dict[str, Any]]) -> float:
             continue
         exposure += _clone_position_effective_cost_usd(position)
     return round(exposure, 6)
+
+
+def _clone_entry_condition_id(candidate: dict[str, Any], plan: dict[str, Any] | None = None) -> str:
+    if plan is not None and str(plan.get("condition_id") or "").strip():
+        return str(plan.get("condition_id") or "").strip()
+    return str(candidate.get("condition_id") or candidate.get("market_id") or "").strip()
+
+
+def _clone_apply_runtime_size_controls(
+    plan: dict[str, Any],
+    *,
+    candidate: dict[str, Any],
+    runtime,
+    repeat_count: int,
+) -> dict[str, Any] | None:
+    playbook_key = str(plan.get("playbook_key") or "")
+    playbook = ((runtime.config.get("playbooks") or {}).get(playbook_key) or {})
+    sequence_budget = safe_float(playbook.get("sequence_budget_usd")) or safe_float(plan.get("sequence_budget_usd")) or 0.0
+    max_ask_fraction = safe_float(playbook.get("max_ask_size_fraction")) or 1.0
+    reentry_scale = safe_float(playbook.get("reentry_scale")) or 1.0
+    effective_budget = max(0.0, sequence_budget * (reentry_scale ** max(0, repeat_count)))
+    adjusted = dict(plan)
+    adjusted["sequence_budget_usd"] = round(sequence_budget, 6)
+    if playbook_key in {"paired_under_par", "asymmetric_paired_accumulation"}:
+        yes_price = safe_float(plan.get("yes_price")) or 0.0
+        no_price = safe_float(plan.get("no_price")) or 0.0
+        yes_target = max(0, math.floor((safe_float(plan.get("yes_target_shares")) or 0.0) * (reentry_scale ** max(0, repeat_count))))
+        no_target = max(0, math.floor((safe_float(plan.get("no_target_shares")) or 0.0) * (reentry_scale ** max(0, repeat_count))))
+        yes_ask_size = safe_float(plan.get("yes_ask_size"))
+        no_ask_size = safe_float(plan.get("no_ask_size"))
+        if yes_ask_size is not None and yes_ask_size > 0:
+            yes_target = min(yes_target, math.floor(yes_ask_size * max_ask_fraction))
+        if no_ask_size is not None and no_ask_size > 0:
+            no_target = min(no_target, math.floor(no_ask_size * max_ask_fraction))
+        total_target_cost = (yes_target * yes_price) + (no_target * no_price)
+        if effective_budget > 0 and total_target_cost > effective_budget:
+            scale = effective_budget / max(total_target_cost, 1e-9)
+            yes_target = math.floor(yes_target * scale)
+            no_target = math.floor(no_target * scale)
+            total_target_cost = (yes_target * yes_price) + (no_target * no_price)
+        paired_target = min(yes_target, no_target)
+        if paired_target <= 0 or total_target_cost <= 0:
+            return None
+        adjusted["yes_target_shares"] = yes_target
+        adjusted["no_target_shares"] = no_target
+        adjusted["target_shares"] = paired_target
+        adjusted["total_target_cost"] = round(total_target_cost, 6)
+        adjusted["expected_edge_usd"] = round(max(0.0, 1.0 - (safe_float(adjusted.get("combined_cost")) or 1.0)) * paired_target, 6)
+        return adjusted
+    if playbook_key == "neg_risk_basket":
+        legs = list(plan.get("legs") or [])
+        if not legs:
+            return None
+        per_leg_budget = effective_budget / max(len(legs), 1)
+        adjusted_legs: list[dict[str, Any]] = []
+        for leg in legs:
+            price = safe_float(leg.get("price")) or 0.0
+            available_size = safe_float(leg.get("available_size"))
+            if price <= 0:
+                continue
+            target_shares = math.floor(per_leg_budget / price)
+            if available_size is not None and available_size > 0:
+                target_shares = min(target_shares, math.floor(available_size * max_ask_fraction))
+            if target_shares <= 0:
+                continue
+            adjusted_legs.append({**leg, "target_shares": int(target_shares)})
+        required = int(safe_float(plan.get("selected_condition_count")) or len(legs) or 0)
+        if len(adjusted_legs) < max(1, required):
+            return None
+        adjusted["legs"] = adjusted_legs
+        adjusted["selected_condition_count"] = len(adjusted_legs)
+        adjusted["target_shares"] = int(sum(int(leg.get("target_shares") or 0) for leg in adjusted_legs))
+        adjusted["combined_cost"] = round(sum((safe_float(leg.get("price")) or 0.0) for leg in adjusted_legs), 6)
+        adjusted["total_target_cost"] = round(
+            sum((safe_float(leg.get("price")) or 0.0) * int(leg.get("target_shares") or 0) for leg in adjusted_legs),
+            6,
+        )
+        return adjusted if adjusted["target_shares"] > 0 else None
+    target_shares = max(0, math.floor((safe_float(plan.get("target_shares")) or 0.0) * (reentry_scale ** max(0, repeat_count))))
+    available_size = safe_float(plan.get("available_size"))
+    price = safe_float(plan.get("price")) or 0.0
+    if available_size is not None and available_size > 0:
+        target_shares = min(target_shares, math.floor(available_size * max_ask_fraction))
+    if effective_budget > 0 and price > 0:
+        target_shares = min(target_shares, math.floor(effective_budget / price))
+    if target_shares <= 0:
+        return None
+    adjusted["target_shares"] = int(target_shares)
+    adjusted["expected_edge_usd"] = round(
+        max(0.0, (safe_float(plan.get("profit_take_price")) or price) - price) * target_shares,
+        6,
+    )
+    return adjusted
+
+
+def _clone_runtime_cooldown_blocked(*, latest_opened_at: datetime | None, captured_at: datetime, cooldown_seconds: float) -> bool:
+    if latest_opened_at is None or cooldown_seconds <= 0:
+        return False
+    latest = latest_opened_at.astimezone(UTC) if latest_opened_at.tzinfo else latest_opened_at.replace(tzinfo=UTC)
+    return (captured_at - latest).total_seconds() < cooldown_seconds
 
 
 async def _attempt_clone_paired_entry(
@@ -2906,6 +3008,11 @@ async def _run_clone_cycle(
         health_state["execution_allowed"] = bool((health_state.get("execution_auth") or {}).get("allowed"))
         if bool((bot_config.get("health") or {}).get("require_execution_auth_for_live", True)) and not health_state["execution_allowed"]:
             health_state["execution_allowed"] = False
+        deployment_config = bot_config.get("deployment") or {}
+        if bool(deployment_config.get("require_approved_parity_for_live", True)) and not str(
+            deployment_config.get("approved_parity_artifact") or ""
+        ).strip():
+            health_state["execution_allowed"] = False
 
     active_positions = await get_open_clone_positions()
     await _reconcile_clone_positions(clob, active_positions)
@@ -2929,6 +3036,10 @@ async def _run_clone_cycle(
     guard_warning_reason: str | None = None
     if not guard_report.get("ready"):
         stand_down_reason, guard_warning_reason = _clone_guard_resolution(guard_report)
+    elif bot_config.get("execution_mode") == "live_small" and bool((bot_config.get("deployment") or {}).get("require_approved_parity_for_live", True)) and not str(
+        (bot_config.get("deployment") or {}).get("approved_parity_artifact") or ""
+    ).strip():
+        stand_down_reason = "parity_artifact_required"
     elif daily_loss_limit_usd > 0 and daily_loss >= daily_loss_limit_usd:
         stand_down_reason = "daily_loss_limit_reached"
     elif daily_spend_limit_usd > 0 and total_spent_usd >= daily_spend_limit_usd:
@@ -2973,20 +3084,44 @@ async def _run_clone_cycle(
                 break
             if max_entry_attempts > 0 and entry_attempts >= max_entry_attempts:
                 break
+            candidate_side = str(candidate.get("side") or "paired")
+            entry_activity = await get_clone_entry_activity(
+                condition_id=_clone_entry_condition_id(candidate),
+                playbook_key=playbook_key,
+                side=candidate_side,
+            )
+            if _clone_runtime_cooldown_blocked(
+                latest_opened_at=entry_activity.get("latest_opened_at"),
+                captured_at=captured_at,
+                cooldown_seconds=float(runtime.runtime.get("repeat_entry_cooldown_seconds") or 0.0),
+            ):
+                continue
             plan = None
-            if playbook_key == "paired_under_par":
+            if playbook_key in {"paired_under_par", "asymmetric_paired_accumulation"}:
                 plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
+            elif playbook_key == "neg_risk_basket":
+                plan = plan_neg_risk_entry(candidate, runtime, active_exposure_usd=active_exposure)
             else:
                 plan = plan_directional_entry(candidate, runtime, active_exposure_usd=active_exposure)
             if plan is None:
                 continue
+            plan = _clone_apply_runtime_size_controls(
+                plan,
+                candidate=candidate,
+                runtime=runtime,
+                repeat_count=int(entry_activity.get("entry_count") or 0),
+            )
+            if plan is None:
+                continue
             entry_attempts += 1
-            if playbook_key == "paired_under_par":
+            if playbook_key in {"paired_under_par", "asymmetric_paired_accumulation"}:
                 await _attempt_clone_paired_entry(
                     clob,
                     plan,
                     shadow_only=not bool(health_state.get("execution_allowed")),
                 )
+            elif playbook_key == "neg_risk_basket":
+                continue
             else:
                 await _attempt_clone_directional_entry(
                     clob,

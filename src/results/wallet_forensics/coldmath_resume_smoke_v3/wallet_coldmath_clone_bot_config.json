@@ -1,7 +1,7 @@
 {
   "mode": "coldmath_weather_clone",
   "strategy_name": "coldmath_weather_clone_v1",
-  "execution_mode": "live_small",
+  "execution_mode": "shadow_only",
   "profile_name": null,
   "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
   "playbooks": {
@@ -11,13 +11,15 @@
       "live_enabled": true,
       "rolling_window_seconds": 60.0,
       "sequence_budget_usd": 6.0,
+      "max_ask_size_fraction": 1.0,
+      "reentry_scale": 1.0,
       "target_sides": [
         "yes",
         "no"
       ],
       "synthetic_pair_cost_lte": 0.995,
       "min_mergeable_size": 0.0,
-      "max_inventory_imbalance_ratio": 0.491617,
+      "max_inventory_imbalance_ratio": 0.473218,
       "max_quote_age_seconds": 120.0,
       "max_leg_spread": 0.08,
       "allow_stale_pair_recovery": true,
@@ -25,12 +27,33 @@
       "live_requires_full_quote_pair": false,
       "midpoint_confirmation_required": false
     },
+    "neg_risk_basket": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 25.0,
+      "max_ask_size_fraction": 1.0,
+      "reentry_scale": 1.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "synthetic_basket_cost_lte": 0.99,
+      "min_distinct_conditions": 3,
+      "max_unmatched_ratio": 0.317073,
+      "max_quote_age_seconds": 120.0,
+      "require_sibling_coverage": true,
+      "force_flatten_minutes_before_end": 120
+    },
     "tail_bucket_accumulation": {
       "enabled": true,
       "shadow_enabled": true,
       "live_enabled": false,
       "rolling_window_seconds": 60.0,
       "sequence_budget_usd": 2.0,
+      "max_ask_size_fraction": 1.0,
+      "reentry_scale": 1.0,
       "target_sides": [
         "yes",
         "no"
@@ -45,6 +68,8 @@
       "live_enabled": false,
       "rolling_window_seconds": 60.0,
       "sequence_budget_usd": 2.5,
+      "max_ask_size_fraction": 1.0,
+      "reentry_scale": 1.0,
       "target_sides": [
         "yes",
         "no"
@@ -79,7 +104,8 @@
     "daily_spend_limit_usd": 30.0,
     "min_expected_edge_usd": 0.03,
     "max_concurrent_positions": 3,
-    "min_target_shares": 5
+    "min_target_shares": 5,
+    "repeat_entry_cooldown_seconds": 15.0
   },
   "health": {
     "require_execution_auth_for_live": true,
@@ -100,6 +126,18 @@
       "paired_under_par"
     ],
     "required_under_par_pair_matches": 21,
-    "enable_live_when_matched_trade_ratio_gte": 0.25
+    "enable_live_when_matched_trade_ratio_gte": 0.25,
+    "holdout_condition_side_match_rate_gte": 0.7,
+    "holdout_playbook_match_rate_gte": 0.6,
+    "holdout_median_entry_delta_seconds_lte": 45.0,
+    "holdout_median_size_error_ratio_lte": 0.35,
+    "holdout_replay_pnl_proxy_ratio_gte": 0.75,
+    "holdout_pair_replay_pnl_proxy_ratio_gte": 0.85,
+    "notional_miss_bucket_min_usd": 25.0
+  },
+  "deployment": {
+    "approved_parity_artifact": null,
+    "release_gate_status": "replay_pending",
+    "require_approved_parity_for_live": true
   }
 }

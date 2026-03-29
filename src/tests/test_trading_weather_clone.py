@@ -185,9 +185,11 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertEqual(self.config["execution_mode"], "shadow_only")
         self.assertIn("paired_under_par", self.config["playbooks"])
         self.assertIn("cheap_bucket_accumulation", self.config["playbooks"])
+        self.assertIn("neg_risk_basket", self.config["playbooks"])
         self.assertTrue(self.config["playbooks"]["tail_bucket_accumulation"]["enabled"])
-        self.assertTrue(self.config["playbooks"]["cheap_bucket_accumulation"]["live_enabled"])
-        self.assertTrue(self.config["playbooks"]["high_prob_bucket_accumulation"]["live_enabled"])
+        self.assertFalse(self.config["playbooks"]["cheap_bucket_accumulation"]["live_enabled"])
+        self.assertFalse(self.config["playbooks"]["high_prob_bucket_accumulation"]["live_enabled"])
+        self.assertFalse(self.config["playbooks"]["neg_risk_basket"]["live_enabled"])
 
     def test_explicit_clone_config_keeps_omitted_playbooks_disabled(self):
         config = normalize_clone_bot_config(
@@ -300,6 +302,35 @@ class TradingWeatherCloneTests(unittest.TestCase):
             and row["side"] == "yes"
         )
         self.assertTrue(candidate["qualifies"])
+
+    def test_evaluate_clone_cycle_detects_neg_risk_basket_playbook(self):
+        markets = [
+            _market("nr-1", bucket_order=0, yes_ask=0.32, no_ask=0.68),
+            _market("nr-2", bucket_order=1, yes_ask=0.24, no_ask=0.76),
+            _market("nr-3", bucket_order=2, yes_ask=0.18, no_ask=0.82),
+            _market("nr-4", bucket_order=3, yes_ask=0.11, no_ask=0.89),
+        ]
+        report = evaluate_clone_cycle(
+            contexts=[_context(markets)],
+            runtime=build_clone_runtime(self.config, dry_run=False),
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "healthy", "reason": "ok"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": True,
+            },
+            sequence_state={},
+            active_positions=[],
+            active_market_ids=set(),
+        )
+
+        candidate = next(row for row in report["candidates"] if row["playbook_key"] == "neg_risk_basket")
+
+        self.assertTrue(candidate["qualifies"])
+        self.assertEqual(candidate["side"], "yes")
+        self.assertGreaterEqual(candidate["selected_condition_count"], 3)
+        self.assertLessEqual(candidate["combined_cost"], 0.99)
 
     def test_sequence_state_moves_from_watching_to_paired(self):
         sequence_state: dict[str, dict] = {}

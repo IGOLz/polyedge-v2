@@ -577,6 +577,40 @@ async def get_open_clone_positions() -> list[dict[str, Any]]:
     return result
 
 
+async def get_clone_entry_activity(
+    *,
+    condition_id: str,
+    playbook_key: str,
+    side: str,
+    day_start: datetime | None = None,
+) -> dict[str, Any]:
+    window_start = _utc_day_start(day_start)
+    normalized_side = str(side or "").strip() or "paired"
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS entry_count,
+                MAX(opened_at) AS latest_opened_at
+            FROM weather_clone_positions
+            WHERE shadow_only = FALSE
+              AND opened_at >= $1
+              AND condition_id = $2
+              AND playbook_key = $3
+              AND COALESCE(side, 'paired') = $4
+            """,
+            window_start,
+            condition_id,
+            playbook_key,
+            normalized_side,
+        )
+    return {
+        "entry_count": int(row["entry_count"] or 0) if row else 0,
+        "latest_opened_at": row["latest_opened_at"] if row else None,
+    }
+
+
 async def update_clone_position_fill(
     position_id: int,
     *,

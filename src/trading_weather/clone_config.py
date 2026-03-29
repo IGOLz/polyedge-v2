@@ -11,6 +11,7 @@ DEFAULT_CLONE_MODE = "coldmath_weather_clone"
 PLAYBOOK_ORDER = (
     "paired_under_par",
     "asymmetric_paired_accumulation",
+    "neg_risk_basket",
     "cheap_bucket_accumulation",
     "tail_bucket_accumulation",
     "high_prob_bucket_accumulation",
@@ -52,6 +53,7 @@ def _normalize_explicit_clone_config(config: dict[str, Any]) -> dict[str, Any]:
         "runtime": _normalize_runtime(config.get("runtime") or {}),
         "health": _normalize_health(config.get("health") or {}),
         "parity": _normalize_parity(config.get("parity") or {}),
+        "deployment": _normalize_deployment(config.get("deployment") or {}),
     }
     playbooks = config.get("playbooks") or {}
     for playbook_key in PLAYBOOK_ORDER:
@@ -88,7 +90,7 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "rolling_window_seconds": 60,
                     "synthetic_pair_cost_lte": entry_rule.get("complete_set_cost_lte", 0.995),
                     "min_mergeable_size": entry_rule.get("min_matched_size", 0.0),
-                    "max_inventory_imbalance_ratio": inventory_rule.get("max_inventory_imbalance_ratio", 0.491617),
+                    "max_inventory_imbalance_ratio": inventory_rule.get("max_inventory_imbalance_ratio", 0.473218),
                     "max_quote_age_seconds": 120.0,
                     "max_leg_spread": 0.08,
                     "allow_stale_pair_recovery": True,
@@ -96,6 +98,8 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "live_requires_full_quote_pair": False,
                     "midpoint_confirmation_required": False,
                     "sequence_budget_usd": config.get("sizing_rule", {}).get("max_sequence_buy_usdc", runtime_config.DEFAULT_SEQUENCE_BUDGET_USD or 8.0),
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
                 },
             ),
             "asymmetric_paired_accumulation": _normalize_playbook(
@@ -121,6 +125,26 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "live_requires_full_quote_pair": False,
                     "midpoint_confirmation_required": False,
                     "sequence_budget_usd": config.get("sizing_rule", {}).get("max_sequence_buy_usdc", runtime_config.DEFAULT_SEQUENCE_BUDGET_USD or 8.0),
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
+                },
+            ),
+            "neg_risk_basket": _normalize_playbook(
+                "neg_risk_basket",
+                {
+                    "enabled": True,
+                    "shadow_enabled": True,
+                    "live_enabled": False,
+                    "rolling_window_seconds": 60,
+                    "sequence_budget_usd": 25.0,
+                    "synthetic_basket_cost_lte": 0.99,
+                    "min_distinct_conditions": 3,
+                    "max_unmatched_ratio": 0.317073,
+                    "max_quote_age_seconds": 120.0,
+                    "require_sibling_coverage": True,
+                    "force_flatten_minutes_before_end": 120,
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
                 },
             ),
             "tail_bucket_accumulation": _normalize_playbook(
@@ -135,6 +159,8 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "sequence_budget_usd": 5.0,
                     "profit_take_price": 0.12,
                     "force_flatten_minutes_before_end": 120,
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
                 },
             ),
             "cheap_bucket_accumulation": _normalize_playbook(
@@ -142,7 +168,7 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                 {
                     "enabled": True,
                     "shadow_enabled": True,
-                    "live_enabled": True,
+                    "live_enabled": False,
                     "directional_price_lte": 0.06,
                     "complementary_price_gte": 0.94,
                     "target_sides": ["yes", "no"],
@@ -150,6 +176,8 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "sequence_budget_usd": 3.0,
                     "profit_take_price": 0.12,
                     "force_flatten_minutes_before_end": 120,
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
                 },
             ),
             "high_prob_bucket_accumulation": _normalize_playbook(
@@ -157,7 +185,7 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                 {
                     "enabled": True,
                     "shadow_enabled": True,
-                    "live_enabled": True,
+                    "live_enabled": False,
                     "directional_price_gte": 0.94,
                     "directional_price_lte": 0.995,
                     "complementary_price_lte": 0.06,
@@ -167,6 +195,8 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                     "sequence_budget_usd": 5.0,
                     "profit_take_price": 0.985,
                     "force_flatten_minutes_before_end": 120,
+                    "max_ask_size_fraction": 1.0,
+                    "reentry_scale": 1.0,
                 },
             ),
             "inventory_exit_and_closeout": _normalize_playbook(
@@ -193,10 +223,12 @@ def _convert_merge_config_to_clone(config: dict[str, Any]) -> dict[str, Any]:
                 "min_expected_edge_usd": runtime_config.DEFAULT_MIN_EXPECTED_EDGE_USD,
                 "max_concurrent_positions": runtime_config.DEFAULT_MAX_CONCURRENT_POSITIONS,
                 "min_target_shares": runtime_config.DEFAULT_MIN_TARGET_SHARES,
+                "repeat_entry_cooldown_seconds": 15.0,
             }
         ),
         "health": _normalize_health({}),
         "parity": _normalize_parity({}),
+        "deployment": _normalize_deployment({}),
     }
 
 
@@ -212,6 +244,7 @@ def _normalize_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         "max_concurrent_positions": int(runtime.get("max_concurrent_positions") or runtime_config.DEFAULT_MAX_CONCURRENT_POSITIONS or 2),
         "max_entry_attempts": int(runtime.get("max_entry_attempts") or runtime_config.DEFAULT_MAX_ENTRY_ATTEMPTS or 1),
         "min_target_shares": int(runtime.get("min_target_shares") or runtime_config.DEFAULT_MIN_TARGET_SHARES),
+        "repeat_entry_cooldown_seconds": float(runtime.get("repeat_entry_cooldown_seconds") or 0.0),
     }
 
 
@@ -240,7 +273,61 @@ def _normalize_parity(parity: dict[str, Any]) -> dict[str, Any]:
         "high_confidence_playbooks": parity.get("high_confidence_playbooks") or ["paired_under_par"],
         "required_under_par_pair_matches": int(parity.get("required_under_par_pair_matches") or 21),
         "enable_live_when_matched_trade_ratio_gte": float(parity.get("enable_live_when_matched_trade_ratio_gte") or 0.25),
+        "holdout_condition_side_match_rate_gte": float(parity.get("holdout_condition_side_match_rate_gte") or 0.70),
+        "holdout_playbook_match_rate_gte": float(parity.get("holdout_playbook_match_rate_gte") or 0.60),
+        "holdout_median_entry_delta_seconds_lte": float(parity.get("holdout_median_entry_delta_seconds_lte") or 45.0),
+        "holdout_median_size_error_ratio_lte": float(parity.get("holdout_median_size_error_ratio_lte") or 0.35),
+        "holdout_replay_pnl_proxy_ratio_gte": float(parity.get("holdout_replay_pnl_proxy_ratio_gte") or 0.75),
+        "holdout_pair_replay_pnl_proxy_ratio_gte": float(parity.get("holdout_pair_replay_pnl_proxy_ratio_gte") or 0.85),
+        "notional_miss_bucket_min_usd": float(parity.get("notional_miss_bucket_min_usd") or 25.0),
     }
+
+
+def _normalize_deployment(deployment: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "approved_parity_artifact": str(deployment.get("approved_parity_artifact") or "").strip() or None,
+        "release_gate_status": str(deployment.get("release_gate_status") or "replay_pending"),
+        "require_approved_parity_for_live": bool(deployment.get("require_approved_parity_for_live", True)),
+    }
+
+
+def build_clone_size_model(config: dict[str, Any]) -> dict[str, Any]:
+    runtime = config.get("runtime") or {}
+    playbooks = config.get("playbooks") or {}
+    size_model = {
+        "repeat_entry_cooldown_seconds": float(runtime.get("repeat_entry_cooldown_seconds") or 0.0),
+        "per_playbook": {},
+    }
+    for playbook_key in PLAYBOOK_ORDER:
+        playbook = (playbooks.get(playbook_key) or {})
+        size_model["per_playbook"][playbook_key] = {
+            "sequence_budget_usd": float(playbook.get("sequence_budget_usd") or runtime.get("sequence_budget_usd") or 0.0),
+            "max_ask_size_fraction": float(playbook.get("max_ask_size_fraction") or 1.0),
+            "reentry_scale": float(playbook.get("reentry_scale") or 1.0),
+            "dominant_leg_budget_fraction": (
+                float(playbook.get("dominant_leg_budget_fraction"))
+                if playbook.get("dominant_leg_budget_fraction") is not None
+                else None
+            ),
+        }
+    return size_model
+
+
+def apply_clone_size_model(config: dict[str, Any], size_model: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(config)
+    runtime = result.setdefault("runtime", {})
+    playbooks = result.setdefault("playbooks", {})
+    runtime["repeat_entry_cooldown_seconds"] = float(size_model.get("repeat_entry_cooldown_seconds") or 0.0)
+    per_playbook = size_model.get("per_playbook") or {}
+    for playbook_key, settings in per_playbook.items():
+        playbook = playbooks.setdefault(playbook_key, _normalize_playbook(playbook_key, {}))
+        if settings.get("sequence_budget_usd") is not None:
+            playbook["sequence_budget_usd"] = float(settings.get("sequence_budget_usd") or 0.0)
+        playbook["max_ask_size_fraction"] = float(settings.get("max_ask_size_fraction") or 1.0)
+        playbook["reentry_scale"] = float(settings.get("reentry_scale") or 1.0)
+        if settings.get("dominant_leg_budget_fraction") is not None:
+            playbook["dominant_leg_budget_fraction"] = float(settings.get("dominant_leg_budget_fraction"))
+    return result
 
 
 def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -251,6 +338,8 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
         "rolling_window_seconds": 60.0,
         "sequence_budget_usd": 5.0,
         "target_sides": ["yes", "no"],
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
     }
     if playbook_key == "paired_under_par":
         defaults.update(
@@ -258,7 +347,7 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "live_enabled": True,
                 "synthetic_pair_cost_lte": 0.995,
                 "min_mergeable_size": 0.0,
-                "max_inventory_imbalance_ratio": 0.65,
+                "max_inventory_imbalance_ratio": 0.473218,
                 "max_quote_age_seconds": 120.0,
                 "max_leg_spread": 0.08,
                 "min_leg_price_gte": 0.0,
@@ -290,6 +379,17 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
                 "midpoint_confirmation_required": False,
             }
         )
+    elif playbook_key == "neg_risk_basket":
+        defaults.update(
+            {
+                "synthetic_basket_cost_lte": 0.99,
+                "min_distinct_conditions": 3,
+                "max_unmatched_ratio": 0.317073,
+                "max_quote_age_seconds": 120.0,
+                "require_sibling_coverage": True,
+                "force_flatten_minutes_before_end": 120,
+            }
+        )
     elif playbook_key == "tail_bucket_accumulation":
         defaults.update(
             {
@@ -303,7 +403,6 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
     elif playbook_key == "cheap_bucket_accumulation":
         defaults.update(
             {
-                "live_enabled": True,
                 "directional_price_lte": 0.06,
                 "complementary_price_gte": 0.94,
                 "profit_take_price": 0.12,
@@ -315,7 +414,6 @@ def _normalize_playbook(playbook_key: str, config: dict[str, Any]) -> dict[str, 
     elif playbook_key == "high_prob_bucket_accumulation":
         defaults.update(
             {
-                "live_enabled": True,
                 "directional_price_gte": 0.94,
                 "directional_price_lte": 0.995,
                 "complementary_price_lte": 0.06,

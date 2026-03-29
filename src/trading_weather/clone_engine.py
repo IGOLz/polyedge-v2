@@ -12,7 +12,7 @@ from typing import Any
 from analysis.wallet_forensics.paper_scan import _evaluate_inventory_merge_candidate
 from analysis.wallet_forensics.utils import safe_float
 from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, PLAYBOOK_ORDER, playbook_enabled
-from weather.models import WeatherBucketMarket, WeatherMarketContext
+from weather.models import WeatherBucketMarket, WeatherMarketContext, complete_neg_risk_quotes
 
 
 @dataclass(slots=True)
@@ -330,6 +330,22 @@ def evaluate_clone_cycle(
                 else:
                     for reason in row.get("rejection_reasons") or []:
                         top_rejection_counts[str(reason)] = top_rejection_counts.get(str(reason), 0) + 1
+        basket_rows = _evaluate_neg_risk_basket_playbook(
+            context=context,
+            playbook=playbooks.get("neg_risk_basket") or {},
+            runtime=runtime,
+            captured_at=captured_at,
+            health_state=health_state,
+            sequence_state=sequence_state,
+        )
+        for row in basket_rows:
+            cycle_rows.append(row)
+            sequence_snapshots.append(row["sequence_data"])
+            if row["qualifies"]:
+                candidates.append(row)
+            else:
+                for reason in row.get("rejection_reasons") or []:
+                    top_rejection_counts[str(reason)] = top_rejection_counts.get(str(reason), 0) + 1
 
     exit_rows = _evaluate_inventory_closeout_playbook(
         runtime=runtime,
@@ -463,6 +479,88 @@ def plan_paired_entry(
         "sequence_budget_usd": round(budget, 2),
         "first_side": first_side,
         "second_side": second_side,
+        "signal_data": candidate.get("signal_data") or {},
+        "sequence_data": candidate.get("sequence_data") or {},
+        "quote_snapshot": candidate.get("quote_snapshot") or {},
+    }
+
+
+def plan_neg_risk_entry(
+    candidate: dict[str, Any],
+    runtime: CloneRuntime,
+    *,
+    active_exposure_usd: float,
+) -> dict[str, Any] | None:
+    if str(candidate.get("playbook_key") or "") != "neg_risk_basket":
+        return None
+    side = str(candidate.get("side") or "").lower()
+    if side not in {"yes", "no"}:
+        return None
+    basket_legs = list((candidate.get("signal_data") or {}).get("selected_legs") or [])
+    if not basket_legs:
+        return None
+
+    playbook = ((runtime.config.get("playbooks") or {}).get("neg_risk_basket") or {})
+    playbook_budget = float(playbook.get("sequence_budget_usd") or runtime.runtime.get("sequence_budget_usd") or 0.0)
+    available_budget = max(0.0, float(runtime.runtime.get("max_total_exposure_usd") or 0.0) - active_exposure_usd)
+    budget = max(0.0, min(playbook_budget, available_budget))
+    if budget <= 0:
+        return None
+
+    per_leg_budget = budget / max(len(basket_legs), 1)
+    planned_legs: list[dict[str, Any]] = []
+    min_target_shares = max(1, int(runtime.runtime.get("min_target_shares") or 1))
+    for leg in basket_legs:
+        price = safe_float(leg.get("price"))
+        if price is None or price <= 0:
+            continue
+        available_size = safe_float(leg.get("ask_size"))
+        target_shares = math.floor(per_leg_budget / price)
+        if available_size is not None and available_size > 0:
+            target_shares = min(target_shares, math.floor(available_size))
+        target_shares = _normalize_buy_target_shares(price, target_shares)
+        if target_shares < max(min_target_shares, _minimum_buy_target_shares(price)):
+            continue
+        planned_legs.append(
+            {
+                "market_id": str(leg.get("market_id") or ""),
+                "bucket_label": str(leg.get("bucket_label") or ""),
+                "token_id": str(leg.get("token_id") or ""),
+                "price": round(price, 6),
+                "available_size": available_size,
+                "target_shares": int(target_shares),
+            }
+        )
+    if len(planned_legs) < int(playbook.get("min_distinct_conditions") or 3):
+        return None
+
+    total_target_cost = round(sum(float(leg["price"]) * float(leg["target_shares"]) for leg in planned_legs), 6)
+    basket_cost = safe_float(candidate.get("combined_cost")) or 0.0
+    threshold = float(playbook.get("synthetic_basket_cost_lte") or 0.99)
+    expected_edge_usd = round(max(0.0, threshold - basket_cost) * min(leg["target_shares"] for leg in planned_legs), 6)
+    if expected_edge_usd < float(runtime.runtime.get("min_expected_edge_usd") or 0.0):
+        return None
+
+    return {
+        "playbook_key": "neg_risk_basket",
+        "strategy_name": runtime.strategy_name,
+        "market_id": candidate["market_id"],
+        "event_id": candidate["event_id"],
+        "event_slug": candidate["event_slug"],
+        "city": candidate["city"],
+        "local_date": candidate.get("local_date"),
+        "bucket_label": candidate["bucket_label"],
+        "condition_id": candidate["condition_id"],
+        "neg_risk": True,
+        "side": side,
+        "legs": planned_legs,
+        "target_shares": sum(int(leg["target_shares"]) for leg in planned_legs),
+        "selected_condition_count": len(planned_legs),
+        "combined_cost": round(basket_cost, 6),
+        "total_target_cost": total_target_cost,
+        "expected_edge_usd": expected_edge_usd,
+        "signal_score": safe_float(candidate.get("candidate_score")) or 0.0,
+        "sequence_budget_usd": round(budget, 2),
         "signal_data": candidate.get("signal_data") or {},
         "sequence_data": candidate.get("sequence_data") or {},
         "quote_snapshot": candidate.get("quote_snapshot") or {},
@@ -611,7 +709,7 @@ def clone_cycle_status_message(summary: dict[str, Any]) -> str:
         message += f" | guard_warning={guard_warning_reason}"
     top_candidate = summary.get("top_candidate") or {}
     if top_candidate:
-        if top_candidate.get("playbook_key") == "paired_under_par":
+        if top_candidate.get("playbook_key") in {"paired_under_par", "asymmetric_paired_accumulation", "neg_risk_basket"}:
             message += (
                 " | top="
                 f"{top_candidate.get('playbook_key')} "
@@ -1062,6 +1160,205 @@ def _evaluate_directional_playbook(
     return rows
 
 
+def _evaluate_neg_risk_basket_playbook(
+    *,
+    context: WeatherMarketContext,
+    playbook: dict[str, Any],
+    runtime: CloneRuntime,
+    captured_at: datetime,
+    health_state: dict[str, Any],
+    sequence_state: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not bool(playbook.get("enabled", True)):
+        return []
+    markets = [market for market in context.markets if bool(market.active) and bool(market.eligible)]
+    if not markets:
+        return []
+    rows: list[dict[str, Any]] = []
+    max_quote_age_seconds = safe_float(playbook.get("max_quote_age_seconds") or 120.0)
+    min_distinct_conditions = max(1, int(playbook.get("min_distinct_conditions") or 3))
+    synthetic_basket_cost_lte = safe_float(playbook.get("synthetic_basket_cost_lte") or 0.99) or 0.99
+    max_unmatched_ratio = safe_float(playbook.get("max_unmatched_ratio") or 0.317073)
+    require_sibling_coverage = bool(playbook.get("require_sibling_coverage", True))
+    target_sides = [str(side).lower() for side in (playbook.get("target_sides") or ["yes"]) if str(side).lower() in {"yes", "no"}]
+    if not target_sides:
+        target_sides = ["yes"]
+    for side in target_sides:
+        available_legs: list[dict[str, Any]] = []
+        rejection_reasons: list[str] = []
+        missing_quote_count = 0
+        stale_quote_count = 0
+        for market in sorted(markets, key=lambda item: (item.bucket_order, str(item.bucket_label or ""))):
+            quotes = complete_neg_risk_quotes(
+                neg_risk=bool(market.neg_risk),
+                yes_bid=safe_float(market.yes_bid),
+                yes_ask=safe_float(market.yes_ask),
+                yes_mid=safe_float(market.yes_mid),
+                yes_bid_size=safe_float(market.yes_bid_size),
+                yes_ask_size=safe_float(market.yes_ask_size),
+                no_bid=safe_float(market.no_bid),
+                no_ask=safe_float(market.no_ask),
+                no_mid=safe_float(market.no_mid),
+                no_bid_size=safe_float(market.no_bid_size),
+                no_ask_size=safe_float(market.no_ask_size),
+            )
+            ask = safe_float(quotes.get(f"{side}_ask"))
+            ask_size = safe_float(quotes.get(f"{side}_ask_size"))
+            bid = safe_float(quotes.get(f"{side}_bid"))
+            quote_age_seconds = _quote_age_seconds(market.latest_quote_time, captured_at)
+            if ask is None or ask <= 0:
+                missing_quote_count += 1
+                continue
+            if quote_age_seconds is None or (max_quote_age_seconds is not None and quote_age_seconds > max_quote_age_seconds):
+                stale_quote_count += 1
+                continue
+            available_legs.append(
+                {
+                    "market_id": str(market.market_id or ""),
+                    "market_slug": str(market.market_slug or ""),
+                    "bucket_label": str(market.bucket_label or ""),
+                    "bucket_order": int(market.bucket_order),
+                    "token_id": str(market.yes_token_id if side == "yes" else market.no_token_id or ""),
+                    "price": float(ask),
+                    "bid": bid,
+                    "ask_size": ask_size,
+                    "quote_age_seconds": quote_age_seconds,
+                }
+            )
+        if missing_quote_count > 0:
+            rejection_reasons.append("missing_sibling_quote")
+        if stale_quote_count > 0:
+            rejection_reasons.append("stale_quote")
+        if require_sibling_coverage and len(available_legs) < len(markets):
+            rejection_reasons.append("missing_sibling_quote_coverage")
+        if len(available_legs) < min_distinct_conditions:
+            rejection_reasons.append("insufficient_sibling_conditions")
+
+        selected_legs: list[dict[str, Any]] = []
+        combined_cost = 0.0
+        if available_legs:
+            ordered_legs = sorted(
+                available_legs,
+                key=lambda item: (-float(item.get("price") or 0.0), int(item.get("bucket_order") or 0)),
+            )
+            for idx, leg in enumerate(ordered_legs):
+                remaining = len(ordered_legs) - idx - 1
+                must_take = len(selected_legs) + remaining < min_distinct_conditions
+                next_cost = combined_cost + float(leg.get("price") or 0.0)
+                if next_cost <= synthetic_basket_cost_lte + 1e-9 or must_take:
+                    selected_legs.append(dict(leg))
+                    combined_cost = next_cost
+        if len(selected_legs) < min_distinct_conditions and "insufficient_sibling_conditions" not in rejection_reasons:
+            rejection_reasons.append("insufficient_sibling_conditions")
+        if combined_cost > synthetic_basket_cost_lte + 1e-9:
+            rejection_reasons.append("synthetic_basket_cost_above_threshold")
+        unmatched_ratio = max(0.0, 1.0 - combined_cost) if side == "yes" else 0.0
+        if max_unmatched_ratio is not None and unmatched_ratio > max_unmatched_ratio + 1e-9:
+            rejection_reasons.append("unmatched_ratio_above_threshold")
+        qualifies = not rejection_reasons and bool(selected_legs)
+        min_available_size = min(
+            [float(leg.get("ask_size")) for leg in selected_legs if safe_float(leg.get("ask_size")) is not None],
+            default=None,
+        )
+        candidate_score = round(
+            max(0.0, synthetic_basket_cost_lte - combined_cost)
+            * max(1.0, float(len(selected_legs)))
+            * max(1.0, float(min_available_size or 1.0)),
+            6,
+        )
+        synthetic_market_id = f"{context.event_id}:neg-risk-basket:{side}"
+        quote_snapshot = {
+            "captured_at": captured_at.isoformat(),
+            "side": side,
+            "combined_cost": round(combined_cost, 6),
+            "selected_legs": [
+                {
+                    "market_id": leg["market_id"],
+                    "bucket_label": leg["bucket_label"],
+                    "price": round(float(leg["price"]), 6),
+                    "bid": round(float(leg["bid"]), 6) if safe_float(leg.get("bid")) is not None else None,
+                    "ask_size": round(float(leg["ask_size"]), 6) if safe_float(leg.get("ask_size")) is not None else None,
+                }
+                for leg in selected_legs
+            ],
+            "available_condition_count": len(available_legs),
+            "total_condition_count": len(markets),
+        }
+        sequence = _update_event_sequence_state(
+            sequence_state=sequence_state,
+            sequence_key=f"neg_risk_basket:{context.event_id}:{side}",
+            playbook_key="neg_risk_basket",
+            event_id=context.event_id,
+            event_slug=context.event_slug,
+            city=context.city,
+            local_date=context.local_date,
+            market_id=synthetic_market_id,
+            bucket_label="neg-risk-basket",
+            side=side,
+            captured_at=captured_at,
+            rolling_window_seconds=float(playbook.get("rolling_window_seconds") or 60.0),
+            qualifies=qualifies,
+            candidate_score=candidate_score,
+            rejection_reasons=rejection_reasons,
+            quote_snapshot=quote_snapshot,
+            signal_data={
+                "side": side,
+                "selected_legs": selected_legs,
+                "combined_cost": round(combined_cost, 6),
+                "selected_condition_count": len(selected_legs),
+                "available_condition_count": len(available_legs),
+                "total_condition_count": len(markets),
+                "unmatched_ratio": round(unmatched_ratio, 6),
+                "synthetic_basket_cost_lte": synthetic_basket_cost_lte,
+                "max_unmatched_ratio": max_unmatched_ratio,
+            },
+            state="basketed" if qualifies else ("watching" if available_legs else "idle"),
+            strategy_name=runtime.strategy_name,
+            health_data=_health_snapshot(health_state),
+        )
+        sequence_snapshot = _sequence_snapshot(sequence)
+        rows.append(
+            {
+                "event_id": context.event_id,
+                "event_slug": context.event_slug,
+                "city": context.city,
+                "local_date": context.local_date,
+                "market_id": synthetic_market_id,
+                "condition_id": synthetic_market_id,
+                "market_slug": f"{context.event_slug}-neg-risk-basket-{side}",
+                "bucket_label": "neg-risk-basket",
+                "question": f"{context.title} neg-risk basket {side}",
+                "yes_token_id": None,
+                "no_token_id": None,
+                "neg_risk": True,
+                "playbook_key": "neg_risk_basket",
+                "side": side,
+                "combined_cost": round(combined_cost, 6),
+                "selected_condition_count": len(selected_legs),
+                "available_condition_count": len(available_legs),
+                "unmatched_ratio": round(unmatched_ratio, 6),
+                "quote_age_seconds": max(
+                    [float(leg.get("quote_age_seconds") or 0.0) for leg in selected_legs],
+                    default=None,
+                ),
+                "qualifies": qualifies,
+                "live_eligible": (
+                    qualifies
+                    and playbook_enabled(runtime.config, "neg_risk_basket", live=True)
+                    and bool(health_state.get("execution_allowed"))
+                    and runtime.live_requested
+                ),
+                "candidate_score": candidate_score,
+                "rejection_reasons": rejection_reasons,
+                "signal_data": sequence_snapshot["latest_signal_data"],
+                "sequence_data": sequence_snapshot,
+                "quote_snapshot": sequence_snapshot["latest_quote_snapshot"],
+                "health_data": sequence_snapshot["latest_health_data"],
+            }
+        )
+    return rows
+
+
 def _evaluate_inventory_closeout_playbook(
     *,
     runtime: CloneRuntime,
@@ -1262,6 +1559,75 @@ def _update_position_sequence_state(
     existing["latest_candidate_score"] = round(candidate_score, 6)
     existing["latest_rejection_reasons"] = list(rejection_reasons)
     existing["latest_quote_snapshot"] = {}
+    existing["latest_signal_data"] = signal_data
+    existing["latest_health_data"] = health_data
+    sequence_state[sequence_key] = existing
+    return existing
+
+
+def _update_event_sequence_state(
+    *,
+    sequence_state: dict[str, dict[str, Any]],
+    sequence_key: str,
+    playbook_key: str,
+    event_id: str,
+    event_slug: str,
+    city: str,
+    local_date,
+    market_id: str,
+    bucket_label: str,
+    side: str | None,
+    captured_at: datetime,
+    rolling_window_seconds: float,
+    qualifies: bool,
+    candidate_score: float,
+    rejection_reasons: list[str],
+    quote_snapshot: dict[str, Any],
+    signal_data: dict[str, Any],
+    state: str,
+    strategy_name: str,
+    health_data: dict[str, Any],
+) -> dict[str, Any]:
+    existing = sequence_state.get(sequence_key)
+    if existing is not None:
+        last_seen = existing["last_seen_at"]
+        if isinstance(last_seen, str):
+            last_seen = datetime.fromisoformat(last_seen)
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=UTC)
+        if (captured_at - last_seen).total_seconds() > rolling_window_seconds:
+            existing = None
+    if existing is None:
+        existing = {
+            "sequence_key": sequence_key,
+            "strategy_name": strategy_name,
+            "playbook_key": playbook_key,
+            "market_id": market_id,
+            "event_id": event_id,
+            "event_slug": event_slug,
+            "city": city,
+            "local_date": local_date,
+            "bucket_label": bucket_label,
+            "side": side,
+            "state": state,
+            "first_seen_at": captured_at,
+            "first_qualifying_at": captured_at if qualifies else None,
+            "last_seen_at": captured_at,
+            "last_qualifying_at": captured_at if qualifies else None,
+            "detection_count": 0,
+            "qualify_count": 0,
+        }
+    existing["state"] = state
+    existing["last_seen_at"] = captured_at
+    existing["detection_count"] = int(existing.get("detection_count") or 0) + 1
+    if qualifies:
+        existing["qualify_count"] = int(existing.get("qualify_count") or 0) + 1
+        if existing.get("first_qualifying_at") is None:
+            existing["first_qualifying_at"] = captured_at
+        existing["last_qualifying_at"] = captured_at
+    existing["latest_candidate_score"] = round(candidate_score, 6)
+    existing["latest_rejection_reasons"] = list(rejection_reasons)
+    existing["latest_quote_snapshot"] = quote_snapshot
     existing["latest_signal_data"] = signal_data
     existing["latest_health_data"] = health_data
     sequence_state[sequence_key] = existing

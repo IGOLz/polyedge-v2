@@ -24,11 +24,17 @@ from analysis.db_sync import get_connection
 from analysis.wallet_forensics.db import load_rows
 from analysis.wallet_forensics.fetchers import WalletForensicsClient
 from analysis.wallet_forensics.utils import ensure_dir, parse_iso_datetime, safe_float
-from trading_weather.clone_config import PAIR_PLAYBOOK_KEYS, normalize_clone_bot_config
+from trading_weather.clone_config import (
+    PAIR_PLAYBOOK_KEYS,
+    apply_clone_size_model,
+    build_clone_size_model,
+    normalize_clone_bot_config,
+)
 from trading_weather.clone_engine import (
     build_clone_runtime,
     evaluate_clone_cycle,
     plan_directional_entry,
+    plan_neg_risk_entry,
     plan_paired_entry,
 )
 from trading_weather import config as weather_config
@@ -57,6 +63,7 @@ MISS_BUCKETS = {
     "missing_quote_pair",
     "stale_quote",
     "paired_under_par_rejected",
+    "neg_risk_basket_rejected",
     "cheap_bucket_rejected",
     "high_prob_rejected",
     "tail_bucket_rejected",
@@ -71,6 +78,7 @@ MISS_BUCKETS = {
 PLAYBOOK_REJECTION_BUCKETS = {
     "paired_under_par": "paired_under_par_rejected",
     "asymmetric_paired_accumulation": "paired_under_par_rejected",
+    "neg_risk_basket": "neg_risk_basket_rejected",
     "cheap_bucket_accumulation": "cheap_bucket_rejected",
     "high_prob_bucket_accumulation": "high_prob_rejected",
     "tail_bucket_accumulation": "tail_bucket_rejected",
@@ -118,7 +126,8 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
     if not isinstance(args, argparse.Namespace):
         args = build_parser().parse_args(args)
 
-    output_dir = ensure_dir(Path(args.output_dir).resolve())
+    artifact_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    output_dir = ensure_dir(Path(args.output_dir).resolve() / artifact_id)
     clone_config = normalize_clone_bot_config(json.loads(Path(args.clone_config_path).read_text(encoding="utf-8")))
     logger.info("Resolving ColdMath profile and fetching public weather trades")
     client = WalletForensicsClient()
@@ -238,7 +247,7 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
         quote_window_seconds=int(args.quote_window_seconds),
         match_window_seconds=float(args.match_window_seconds),
     )
-    final_config = tuned["clone_config"]
+    final_config = apply_clone_size_model(tuned["clone_config"], tuned["size_model"])
     logger.info("Evaluating trade-time parity with tuned config")
     trade_time_parity = _evaluate_trade_time_parity(
         trade_rows=covered_rows,
@@ -269,7 +278,15 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
     overall_metrics = replay["metrics"]
     holdout_metrics = _filter_metrics_to_rows(replay["matched_rows"], holdout_rows)
     holdout_miss_rows = _filter_rows_to_trade_set(miss_rows, holdout_rows)
-    gate_result = _deployment_gate_result(holdout_metrics=holdout_metrics, miss_rows=holdout_miss_rows)
+    gate_result = _deployment_gate_result(
+        holdout_metrics=holdout_metrics,
+        miss_rows=holdout_miss_rows,
+        parity_config=final_config.get("parity") or {},
+    )
+    approved_clone_config = deepcopy(final_config)
+    approved_clone_config.setdefault("deployment", {})
+    approved_clone_config["deployment"]["approved_parity_artifact"] = artifact_id if gate_result.get("passed") else None
+    approved_clone_config["deployment"]["release_gate_status"] = "approved" if gate_result.get("passed") else "replay_failed"
 
     artifacts = {
         "coldmath_public_trades_48h.csv": trade_rows,
@@ -291,6 +308,8 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
         "holdout_metrics": tuned["holdout_metrics"],
     }
     summary = {
+        "artifact_id": artifact_id,
+        "artifact_dir": str(output_dir),
         "requested_window": requested_window,
         "covered_window": covered_window,
         "coldmath_trade_count": len(trade_rows),
@@ -304,6 +323,7 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
         "holdout_metrics": holdout_metrics,
         "deployment_gate": gate_result,
         "tuned_strategy_parameters": tuned["strategy_parameters"],
+        "approved_clone_config_path": str(output_dir / "coldmath_clone_config_release_candidate.json"),
     }
     logger.info(
         "Parity complete: replay match_rate=%.4f playbook_rate=%.4f gate=%s",
@@ -317,6 +337,10 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
     )
     (output_dir / "coldmath_public_parity_summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True, default=str),
+        encoding="utf-8",
+    )
+    (output_dir / "coldmath_clone_config_release_candidate.json").write_text(
+        json.dumps(approved_clone_config, indent=2, sort_keys=True, default=str),
         encoding="utf-8",
     )
     (output_dir / "coldmath_public_parity_report.md").write_text(
@@ -549,6 +573,8 @@ def _group_public_trade_sequences(
         current["last_timestamp_utc"] = row["timestamp_utc"]
         row["sequence_id"] = current["sequence_id"]
 
+    _annotate_neg_risk_public_baskets(trade_rows, gap_seconds=gap_seconds)
+
     result: list[dict[str, Any]] = []
     for sequence in sequences:
         context = _build_context_for_event(
@@ -583,6 +609,8 @@ def _group_public_trade_sequences(
 def _infer_public_sequence_label(trade_rows: list[dict[str, Any]], context) -> str:
     if not trade_rows:
         return "unsupported_public_behavior"
+    if any(str(row.get("public_playbook") or "") == "neg_risk_basket" for row in trade_rows):
+        return "neg_risk_basket"
     trade_type = str(trade_rows[0].get("trade_type") or "")
     if trade_type == "sell":
         return "inventory_rebalance_and_exit"
@@ -607,6 +635,8 @@ def _infer_public_trade_playbook(trade_row: dict[str, Any], *, context) -> str:
     if str(trade_row.get("trade_type") or "") == "sell":
         return "inventory_rebalance_and_exit"
     sequence_label = str(trade_row.get("public_playbook") or "")
+    if sequence_label == "neg_risk_basket":
+        return sequence_label
     if _is_pair_playbook(sequence_label):
         return sequence_label
     price = safe_float(trade_row.get("price")) or 0.0
@@ -617,6 +647,40 @@ def _infer_public_trade_playbook(trade_row: dict[str, Any], *, context) -> str:
     if price >= 0.90:
         return "high_prob_bucket_accumulation"
     return "unsupported_public_behavior"
+
+
+def _annotate_neg_risk_public_baskets(trade_rows: list[dict[str, Any]], *, gap_seconds: int) -> None:
+    clusters: list[list[dict[str, Any]]] = []
+    active: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    last_seen: dict[tuple[str, str, str], datetime] = {}
+    for row in sorted(trade_rows, key=lambda item: item["timestamp_utc"]):
+        if str(row.get("trade_type") or "") != "buy":
+            continue
+        outcome = str(row.get("outcome") or "").lower()
+        if outcome not in {"yes", "no"}:
+            continue
+        key = (str(row.get("event_slug") or ""), str(row.get("trade_type") or ""), outcome)
+        current = active.get(key)
+        last_timestamp = last_seen.get(key)
+        if current is None or last_timestamp is None or (row["timestamp_utc"] - last_timestamp).total_seconds() > gap_seconds:
+            current = []
+            active[key] = current
+            clusters.append(current)
+        current.append(row)
+        last_seen[key] = row["timestamp_utc"]
+    for cluster in clusters:
+        distinct_conditions = {str(row.get("condition_id") or "") for row in cluster if row.get("condition_id")}
+        if len(distinct_conditions) < 3:
+            continue
+        prices = [safe_float(row.get("price")) for row in cluster]
+        valid_prices = [float(price) for price in prices if price is not None and price > 0]
+        if len(valid_prices) < 3:
+            continue
+        combined_cost = sum(valid_prices)
+        if combined_cost > 1.01 or combined_cost < 0.60:
+            continue
+        for row in cluster:
+            row["public_playbook"] = "neg_risk_basket"
 
 
 def _paired_sequence_profile(trade_rows: list[dict[str, Any]]) -> dict[str, float] | None:
@@ -716,6 +780,9 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
 
     for playbook_key, playbook in (config.get("playbooks") or {}).items():
         notionals = sorted(notional_by_playbook.get(playbook_key) or [])
+        if bool(playbook.get("enabled", False)):
+            playbook["shadow_enabled"] = True
+            playbook["live_enabled"] = True
         if playbook_key in PAIR_PLAYBOOK_KEYS:
             sequence_notionals = sorted(value for value in paired_sequence_notionals.values() if value > 0)
             if sequence_notionals:
@@ -740,7 +807,6 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
             playbook["dominant_leg_price_gte"] = min(float(playbook.get("dominant_leg_price_gte") or 0.90), 0.90)
             playbook["complementary_leg_price_lte"] = max(float(playbook.get("complementary_leg_price_lte") or 0.10), 0.10)
             playbook["midpoint_confirmation_required"] = False
-            playbook["live_enabled"] = True
     return config
 
 
@@ -829,10 +895,17 @@ def _evaluate_trade_time_parity(
             active_positions=[],
             active_market_ids=set(),
         )
-        market_rows = [
-            row for row in report.get("cycle_rows") or []
-            if str(row.get("market_id") or "") == str(trade.get("condition_id") or "")
-        ]
+        market_rows = []
+        for row in report.get("cycle_rows") or []:
+            if str(row.get("market_id") or "") == str(trade.get("condition_id") or ""):
+                market_rows.append(row)
+                continue
+            if (
+                str(row.get("playbook_key") or "") == "neg_risk_basket"
+                and str(row.get("event_slug") or "") == str(trade.get("event_slug") or "")
+                and str(row.get("side") or "") == str(trade.get("outcome") or "")
+            ):
+                market_rows.append(row)
         matched_row = _match_trade_to_candidate(market_rows, trade)
         match_condition_side = matched_row is not None and bool(matched_row.get("qualifies"))
         match_playbook = match_condition_side and str(matched_row.get("playbook_key") or "") == public_playbook
@@ -878,6 +951,9 @@ def _match_trade_to_candidate(market_rows: list[dict[str, Any]], trade: dict[str
         if not bool(row.get("qualifies")):
             continue
         playbook_key = str(row.get("playbook_key") or "")
+        if playbook_key == "neg_risk_basket" and public_playbook == "neg_risk_basket":
+            if str(row.get("side") or "") == outcome:
+                return row
         if _is_pair_playbook(playbook_key) and playbook_key == public_playbook:
             return row
     for row in market_rows:
@@ -907,19 +983,7 @@ def _trade_time_reason(market_rows: list[dict[str, Any]], *, public_playbook: st
 
 
 def _default_size_model(clone_config: dict[str, Any]) -> dict[str, Any]:
-    playbooks = clone_config.get("playbooks") or {}
-    return {
-        "repeat_entry_cooldown_seconds": 60,
-        "per_playbook": {
-            key: {
-                "max_ask_size_fraction": 1.0,
-                "reentry_scale": 1.0,
-                "sequence_budget_usd": float((playbooks.get(key) or {}).get("sequence_budget_usd") or 0.0),
-                "dominant_leg_budget_fraction": float((playbooks.get(key) or {}).get("dominant_leg_budget_fraction") or 0.94),
-            }
-            for key in ("paired_under_par", "asymmetric_paired_accumulation", "cheap_bucket_accumulation", "high_prob_bucket_accumulation", "tail_bucket_accumulation")
-        },
-    }
+    return build_clone_size_model(clone_config)
 
 
 def _tune_clone_strategy(
@@ -948,6 +1012,9 @@ def _tune_clone_strategy(
         ("playbooks.asymmetric_paired_accumulation.synthetic_pair_cost_lte", [0.995, 1.0, 1.01, 1.02, 1.03]),
         ("playbooks.asymmetric_paired_accumulation.dominant_leg_price_gte", [0.88, 0.90, 0.92, 0.94]),
         ("playbooks.asymmetric_paired_accumulation.complementary_leg_price_lte", [0.04, 0.06, 0.08, 0.10]),
+        ("playbooks.neg_risk_basket.synthetic_basket_cost_lte", [0.97, 0.98, 0.99, 1.0]),
+        ("playbooks.neg_risk_basket.min_distinct_conditions", [3, 4, 5]),
+        ("playbooks.neg_risk_basket.max_unmatched_ratio", [0.20, 0.25, 0.317073, 0.40]),
         ("playbooks.cheap_bucket_accumulation.directional_price_lte", [0.04, 0.06, 0.08, 0.10]),
         ("playbooks.cheap_bucket_accumulation.complementary_price_gte", [0.90, 0.92, 0.94, 0.96]),
         ("playbooks.high_prob_bucket_accumulation.directional_price_gte", [0.90, 0.92, 0.94, 0.96]),
@@ -996,6 +1063,9 @@ def _tune_clone_strategy(
         ("per_playbook.paired_under_par.sequence_budget_usd", [5.0, 10.0, 25.0, 50.0, 100.0]),
         ("per_playbook.asymmetric_paired_accumulation.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0, 250.0]),
         ("per_playbook.asymmetric_paired_accumulation.dominant_leg_budget_fraction", [0.80, 0.85, 0.90, 0.94, 0.97]),
+        ("per_playbook.neg_risk_basket.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0]),
+        ("per_playbook.neg_risk_basket.max_ask_size_fraction", [0.25, 0.5, 0.75, 1.0]),
+        ("per_playbook.neg_risk_basket.reentry_scale", [0.5, 0.75, 1.0]),
         ("per_playbook.cheap_bucket_accumulation.sequence_budget_usd", [3.0, 5.0, 10.0, 25.0, 50.0]),
         ("per_playbook.high_prob_bucket_accumulation.sequence_budget_usd", [3.0, 5.0, 10.0, 25.0, 50.0]),
         ("per_playbook.tail_bucket_accumulation.sequence_budget_usd", [2.0, 5.0, 10.0, 20.0]),
@@ -1056,6 +1126,8 @@ def _tune_clone_strategy(
         ("per_playbook.asymmetric_paired_accumulation.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0, 250.0, 425.0]),
         ("per_playbook.asymmetric_paired_accumulation.reentry_scale", [1.0, 1.25, 1.5, 2.0]),
         ("per_playbook.asymmetric_paired_accumulation.dominant_leg_budget_fraction", [0.85, 0.90, 0.92, 0.94, 0.97]),
+        ("per_playbook.neg_risk_basket.sequence_budget_usd", [10.0, 25.0, 50.0, 100.0]),
+        ("per_playbook.neg_risk_basket.reentry_scale", [0.75, 1.0, 1.25]),
     ]
     for _ in range(2):
         improved = False
@@ -1098,7 +1170,7 @@ def _tune_clone_strategy(
     )["metrics"]
     holdout_metrics = _run_full_replay(
         trade_rows=holdout_rows,
-        clone_config=clone_config,
+        clone_config=apply_clone_size_model(clone_config, size_model),
         size_model=size_model,
         catalog_by_event=catalog_by_event,
         quote_series=quote_series,
@@ -1107,12 +1179,12 @@ def _tune_clone_strategy(
         match_window_seconds=match_window_seconds,
     )["metrics"]
     return {
-        "clone_config": clone_config,
+        "clone_config": apply_clone_size_model(clone_config, size_model),
         "size_model": size_model,
         "training_metrics": training_metrics,
         "holdout_metrics": holdout_metrics,
         "strategy_parameters": {
-            "playbooks": clone_config.get("playbooks") or {},
+            "playbooks": apply_clone_size_model(clone_config, size_model).get("playbooks") or {},
             "size_model": size_model,
         },
     }
@@ -1195,7 +1267,11 @@ def _evaluate_size_fit(
         if adjusted is None:
             size_errors.append(1.0)
             continue
-        simulated_size = _planned_trade_size_for_outcome(adjusted, str(trade.get("outcome") or ""))
+        simulated_size = _planned_trade_size_for_trade(
+            adjusted,
+            condition_id=str(trade.get("condition_id") or ""),
+            outcome=str(trade.get("outcome") or ""),
+        )
         public_size = safe_float(trade.get("size")) or 0.0
         if public_size > 0:
             size_errors.append(abs(simulated_size - public_size) / public_size)
@@ -1253,6 +1329,14 @@ def _run_full_replay(
     max_entries_per_tick = int(runtime_cfg.get("max_entry_attempts") or 1)
 
     for captured_at in tick_times:
+        active_positions, neg_risk_exit_trades = _simulate_neg_risk_exits(
+            active_positions=active_positions,
+            captured_at=captured_at,
+            catalog_by_event=catalog_by_event,
+            quote_series=quote_series,
+            quote_window_seconds=quote_window_seconds,
+        )
+        replay_trades.extend(neg_risk_exit_trades)
         active_positions, exit_trades = _simulate_directional_exits(
             active_positions=active_positions,
             captured_at=captured_at,
@@ -1321,7 +1405,9 @@ def _run_full_replay(
             if total_spend_limit > 0 and spent_usd >= total_spend_limit:
                 blocked_candidates.append({**_candidate_brief(candidate), "timestamp_utc": captured_at, "block_reason": "exposure_or_spend_cap_blocked"})
                 continue
-            if _is_pair_playbook(str(candidate.get("playbook_key") or "")):
+            if playbook_key == "neg_risk_basket":
+                plan = plan_neg_risk_entry(candidate, runtime, active_exposure_usd=active_exposure)
+            elif _is_pair_playbook(str(candidate.get("playbook_key") or "")):
                 plan = plan_paired_entry(candidate, runtime, active_exposure_usd=active_exposure)
             else:
                 plan = plan_directional_entry(candidate, runtime, active_exposure_usd=active_exposure)
@@ -1381,6 +1467,14 @@ def _empty_metrics() -> dict[str, Any]:
         "median_entry_time_delta_seconds": None,
         "median_size_error_ratio": None,
         "false_positive_trade_count": 0,
+        "false_positive_notional_usd": 0.0,
+        "false_positive_pnl_proxy_usd": 0.0,
+        "public_notional_usd": 0.0,
+        "replay_notional_usd": 0.0,
+        "public_pnl_proxy_usd": 0.0,
+        "replay_pnl_proxy_usd": 0.0,
+        "replay_pnl_proxy_ratio": None,
+        "playbook_pnl_proxy": [],
         "top_miss_reasons": [],
     }
 
@@ -1446,12 +1540,32 @@ def _pair_targets_from_budget(
 
 
 def _planned_trade_size_for_outcome(plan: dict[str, Any], outcome: str) -> float:
+    if str(plan.get("playbook_key") or "") == "neg_risk_basket":
+        legs = list(plan.get("legs") or [])
+        if outcome not in {"yes", "no"}:
+            return 0.0
+        return float(
+            sum(
+                safe_float(leg.get("target_shares")) or 0.0
+                for leg in legs
+                if str(plan.get("side") or "") == outcome
+            )
+        )
     if _is_pair_playbook(str(plan.get("playbook_key") or "")):
         if outcome == "yes":
             return safe_float(plan.get("yes_target_shares")) or safe_float(plan.get("target_shares")) or 0.0
         if outcome == "no":
             return safe_float(plan.get("no_target_shares")) or safe_float(plan.get("target_shares")) or 0.0
     return safe_float(plan.get("target_shares")) or 0.0
+
+
+def _planned_trade_size_for_trade(plan: dict[str, Any], *, condition_id: str, outcome: str) -> float:
+    if str(plan.get("playbook_key") or "") == "neg_risk_basket":
+        for leg in plan.get("legs") or []:
+            if str(leg.get("market_id") or "") == condition_id:
+                return safe_float(leg.get("target_shares")) or 0.0
+        return 0.0
+    return _planned_trade_size_for_outcome(plan, outcome)
 
 
 def _apply_size_model(
@@ -1471,6 +1585,9 @@ def _apply_size_model(
         no_size = safe_float(candidate.get("no_ask_size"))
         cost_per_share = safe_float(plan.get("combined_cost")) or 0.0
         entry_key = (str(plan.get("condition_id") or ""), "paired", playbook_key)
+    elif playbook_key == "neg_risk_basket":
+        cost_per_share = safe_float(plan.get("combined_cost")) or 0.0
+        entry_key = (str(plan.get("condition_id") or ""), str(plan.get("side") or ""), playbook_key)
     else:
         available_size = safe_float(plan.get("available_size"))
         if available_size is None:
@@ -1514,6 +1631,50 @@ def _apply_size_model(
         adjusted["target_shares"] = paired_target_shares
         adjusted["total_target_cost"] = round((yes_target_shares * yes_price) + (no_target_shares * no_price), 6)
         adjusted["expected_edge_usd"] = round((1.0 - cost_per_share) * paired_target_shares, 6)
+    elif playbook_key == "neg_risk_basket":
+        legs = list(plan.get("legs") or [])
+        if not legs:
+            return None
+        effective_budget = max(0.0, sequence_budget * (reentry_scale ** repeat_count))
+        per_leg_budget = effective_budget / max(len(legs), 1)
+        adjusted_legs: list[dict[str, Any]] = []
+        for leg in legs:
+            price = safe_float(leg.get("price")) or 0.0
+            available_size = safe_float(leg.get("available_size"))
+            if price <= 0:
+                continue
+            target_shares = floor(per_leg_budget / price)
+            if available_size is not None and available_size > 0:
+                target_shares = min(target_shares, floor(available_size * max_fraction))
+            if target_shares <= 0:
+                continue
+            adjusted_legs.append(
+                {
+                    **leg,
+                    "target_shares": int(target_shares),
+                    "available_size": available_size,
+                }
+            )
+        required_conditions = int(
+            safe_float((candidate.get("signal_data") or {}).get("selected_condition_count"))
+            or safe_float(plan.get("selected_condition_count"))
+            or 3
+        )
+        if len(adjusted_legs) < required_conditions:
+            return None
+        adjusted["legs"] = adjusted_legs
+        adjusted["selected_condition_count"] = len(adjusted_legs)
+        adjusted["target_shares"] = int(sum(int(leg.get("target_shares") or 0) for leg in adjusted_legs))
+        adjusted["combined_cost"] = round(sum((safe_float(leg.get("price")) or 0.0) for leg in adjusted_legs), 6)
+        adjusted["total_target_cost"] = round(
+            sum((safe_float(leg.get("price")) or 0.0) * int(leg.get("target_shares") or 0) for leg in adjusted_legs),
+            6,
+        )
+        adjusted["expected_edge_usd"] = round(
+            max(0.0, 1.0 - float(adjusted.get("combined_cost") or 0.0))
+            * min(int(leg.get("target_shares") or 0) for leg in adjusted_legs),
+            6,
+        )
     else:
         target_shares = int(plan.get("target_shares") or 0)
         target_shares = floor(target_shares * (reentry_scale ** repeat_count))
@@ -1533,6 +1694,60 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
     target_shares = int(plan.get("target_shares") or 0)
     if target_shares <= 0:
         return [], None
+    if playbook_key == "neg_risk_basket":
+        side = str(plan.get("side") or "")
+        legs = list(plan.get("legs") or [])
+        if side not in {"yes", "no"} or not legs:
+            return [], None
+        rows = [
+            _replay_trade_row(
+                captured_at=captured_at,
+                condition_id=str(leg.get("market_id") or ""),
+                event_slug=str(plan.get("event_slug") or ""),
+                city=str(plan.get("city") or ""),
+                local_date=plan.get("local_date"),
+                bucket_label=str(leg.get("bucket_label") or ""),
+                playbook_key=playbook_key,
+                trade_type="buy",
+                outcome=side,
+                size=int(leg.get("target_shares") or 0),
+                price=safe_float(leg.get("price")) or 0.0,
+            )
+            for leg in legs
+            if int(leg.get("target_shares") or 0) > 0 and (safe_float(leg.get("price")) or 0.0) > 0.0
+        ]
+        if not rows:
+            return [], None
+        position = {
+            "id": position_id,
+            "market_id": str(plan.get("condition_id") or ""),
+            "event_slug": str(plan.get("event_slug") or ""),
+            "city": str(plan.get("city") or ""),
+            "local_date": plan.get("local_date"),
+            "bucket_label": str(plan.get("bucket_label") or ""),
+            "playbook_key": playbook_key,
+            "side": side,
+            "status": "open_neg_risk_basket",
+            "opened_at": captured_at,
+            "closed_at": None,
+            "legs": [
+                {
+                    "market_id": str(leg.get("market_id") or ""),
+                    "bucket_label": str(leg.get("bucket_label") or ""),
+                    "target_shares": int(leg.get("target_shares") or 0),
+                }
+                for leg in legs
+            ],
+            "force_flatten_minutes_before_end": float(
+                safe_float((candidate.get("signal_data") or {}).get("force_flatten_minutes_before_end"))
+                or safe_float(plan.get("force_flatten_minutes_before_end"))
+                or 120.0
+            ),
+            "max_unmatched_ratio": safe_float((candidate.get("signal_data") or {}).get("max_unmatched_ratio")),
+            "selected_condition_count": len(legs),
+            "total_entry_cost": round(sum(float(row.get("notional_usd") or 0.0) for row in rows), 6),
+        }
+        return rows, position
     if _is_pair_playbook(playbook_key):
         yes_price = safe_float(plan.get("yes_price")) or 0.0
         no_price = safe_float(plan.get("no_price")) or 0.0
@@ -1618,6 +1833,92 @@ def _simulate_entry_from_plan(*, plan: dict[str, Any], candidate: dict[str, Any]
         "total_entry_cost": round(price * target_shares, 6),
     }
     return [row], position
+
+
+def _simulate_neg_risk_exits(
+    *,
+    active_positions: list[dict[str, Any]],
+    captured_at,
+    catalog_by_event: dict[str, list[dict[str, Any]]],
+    quote_series: dict[tuple[str, str], dict[str, Any]],
+    quote_window_seconds: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    remaining: list[dict[str, Any]] = []
+    replay_rows: list[dict[str, Any]] = []
+    for position in active_positions:
+        if position.get("closed_at") is not None or str(position.get("status") or "") != "open_neg_risk_basket":
+            remaining.append(position)
+            continue
+        context = _build_context_for_event(
+            event_slug=str(position.get("event_slug") or ""),
+            captured_at=captured_at,
+            catalog_by_event=catalog_by_event,
+            quote_series=quote_series,
+            quote_window_seconds=quote_window_seconds,
+        )
+        if context is None:
+            remaining.append(position)
+            continue
+        market_map = {str(market.market_id or ""): market for market in context.markets}
+        legs = list(position.get("legs") or [])
+        if not legs:
+            remaining.append(position)
+            continue
+        side = str(position.get("side") or "")
+        quoted_legs = 0
+        current_basket_value = 0.0
+        exitable_legs: list[tuple[dict[str, Any], float]] = []
+        ended_at = None
+        for leg in legs:
+            market = market_map.get(str(leg.get("market_id") or ""))
+            if market is None:
+                continue
+            ended_at = market.ended_at or ended_at
+            exit_price = safe_float(market.yes_bid if side == "yes" else market.no_bid)
+            if exit_price is None:
+                continue
+            quoted_legs += 1
+            current_basket_value += exit_price
+            exitable_legs.append((leg, exit_price))
+        should_exit = False
+        if ended_at is not None:
+            minutes_to_end = (ended_at - captured_at).total_seconds() / 60.0
+            if minutes_to_end <= float(position.get("force_flatten_minutes_before_end") or 0.0):
+                should_exit = True
+        expected_min_legs = int(position.get("selected_condition_count") or len(legs) or 0)
+        if expected_min_legs > 0 and quoted_legs < expected_min_legs:
+            should_exit = True
+        max_unmatched_ratio = safe_float(position.get("max_unmatched_ratio"))
+        if (
+            max_unmatched_ratio is not None
+            and side == "yes"
+            and quoted_legs > 0
+            and max(0.0, 1.0 - current_basket_value) > max_unmatched_ratio
+        ):
+            should_exit = True
+        if not should_exit or not exitable_legs:
+            remaining.append(position)
+            continue
+        for leg, exit_price in exitable_legs:
+            shares = int(leg.get("target_shares") or 0)
+            if shares <= 0:
+                continue
+            replay_rows.append(
+                _replay_trade_row(
+                    captured_at=captured_at,
+                    condition_id=str(leg.get("market_id") or ""),
+                    event_slug=str(position.get("event_slug") or ""),
+                    city=str(position.get("city") or ""),
+                    local_date=position.get("local_date"),
+                    bucket_label=str(leg.get("bucket_label") or ""),
+                    playbook_key="inventory_rebalance_and_exit",
+                    trade_type="sell",
+                    outcome=side,
+                    size=shares,
+                    price=exit_price,
+                )
+            )
+    return remaining, replay_rows
 
 
 def _simulate_directional_exits(
@@ -1726,6 +2027,64 @@ def _replay_trade_row(
     }
 
 
+def _trade_notional_usd(row: dict[str, Any]) -> float:
+    notional = safe_float(row.get("notional_usd"))
+    if notional is not None:
+        return round(abs(notional), 6)
+    price = safe_float(row.get("price")) or 0.0
+    size = safe_float(row.get("size")) or 0.0
+    return round(abs(price * size), 6)
+
+
+def _trade_cashflow_proxy_usd(row: dict[str, Any]) -> float:
+    trade_type = str(row.get("trade_type") or row.get("side") or "").lower()
+    notional = _trade_notional_usd(row)
+    if trade_type in {"sell", "redeem"}:
+        return round(notional, 6)
+    return round(-notional, 6)
+
+
+def _pnl_proxy_ratio(public_pnl_proxy_usd: float, replay_pnl_proxy_usd: float) -> float | None:
+    if public_pnl_proxy_usd > 0:
+        return round(replay_pnl_proxy_usd / public_pnl_proxy_usd, 6)
+    if public_pnl_proxy_usd == 0:
+        return 1.0 if replay_pnl_proxy_usd >= 0 else 0.0
+    return None
+
+
+def _playbook_cashflow_summary(*, public_rows: list[dict[str, Any]], replay_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    public_by_playbook: dict[str, dict[str, float]] = {}
+    replay_by_playbook: dict[str, dict[str, float]] = {}
+    for row in public_rows:
+        playbook_key = str(row.get("public_playbook") or "unsupported_public_behavior")
+        bucket = public_by_playbook.setdefault(playbook_key, {"public_notional_usd": 0.0, "public_pnl_proxy_usd": 0.0})
+        bucket["public_notional_usd"] += _trade_notional_usd(row)
+        bucket["public_pnl_proxy_usd"] += _trade_cashflow_proxy_usd(row)
+    for row in replay_rows:
+        playbook_key = str(row.get("playbook_key") or "unsupported_public_behavior")
+        bucket = replay_by_playbook.setdefault(playbook_key, {"replay_notional_usd": 0.0, "replay_pnl_proxy_usd": 0.0})
+        bucket["replay_notional_usd"] += _trade_notional_usd(row)
+        bucket["replay_pnl_proxy_usd"] += _trade_cashflow_proxy_usd(row)
+    keys = sorted(set(public_by_playbook) | set(replay_by_playbook))
+    result = []
+    for key in keys:
+        public_bucket = public_by_playbook.get(key) or {}
+        replay_bucket = replay_by_playbook.get(key) or {}
+        public_pnl = round(float(public_bucket.get("public_pnl_proxy_usd") or 0.0), 6)
+        replay_pnl = round(float(replay_bucket.get("replay_pnl_proxy_usd") or 0.0), 6)
+        result.append(
+            {
+                "playbook_key": key,
+                "public_notional_usd": round(float(public_bucket.get("public_notional_usd") or 0.0), 6),
+                "replay_notional_usd": round(float(replay_bucket.get("replay_notional_usd") or 0.0), 6),
+                "public_pnl_proxy_usd": public_pnl,
+                "replay_pnl_proxy_usd": replay_pnl,
+                "replay_pnl_proxy_ratio": _pnl_proxy_ratio(public_pnl, replay_pnl),
+            }
+        )
+    return result
+
+
 def _compare_replay_to_public(
     *,
     public_rows: list[dict[str, Any]],
@@ -1774,6 +2133,10 @@ def _compare_replay_to_public(
                     "outcome": public.get("outcome"),
                     "delta_seconds": round(delta, 6),
                     "size_error_ratio": round(size_ratio, 6),
+                    "public_notional_usd": _trade_notional_usd(public),
+                    "replay_notional_usd": _trade_notional_usd(replay),
+                    "public_pnl_proxy_usd": _trade_cashflow_proxy_usd(public),
+                    "replay_pnl_proxy_usd": _trade_cashflow_proxy_usd(replay),
                     "matched": True,
                 }
             )
@@ -1792,9 +2155,19 @@ def _compare_replay_to_public(
                     "outcome": public.get("outcome"),
                     "delta_seconds": None,
                     "size_error_ratio": None,
+                    "public_notional_usd": _trade_notional_usd(public),
+                    "replay_notional_usd": 0.0,
+                    "public_pnl_proxy_usd": _trade_cashflow_proxy_usd(public),
+                    "replay_pnl_proxy_usd": 0.0,
                     "matched": False,
                 }
             )
+    public_notional_usd = round(sum(_trade_notional_usd(row) for row in public_rows), 6)
+    replay_notional_usd = round(sum(_trade_notional_usd(row) for row in replay_rows), 6)
+    public_pnl_proxy_usd = round(sum(_trade_cashflow_proxy_usd(row) for row in public_rows), 6)
+    replay_pnl_proxy_usd = round(sum(_trade_cashflow_proxy_usd(row) for row in replay_rows), 6)
+    false_positive_notional_usd = round(sum(_trade_notional_usd(replay_rows[idx]) for idx in unmatched_replay), 6)
+    false_positive_pnl_proxy_usd = round(sum(_trade_cashflow_proxy_usd(replay_rows[idx]) for idx in unmatched_replay), 6)
     metrics = {
         "covered_trade_count": len(public_rows),
         "covered_trade_match_rate_condition_side": round(sum(1 for row in matched_rows if row["matched"]) / len(public_rows), 6) if public_rows else 0.0,
@@ -1802,6 +2175,14 @@ def _compare_replay_to_public(
         "median_entry_time_delta_seconds": median(deltas) if deltas else None,
         "median_size_error_ratio": median(size_errors) if size_errors else None,
         "false_positive_trade_count": len(unmatched_replay),
+        "false_positive_notional_usd": false_positive_notional_usd,
+        "false_positive_pnl_proxy_usd": false_positive_pnl_proxy_usd,
+        "public_notional_usd": public_notional_usd,
+        "replay_notional_usd": replay_notional_usd,
+        "public_pnl_proxy_usd": public_pnl_proxy_usd,
+        "replay_pnl_proxy_usd": replay_pnl_proxy_usd,
+        "replay_pnl_proxy_ratio": _pnl_proxy_ratio(public_pnl_proxy_usd, replay_pnl_proxy_usd),
+        "playbook_pnl_proxy": _playbook_cashflow_summary(public_rows=public_rows, replay_rows=replay_rows),
         "top_miss_reasons": _counter_rows(miss_reasons),
     }
     return matched_rows, metrics
@@ -1865,6 +2246,8 @@ def _classify_public_parity_misses(
                 "outcome": row.get("outcome"),
                 "public_playbook": row.get("public_playbook"),
                 "miss_bucket": miss_bucket,
+                "notional_usd": _trade_notional_usd(row),
+                "cashflow_proxy_usd": _trade_cashflow_proxy_usd(row),
                 "replay_playbook": best_replay.get("playbook_key") if best_replay else None,
                 "replay_delta_seconds": best_replay.get("delta_seconds") if best_replay else None,
                 "replay_size_error_ratio": best_replay.get("size_error_ratio") if best_replay else None,
@@ -1962,6 +2345,32 @@ def _filter_metrics_to_rows(matched_rows: list[dict[str, Any]], target_rows: lis
     playbook_count = sum(1 for row in rows if row.get("matched") and str(row.get("replay_playbook") or "") == str(row.get("public_playbook") or ""))
     deltas = [safe_float(row.get("delta_seconds")) for row in rows if safe_float(row.get("delta_seconds")) is not None and row.get("matched")]
     size_errors = [safe_float(row.get("size_error_ratio")) for row in rows if safe_float(row.get("size_error_ratio")) is not None and row.get("matched")]
+    public_notional_usd = round(sum(float(row.get("public_notional_usd") or 0.0) for row in rows), 6)
+    replay_notional_usd = round(sum(float(row.get("replay_notional_usd") or 0.0) for row in rows), 6)
+    public_pnl_proxy_usd = round(sum(float(row.get("public_pnl_proxy_usd") or 0.0) for row in rows), 6)
+    replay_pnl_proxy_usd = round(sum(float(row.get("replay_pnl_proxy_usd") or 0.0) for row in rows), 6)
+    public_rows = [
+        {
+            "public_playbook": row.get("public_playbook"),
+            "trade_type": row.get("trade_type"),
+            "price": 1.0,
+            "size": float(row.get("public_notional_usd") or 0.0),
+            "notional_usd": float(row.get("public_notional_usd") or 0.0),
+        }
+        for row in rows
+        if float(row.get("public_notional_usd") or 0.0) > 0.0
+    ]
+    replay_rows = [
+        {
+            "playbook_key": row.get("replay_playbook"),
+            "trade_type": row.get("trade_type"),
+            "price": 1.0,
+            "size": float(row.get("replay_notional_usd") or 0.0),
+            "notional_usd": float(row.get("replay_notional_usd") or 0.0),
+        }
+        for row in rows
+        if float(row.get("replay_notional_usd") or 0.0) > 0.0 and row.get("replay_playbook")
+    ]
     return {
         "covered_trade_count": covered_count,
         "covered_trade_match_rate_condition_side": round(matched_count / covered_count, 6) if covered_count else 0.0,
@@ -1969,6 +2378,14 @@ def _filter_metrics_to_rows(matched_rows: list[dict[str, Any]], target_rows: lis
         "median_entry_time_delta_seconds": median(deltas) if deltas else None,
         "median_size_error_ratio": median(size_errors) if size_errors else None,
         "false_positive_trade_count": 0,
+        "false_positive_notional_usd": 0.0,
+        "false_positive_pnl_proxy_usd": 0.0,
+        "public_notional_usd": public_notional_usd,
+        "replay_notional_usd": replay_notional_usd,
+        "public_pnl_proxy_usd": public_pnl_proxy_usd,
+        "replay_pnl_proxy_usd": replay_pnl_proxy_usd,
+        "replay_pnl_proxy_ratio": _pnl_proxy_ratio(public_pnl_proxy_usd, replay_pnl_proxy_usd),
+        "playbook_pnl_proxy": _playbook_cashflow_summary(public_rows=public_rows, replay_rows=replay_rows),
     }
 
 
@@ -1995,7 +2412,61 @@ def _filter_rows_to_trade_set(rows: list[dict[str, Any]], target_rows: list[dict
     ]
 
 
-def _deployment_gate_result(*, holdout_metrics: dict[str, Any], miss_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _playbook_metric(metrics: dict[str, Any], playbook_key: str) -> dict[str, Any] | None:
+    for row in metrics.get("playbook_pnl_proxy") or []:
+        if str(row.get("playbook_key") or "") == playbook_key:
+            return row
+    return None
+
+
+def _aggregate_pair_proxy(metrics: dict[str, Any]) -> dict[str, float | None]:
+    public_pnl = 0.0
+    replay_pnl = 0.0
+    found = False
+    for playbook_key in (*PAIR_PLAYBOOK_KEYS, "inventory_rebalance_and_exit"):
+        row = _playbook_metric(metrics, playbook_key)
+        if row is None:
+            continue
+        found = True
+        public_pnl += float(row.get("public_pnl_proxy_usd") or 0.0)
+        replay_pnl += float(row.get("replay_pnl_proxy_usd") or 0.0)
+    return {
+        "public_pnl_proxy_usd": round(public_pnl, 6) if found else 0.0,
+        "replay_pnl_proxy_usd": round(replay_pnl, 6) if found else 0.0,
+        "replay_pnl_proxy_ratio": _pnl_proxy_ratio(public_pnl, replay_pnl),
+    }
+
+
+def _miss_bucket_notional_summary(miss_rows: list[dict[str, Any]], *, min_notional_usd: float) -> list[dict[str, Any]]:
+    buckets: dict[str, dict[str, float]] = {}
+    for row in miss_rows:
+        key = str(row.get("miss_bucket") or "")
+        bucket = buckets.setdefault(key, {"count": 0.0, "notional_usd": 0.0, "cashflow_proxy_usd": 0.0})
+        bucket["count"] += 1.0
+        bucket["notional_usd"] += float(row.get("notional_usd") or 0.0)
+        bucket["cashflow_proxy_usd"] += float(row.get("cashflow_proxy_usd") or 0.0)
+    result = []
+    for key, payload in sorted(buckets.items(), key=lambda item: (-item[1]["notional_usd"], item[0])):
+        if payload["notional_usd"] < min_notional_usd:
+            continue
+        result.append(
+            {
+                "miss_bucket": key,
+                "count": int(payload["count"]),
+                "notional_usd": round(payload["notional_usd"], 6),
+                "cashflow_proxy_usd": round(payload["cashflow_proxy_usd"], 6),
+            }
+        )
+    return result
+
+
+def _deployment_gate_result(
+    *,
+    holdout_metrics: dict[str, Any],
+    miss_rows: list[dict[str, Any]],
+    parity_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    parity_config = parity_config or {}
     unexplained_by_condition: dict[str, int] = {}
     total_by_condition: dict[str, int] = {}
     for row in miss_rows:
@@ -2008,14 +2479,51 @@ def _deployment_gate_result(*, holdout_metrics: dict[str, Any], miss_rows: list[
         unexplained = unexplained_by_condition.get(condition_id, 0)
         ratio = (unexplained / total) if total else 0.0
         top_condition_failures.append({"condition_id": condition_id, "unexplained_miss_ratio": round(ratio, 6), "trade_count": total})
+    pair_proxy = _aggregate_pair_proxy(holdout_metrics)
+    replay_ratio = holdout_metrics.get("replay_pnl_proxy_ratio")
+    pair_ratio = pair_proxy.get("replay_pnl_proxy_ratio")
+    replay_pnl_gate_passed = (
+        float(holdout_metrics.get("replay_pnl_proxy_usd") or 0.0)
+        >= float(holdout_metrics.get("public_pnl_proxy_usd") or 0.0)
+        if float(holdout_metrics.get("public_pnl_proxy_usd") or 0.0) <= 0.0
+        else (replay_ratio is not None and float(replay_ratio) >= float(parity_config.get("holdout_replay_pnl_proxy_ratio_gte") or 0.75))
+    )
+    pair_pnl_gate_passed = (
+        float(pair_proxy.get("replay_pnl_proxy_usd") or 0.0)
+        >= float(pair_proxy.get("public_pnl_proxy_usd") or 0.0)
+        if float(pair_proxy.get("public_pnl_proxy_usd") or 0.0) <= 0.0
+        else (pair_ratio is not None and float(pair_ratio) >= float(parity_config.get("holdout_pair_replay_pnl_proxy_ratio_gte") or 0.85))
+    )
     passed = (
-        float(holdout_metrics.get("covered_trade_match_rate_condition_side") or 0.0) >= 0.70
-        and float(holdout_metrics.get("covered_trade_match_rate_playbook") or 0.0) >= 0.60
-        and (holdout_metrics.get("median_entry_time_delta_seconds") is not None and float(holdout_metrics.get("median_entry_time_delta_seconds") or 999999.0) <= 45.0)
-        and (holdout_metrics.get("median_size_error_ratio") is not None and float(holdout_metrics.get("median_size_error_ratio") or 999999.0) <= 0.35)
+        float(holdout_metrics.get("covered_trade_match_rate_condition_side") or 0.0)
+        >= float(parity_config.get("holdout_condition_side_match_rate_gte") or 0.70)
+        and float(holdout_metrics.get("covered_trade_match_rate_playbook") or 0.0)
+        >= float(parity_config.get("holdout_playbook_match_rate_gte") or 0.60)
+        and (
+            holdout_metrics.get("median_entry_time_delta_seconds") is not None
+            and float(holdout_metrics.get("median_entry_time_delta_seconds") or 999999.0)
+            <= float(parity_config.get("holdout_median_entry_delta_seconds_lte") or 45.0)
+        )
+        and (
+            holdout_metrics.get("median_size_error_ratio") is not None
+            and float(holdout_metrics.get("median_size_error_ratio") or 999999.0)
+            <= float(parity_config.get("holdout_median_size_error_ratio_lte") or 0.35)
+        )
+        and replay_pnl_gate_passed
+        and pair_pnl_gate_passed
         and all(item["unexplained_miss_ratio"] <= 0.40 for item in top_condition_failures)
     )
-    return {"passed": passed, "top_condition_failures": top_condition_failures}
+    return {
+        "passed": passed,
+        "top_condition_failures": top_condition_failures,
+        "holdout_pair_pnl_proxy": pair_proxy,
+        "holdout_replay_pnl_gate_passed": replay_pnl_gate_passed,
+        "holdout_pair_pnl_gate_passed": pair_pnl_gate_passed,
+        "top_miss_buckets_by_notional": _miss_bucket_notional_summary(
+            miss_rows,
+            min_notional_usd=float(parity_config.get("notional_miss_bucket_min_usd") or 25.0),
+        ),
+    }
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -2054,6 +2562,7 @@ def _build_markdown_report(
         "# ColdMath Public Parity",
         "",
         "## Window",
+        f"- Artifact ID: `{summary.get('artifact_id')}`",
         f"- Wallet: `{wallet_target['proxy_wallet']}`",
         f"- Requested start UTC: `{summary['requested_window']['requested_start_utc'].isoformat()}`",
         f"- Requested end UTC: `{summary['requested_window']['requested_end_utc'].isoformat()}`",
@@ -2065,11 +2574,22 @@ def _build_markdown_report(
         f"- Covered trades: `{summary['covered_trade_count']}`",
         f"- Uncovered trades: `{summary['uncovered_trade_count']}`",
         "",
+        "## Money Proxy",
+        f"- Public notional USD: `{summary['full_replay_metrics']['public_notional_usd']}`",
+        f"- Replay notional USD: `{summary['full_replay_metrics']['replay_notional_usd']}`",
+        f"- Public PnL proxy USD: `{summary['full_replay_metrics']['public_pnl_proxy_usd']}`",
+        f"- Replay PnL proxy USD: `{summary['full_replay_metrics']['replay_pnl_proxy_usd']}`",
+        f"- Replay/Public PnL proxy ratio: `{summary['full_replay_metrics']['replay_pnl_proxy_ratio']}`",
+        "",
         "## Holdout Metrics",
         f"- Condition+side match rate: `{summary['holdout_metrics']['covered_trade_match_rate_condition_side']}`",
         f"- Playbook match rate: `{summary['holdout_metrics']['covered_trade_match_rate_playbook']}`",
         f"- Median entry delta seconds: `{summary['holdout_metrics']['median_entry_time_delta_seconds']}`",
         f"- Median size error ratio: `{summary['holdout_metrics']['median_size_error_ratio']}`",
+        f"- Holdout replay PnL proxy USD: `{summary['holdout_metrics']['replay_pnl_proxy_usd']}`",
+        f"- Holdout public PnL proxy USD: `{summary['holdout_metrics']['public_pnl_proxy_usd']}`",
+        f"- Holdout replay/public PnL proxy ratio: `{summary['holdout_metrics']['replay_pnl_proxy_ratio']}`",
+        f"- Holdout pair replay/public PnL proxy ratio: `{summary['deployment_gate']['holdout_pair_pnl_proxy']['replay_pnl_proxy_ratio']}`",
         "",
         "## Deployment Gate",
         f"- Passed: `{summary['deployment_gate']['passed']}`",
@@ -2083,6 +2603,12 @@ def _build_markdown_report(
     for item in _counter_rows(miss_counts):
         lines.append(f"- `{item['label']}`: `{item['count']}`")
 
+    lines.extend(["", "## Top Miss Buckets By Notional"])
+    for item in summary["deployment_gate"].get("top_miss_buckets_by_notional") or []:
+        lines.append(
+            f"- `{item['miss_bucket']}`: notional=`{item['notional_usd']}` cashflow_proxy=`{item['cashflow_proxy_usd']}` count=`{item['count']}`"
+        )
+
     lines.extend(["", "## Top Public Sequence Playbooks"])
     sequence_counts: dict[str, int] = {}
     for row in grouped_sequences:
@@ -2090,6 +2616,12 @@ def _build_markdown_report(
         sequence_counts[label] = sequence_counts.get(label, 0) + 1
     for item in _counter_rows(sequence_counts):
         lines.append(f"- `{item['label']}`: `{item['count']}`")
+
+    lines.extend(["", "## Playbook PnL Proxy"])
+    for row in summary["full_replay_metrics"].get("playbook_pnl_proxy") or []:
+        lines.append(
+            f"- `{row['playbook_key']}`: public_pnl_proxy=`{row['public_pnl_proxy_usd']}` replay_pnl_proxy=`{row['replay_pnl_proxy_usd']}` ratio=`{row['replay_pnl_proxy_ratio']}`"
+        )
 
     lines.extend(["", "## Uncovered Trades"])
     if not uncovered_rows:
