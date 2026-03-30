@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.paper_runtime import (
     _paper_build_equity_snapshot,
+    _paper_fill_quote,
     _paper_fill_shares,
     _paper_position_mark_value,
     _paper_resolution_side,
@@ -42,6 +43,22 @@ class TradingWeatherPaperTests(unittest.TestCase):
         self.assertEqual(_paper_fill_shares(target_shares=25, available_size=10.9), 10)
         self.assertEqual(_paper_fill_shares(target_shares=8, available_size=25.0), 8)
         self.assertEqual(_paper_fill_shares(target_shares=8, available_size=None), 8)
+
+    def test_paper_fill_quote_uses_generic_directional_price_and_size(self):
+        plan = {
+            "side": "yes",
+            "price": 0.001,
+            "available_size": 3000.0,
+            "quote_snapshot": {
+                "yes_ask": 0.001,
+                "yes_ask_size": 3000.0,
+            },
+        }
+
+        price, available_size = _paper_fill_quote(plan, side="yes")
+
+        self.assertEqual(price, 0.001)
+        self.assertEqual(available_size, 3000.0)
 
     def test_paper_position_mark_value_marks_pairs_at_par_and_residual_at_bid(self):
         market_lookup = {

@@ -401,10 +401,21 @@ def _paper_mark_price(market: Any, *, side: str) -> float:
 
 
 def _paper_fill_quote(plan: dict[str, Any], *, side: str) -> tuple[float | None, float | None]:
-    if side == "yes":
-        return safe_float(plan.get("yes_price")), safe_float(plan.get("yes_ask_size"))
-    if side == "no":
-        return safe_float(plan.get("no_price")), safe_float(plan.get("no_ask_size"))
+    normalized_side = str(side or "").strip().lower()
+    if normalized_side in {"yes", "no"}:
+        leg_price = safe_float(plan.get(f"{normalized_side}_price"))
+        leg_size = safe_float(plan.get(f"{normalized_side}_ask_size"))
+        if leg_price is not None or leg_size is not None:
+            return leg_price, leg_size
+        quote_snapshot = plan.get("quote_snapshot") or {}
+        quote_price = safe_float(quote_snapshot.get(f"{normalized_side}_ask"))
+        quote_size = safe_float(quote_snapshot.get(f"{normalized_side}_ask_size"))
+        if quote_price is not None or quote_size is not None:
+            return quote_price, quote_size
+        plan_side = str(plan.get("side") or "").strip().lower()
+        if not plan_side or plan_side == normalized_side:
+            return safe_float(plan.get("price")), safe_float(plan.get("available_size"))
+        return None, None
     return safe_float(plan.get("price")), safe_float(plan.get("available_size"))
 
 
