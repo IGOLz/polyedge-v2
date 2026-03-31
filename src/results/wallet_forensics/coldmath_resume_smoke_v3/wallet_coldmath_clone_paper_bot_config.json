@@ -21,7 +21,7 @@
     "asymmetric_paired_accumulation": {
       "enabled": true,
       "shadow_enabled": true,
-      "live_enabled": false,
+      "live_enabled": true,
       "sequence_budget_usd": 8.0,
       "synthetic_pair_cost_lte": 1.02,
       "max_inventory_imbalance_ratio": 0.8,
@@ -103,7 +103,8 @@
   },
   "paper": {
     "fill_model": "touch_realistic",
-    "snapshot_interval_seconds": 60.0
+    "snapshot_interval_seconds": 60.0,
+    "execute_shadow_playbooks": false
   },
   "parity": {
     "signal_match_window_seconds": 15.0,

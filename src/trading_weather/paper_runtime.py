@@ -428,7 +428,10 @@ def _paper_fill_shares(*, target_shares: int, available_size: float | None) -> i
 
 
 def _paper_candidate_enabled(bot_config: dict[str, Any], playbook_key: str) -> bool:
-    return playbook_enabled(bot_config, playbook_key, live=False) or playbook_enabled(bot_config, playbook_key, live=True)
+    paper_config = bot_config.get("paper") or {}
+    if bool(paper_config.get("execute_shadow_playbooks", False)):
+        return playbook_enabled(bot_config, playbook_key, live=False) or playbook_enabled(bot_config, playbook_key, live=True)
+    return playbook_enabled(bot_config, playbook_key, live=True)
 
 
 def _paper_position_effective_cost_usd(position: dict[str, Any]) -> float:

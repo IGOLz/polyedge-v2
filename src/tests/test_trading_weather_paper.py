@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.paper_runtime import (
     _paper_build_equity_snapshot,
+    _paper_candidate_enabled,
     _paper_fill_quote,
     _paper_fill_shares,
     _paper_position_mark_value,
@@ -38,6 +39,7 @@ class TradingWeatherPaperTests(unittest.TestCase):
         self.assertEqual(config["execution_mode"], "paper_live")
         self.assertEqual(config["paper"]["fill_model"], "touch_realistic")
         self.assertGreater(config["paper"]["snapshot_interval_seconds"], 0.0)
+        self.assertFalse(config["paper"]["execute_shadow_playbooks"])
 
     def test_paper_fill_shares_caps_to_top_of_book(self):
         self.assertEqual(_paper_fill_shares(target_shares=25, available_size=10.9), 10)
@@ -59,6 +61,45 @@ class TradingWeatherPaperTests(unittest.TestCase):
 
         self.assertEqual(price, 0.001)
         self.assertEqual(available_size, 3000.0)
+
+    def test_paper_candidate_enabled_defaults_to_live_only(self):
+        config = normalize_clone_bot_config(
+            {
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "paper-test",
+                "execution_mode": "paper_live",
+                "playbooks": {
+                    "asymmetric_paired_accumulation": {
+                        "enabled": True,
+                        "shadow_enabled": True,
+                        "live_enabled": False,
+                    }
+                },
+            }
+        )
+
+        self.assertFalse(_paper_candidate_enabled(config, "asymmetric_paired_accumulation"))
+
+    def test_paper_candidate_enabled_can_opt_into_shadow_playbooks(self):
+        config = normalize_clone_bot_config(
+            {
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "paper-test",
+                "execution_mode": "paper_live",
+                "paper": {
+                    "execute_shadow_playbooks": True,
+                },
+                "playbooks": {
+                    "asymmetric_paired_accumulation": {
+                        "enabled": True,
+                        "shadow_enabled": True,
+                        "live_enabled": False,
+                    }
+                },
+            }
+        )
+
+        self.assertTrue(_paper_candidate_enabled(config, "asymmetric_paired_accumulation"))
 
     def test_paper_position_mark_value_marks_pairs_at_par_and_residual_at_bid(self):
         market_lookup = {

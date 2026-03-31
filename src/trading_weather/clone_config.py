@@ -274,6 +274,7 @@ def _normalize_paper(paper: dict[str, Any]) -> dict[str, Any]:
         "snapshot_interval_seconds": float(
             paper.get("snapshot_interval_seconds") or runtime_config.DEFAULT_SUMMARY_INTERVAL_SECONDS
         ),
+        "execute_shadow_playbooks": bool(paper.get("execute_shadow_playbooks", False)),
     }
 
 
