@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from trading_weather.clone_config import normalize_clone_bot_config
+from trading_weather.clone_engine import build_clone_runtime, plan_paired_entry
 from trading_weather.paper_runtime import (
     _paper_build_equity_snapshot,
     _paper_candidate_enabled,
@@ -100,6 +101,54 @@ class TradingWeatherPaperTests(unittest.TestCase):
         )
 
         self.assertTrue(_paper_candidate_enabled(config, "asymmetric_paired_accumulation"))
+
+    def test_asymmetric_pair_plan_allows_small_complement_leg(self):
+        config = normalize_clone_bot_config(
+            {
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "paper-test",
+                "execution_mode": "paper_live",
+                "runtime": {
+                    "sequence_budget_usd": 8.0,
+                    "max_total_exposure_usd": 30.0,
+                    "min_expected_edge_usd": 0.03,
+                },
+                "playbooks": {
+                    "asymmetric_paired_accumulation": {
+                        "enabled": True,
+                        "shadow_enabled": True,
+                        "live_enabled": True,
+                        "sequence_budget_usd": 8.0,
+                        "synthetic_pair_cost_lte": 1.02,
+                        "dominant_leg_budget_fraction": 0.94,
+                    }
+                },
+            }
+        )
+        runtime = build_clone_runtime(config, dry_run=False)
+        candidate = {
+            "playbook_key": "asymmetric_paired_accumulation",
+            "market_id": "m1",
+            "event_id": "e1",
+            "event_slug": "event",
+            "city": "dallas",
+            "local_date": "2026-04-01",
+            "bucket_label": "72-73F",
+            "combined_cost": 1.001,
+            "yes_ask": 0.002,
+            "no_ask": 0.999,
+            "yes_ask_size": 4289.2,
+            "no_ask_size": 3403.95,
+            "candidate_score": 83313.378225,
+            "yes_token_id": "yes",
+            "no_token_id": "no",
+        }
+
+        plan = plan_paired_entry(candidate, runtime, active_exposure_usd=0.0)
+
+        self.assertIsNotNone(plan)
+        self.assertGreater(plan["yes_target_shares"], plan["no_target_shares"])
+        self.assertGreater(plan["no_target_shares"], 0)
 
     def test_paper_position_mark_value_marks_pairs_at_par_and_residual_at_bid(self):
         market_lookup = {

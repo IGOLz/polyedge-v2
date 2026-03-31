@@ -115,14 +115,12 @@ def _pair_side_targets_from_budget(
     yes_budget = dominant_budget if dominant_side == "yes" else complement_budget
     no_budget = dominant_budget if dominant_side == "no" else complement_budget
 
-    yes_target = _normalize_buy_target_shares(yes_price, math.floor(yes_budget / yes_price))
-    no_target = _normalize_buy_target_shares(no_price, math.floor(no_budget / no_price))
+    yes_target = max(0, math.floor(yes_budget / yes_price))
+    no_target = max(0, math.floor(no_budget / no_price))
     if yes_ask_size is not None:
         yes_target = min(yes_target, math.floor(yes_ask_size))
-        yes_target = _normalize_buy_target_shares(yes_price, yes_target)
     if no_ask_size is not None:
         no_target = min(no_target, math.floor(no_ask_size))
-        no_target = _normalize_buy_target_shares(no_price, no_target)
     return yes_target, no_target
 
 
@@ -325,7 +323,10 @@ def evaluate_clone_cycle(
             for row in rows_for_market:
                 cycle_rows.append(row)
                 sequence_snapshots.append(row["sequence_data"])
-                if row["qualifies"]:
+                if row["qualifies"] and (
+                    playbook_enabled(runtime.config, str(row.get("playbook_key") or ""), live=False)
+                    or playbook_enabled(runtime.config, str(row.get("playbook_key") or ""), live=True)
+                ):
                     candidates.append(row)
                 else:
                     for reason in row.get("rejection_reasons") or []:
@@ -341,7 +342,10 @@ def evaluate_clone_cycle(
         for row in basket_rows:
             cycle_rows.append(row)
             sequence_snapshots.append(row["sequence_data"])
-            if row["qualifies"]:
+            if row["qualifies"] and (
+                playbook_enabled(runtime.config, str(row.get("playbook_key") or ""), live=False)
+                or playbook_enabled(runtime.config, str(row.get("playbook_key") or ""), live=True)
+            ):
                 candidates.append(row)
             else:
                 for reason in row.get("rejection_reasons") or []:
@@ -429,9 +433,9 @@ def plan_paired_entry(
         _minimum_pair_target_shares(yes_ask, no_ask),
     )
     if playbook_key == "asymmetric_paired_accumulation":
-        if yes_target_shares < max(1, _minimum_buy_target_shares(yes_ask)):
+        if yes_target_shares < 1:
             return None
-        if no_target_shares < max(1, _minimum_buy_target_shares(no_ask)):
+        if no_target_shares < 1:
             return None
     else:
         if yes_target_shares < min_pair_target or no_target_shares < min_pair_target:
