@@ -303,10 +303,9 @@ async def _record_paper_position_event(
 
 
 def _paper_candidate_signature(report: dict[str, Any]) -> str | None:
-    candidates = report.get("candidates") or []
-    if not candidates:
+    top = _paper_top_candidate(report)
+    if top is None:
         return None
-    top = candidates[0]
     payload = {
         "playbook_key": top.get("playbook_key"),
         "market_id": top.get("market_id"),
@@ -316,6 +315,32 @@ def _paper_candidate_signature(report: dict[str, Any]) -> str | None:
         "directional_price": round(float(top.get("directional_price") or 0.0), 4),
     }
     return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _paper_top_candidate(report: dict[str, Any]) -> dict[str, Any] | None:
+    candidates = report.get("candidates") or []
+    if not candidates:
+        return None
+    for candidate in candidates:
+        if bool(candidate.get("paper_eligible")):
+            return candidate
+    return candidates[0]
+
+
+def _paper_summary_candidate(candidate: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not candidate:
+        return None
+    return {
+        "playbook_key": candidate.get("playbook_key"),
+        "city": candidate.get("city"),
+        "local_date": candidate.get("local_date"),
+        "bucket_label": candidate.get("bucket_label"),
+        "side": candidate.get("side"),
+        "candidate_score": candidate.get("candidate_score"),
+        "combined_cost": candidate.get("combined_cost"),
+        "directional_price": candidate.get("directional_price"),
+        "rejection_reasons": candidate.get("rejection_reasons"),
+    }
 
 
 def _paper_persist_sort_key(row: dict[str, Any]) -> tuple[int, int, float]:
@@ -624,7 +649,7 @@ async def _emit_paper_cycle_telemetry(
     telemetry.iteration += 1
     signature = _paper_candidate_signature(report)
     if signature and signature != telemetry.last_candidate_signature:
-        top = (report.get("candidates") or [None])[0] or {}
+        top = _paper_top_candidate(report) or {}
         message = (
             "[WEATHER-PAPER] Candidate | "
             f"{top.get('playbook_key')} {top.get('city')} {top.get('local_date')} {top.get('bucket_label')} "
@@ -1426,11 +1451,14 @@ async def _run_clone_paper_cycle(
         active_positions=active_positions,
         active_market_ids=active_market_ids,
     )
+    for row in report.get("cycle_rows") or []:
+        row["paper_eligible"] = False
 
     entry_attempts = 0
     fill_count = 0.0
     partial_fill_count = 0.0
     fill_notional_usd = 0.0
+    selected_candidate: dict[str, Any] | None = None
     max_entry_attempts = int(runtime.runtime.get("max_entry_attempts") or config.DEFAULT_MAX_ENTRY_ATTEMPTS or 1)
     if stand_down_reason is None and report.get("candidates"):
         for candidate in report["candidates"]:
@@ -1469,6 +1497,9 @@ async def _run_clone_paper_cycle(
             plan = _clone_apply_runtime_size_controls(plan, runtime=runtime, repeat_count=int(entry_activity.get("entry_count") or 0))
             if plan is None:
                 continue
+            candidate["paper_eligible"] = True
+            if selected_candidate is None:
+                selected_candidate = candidate
             entry_attempts += 1
             if playbook_key in PAIR_PLAYBOOK_KEYS:
                 result = await _paper_execute_pair_entry(plan, paper_run_id=paper_run_id, config_fingerprint=config_fingerprint, git_sha=git_sha)
@@ -1521,6 +1552,9 @@ async def _run_clone_paper_cycle(
         active_positions=active_positions,
         entry_attempts=entry_attempts,
     )
+    paper_top_candidate = selected_candidate or _paper_top_candidate(report)
+    if paper_top_candidate is not None:
+        summary["top_candidate"] = _paper_summary_candidate(paper_top_candidate)
     summary.update(
         {
             "stand_down_reason": stand_down_reason,

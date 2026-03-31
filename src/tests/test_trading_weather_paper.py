@@ -11,6 +11,7 @@ from trading_weather.clone_config import normalize_clone_bot_config
 from trading_weather.clone_engine import build_clone_runtime, plan_paired_entry
 from trading_weather.paper_runtime import (
     _paper_build_equity_snapshot,
+    _paper_candidate_signature,
     _paper_candidate_enabled,
     _paper_fill_quote,
     _paper_fill_shares,
@@ -101,6 +102,31 @@ class TradingWeatherPaperTests(unittest.TestCase):
         )
 
         self.assertTrue(_paper_candidate_enabled(config, "asymmetric_paired_accumulation"))
+
+    def test_paper_candidate_signature_prefers_selected_candidate(self):
+        report = {
+            "candidates": [
+                {
+                    "playbook_key": "paired_under_par",
+                    "market_id": "m1",
+                    "candidate_score": 10.0,
+                    "combined_cost": 1.01,
+                },
+                {
+                    "playbook_key": "asymmetric_paired_accumulation",
+                    "market_id": "m2",
+                    "candidate_score": 999.0,
+                    "combined_cost": 1.001,
+                    "paper_eligible": True,
+                },
+            ]
+        }
+
+        signature = _paper_candidate_signature(report)
+
+        self.assertIsNotNone(signature)
+        self.assertIn("asymmetric_paired_accumulation", signature)
+        self.assertIn("m2", signature)
 
     def test_asymmetric_pair_plan_allows_small_complement_leg(self):
         config = normalize_clone_bot_config(

@@ -253,6 +253,7 @@ async def fetch_nws_hourly_forecast(
     points = await client.get(
         f"https://api.weather.gov/points/{lat},{lon}",
         headers={"User-Agent": WEATHER_USER_AGENT, "Accept": "application/geo+json"},
+        follow_redirects=True,
     )
     points.raise_for_status()
     points_payload = points.json()
@@ -267,6 +268,7 @@ async def fetch_nws_hourly_forecast(
     forecast = await client.get(
         forecast_url,
         headers={"User-Agent": WEATHER_USER_AGENT, "Accept": "application/geo+json"},
+        follow_redirects=True,
     )
     forecast.raise_for_status()
     return forecast.json()
