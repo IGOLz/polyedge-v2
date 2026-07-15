@@ -274,6 +274,45 @@ class TradingWeatherCloneTests(unittest.TestCase):
         self.assertIn(("tail_bucket_accumulation", "tail", "yes"), playbooks)
         self.assertIn(("high_prob_bucket_accumulation", "high", "yes"), playbooks)
 
+    def test_evaluate_clone_cycle_excludes_disabled_playbooks_from_candidates(self):
+        explicit = normalize_clone_bot_config(
+            {
+                "mode": "coldmath_weather_clone",
+                "strategy_name": "coldmath_weather_clone_v1",
+                "execution_mode": "shadow_only",
+                "playbooks": {
+                    "paired_under_par": {
+                        "enabled": True,
+                        "shadow_enabled": True,
+                        "live_enabled": True,
+                    }
+                },
+                "runtime": {
+                    "sequence_budget_usd": 6.0,
+                    "max_total_exposure_usd": 30.0,
+                    "daily_loss_limit_usd": 30.0,
+                    "daily_spend_limit_usd": 30.0,
+                },
+            }
+        )
+        runtime = build_clone_runtime(explicit, dry_run=True)
+        report = evaluate_clone_cycle(
+            contexts=[_context([_market("asym", bucket_order=1, yes_ask=0.95, no_ask=0.02)])],
+            runtime=runtime,
+            captured_at=self.captured_at,
+            health_state={
+                "execution_auth": {"status": "unknown", "reason": "dry_run"},
+                "market_data": {"status": "healthy", "reason": "ok"},
+                "quote_coverage_ratio": 1.0,
+                "execution_allowed": False,
+            },
+            sequence_state={},
+            active_market_ids=set(),
+        )
+
+        playbooks = {row["playbook_key"] for row in report["candidates"]}
+        self.assertEqual(playbooks, set())
+
     def test_high_prob_playbook_allows_non_dominant_bucket_when_complementary_side_is_cheap(self):
         markets = [
             _market("high-a", bucket_order=1, yes_ask=0.96, no_ask=0.04),

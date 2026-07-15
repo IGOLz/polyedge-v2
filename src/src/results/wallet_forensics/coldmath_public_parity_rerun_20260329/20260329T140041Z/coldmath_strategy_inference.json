@@ -1,0 +1,392 @@
+{
+  "covered_window": {
+    "covered_end_utc": "2026-03-29 14:00:42.621267+00:00",
+    "covered_start_utc": "2026-03-28 14:00:42.621267+00:00"
+  },
+  "holdout_metrics": {
+    "covered_trade_count": 283,
+    "covered_trade_match_rate_condition_side": 0.0,
+    "covered_trade_match_rate_playbook": 0.0,
+    "false_positive_notional_usd": 0,
+    "false_positive_pnl_proxy_usd": 0,
+    "false_positive_trade_count": 0,
+    "median_entry_time_delta_seconds": null,
+    "median_size_error_ratio": null,
+    "playbook_pnl_proxy": [
+      {
+        "playbook_key": "asymmetric_paired_accumulation",
+        "public_notional_usd": 3560.22166,
+        "public_pnl_proxy_usd": -3560.22166,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "cheap_bucket_accumulation",
+        "public_notional_usd": 489.83233,
+        "public_pnl_proxy_usd": -489.83233,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "high_prob_bucket_accumulation",
+        "public_notional_usd": 594.5855,
+        "public_pnl_proxy_usd": -594.5855,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "paired_under_par",
+        "public_notional_usd": 40.449807,
+        "public_pnl_proxy_usd": -40.449807,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "tail_bucket_accumulation",
+        "public_notional_usd": 0.07,
+        "public_pnl_proxy_usd": -0.07,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "unsupported_public_behavior",
+        "public_notional_usd": 0.5481,
+        "public_pnl_proxy_usd": -0.5481,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      }
+    ],
+    "public_notional_usd": 4685.707397,
+    "public_pnl_proxy_usd": -4685.707397,
+    "replay_notional_usd": 0,
+    "replay_pnl_proxy_ratio": null,
+    "replay_pnl_proxy_usd": 0,
+    "top_miss_reasons": [
+      {
+        "count": 283,
+        "label": "no_replay_match"
+      }
+    ]
+  },
+  "requested_window": {
+    "requested_end_utc": "2026-03-29 14:00:42.621267+00:00",
+    "requested_lookback_hours": 24.0,
+    "requested_start_utc": "2026-03-28 14:00:42.621267+00:00"
+  },
+  "size_model": {
+    "per_playbook": {
+      "asymmetric_paired_accumulation": {
+        "dominant_leg_budget_fraction": 0.96671,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 215.08
+      },
+      "cheap_bucket_accumulation": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 15.03
+      },
+      "high_prob_bucket_accumulation": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 393.5
+      },
+      "inventory_exit_and_closeout": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 5.0
+      },
+      "neg_risk_basket": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 107.21
+      },
+      "paired_under_par": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 215.08
+      },
+      "tail_bucket_accumulation": {
+        "dominant_leg_budget_fraction": null,
+        "max_ask_size_fraction": 1.0,
+        "reentry_scale": 1.0,
+        "sequence_budget_usd": 2.0
+      }
+    },
+    "repeat_entry_cooldown_seconds": 15.0
+  },
+  "strategy_parameters": {
+    "playbooks": {
+      "asymmetric_paired_accumulation": {
+        "allow_active_market_reentry": true,
+        "allow_stale_pair_recovery": true,
+        "complementary_leg_price_lte": 0.1,
+        "dominant_leg_budget_fraction": 0.96671,
+        "dominant_leg_price_gte": 0.9,
+        "enabled": false,
+        "live_enabled": false,
+        "live_requires_full_quote_pair": false,
+        "max_ask_size_fraction": 1.0,
+        "max_inventory_imbalance_ratio": 0.8,
+        "max_leg_price_lte": 1.0,
+        "max_leg_spread": 0.08,
+        "max_quote_age_seconds": 120.0,
+        "midpoint_confirmation_required": false,
+        "min_leg_price_gte": 0.0,
+        "min_mergeable_size": 0.0,
+        "reentry_scale": 1.0,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 215.08,
+        "shadow_enabled": false,
+        "shadow_requires_full_quote_pair": false,
+        "synthetic_pair_cost_lte": 1.02,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "cheap_bucket_accumulation": {
+        "complementary_price_gte": 0.94,
+        "directional_price_lte": 0.06,
+        "enabled": false,
+        "force_flatten_minutes_before_end": 120,
+        "live_enabled": false,
+        "max_ask_size_fraction": 1.0,
+        "min_quote_age_seconds": 0.0,
+        "minimum_hold_seconds": 300.0,
+        "profit_take_price": 0.12,
+        "reentry_scale": 1.0,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 15.03,
+        "shadow_enabled": false,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "high_prob_bucket_accumulation": {
+        "complementary_price_lte": 0.06,
+        "directional_price_gte": 0.95,
+        "directional_price_lte": 0.995,
+        "enabled": true,
+        "force_flatten_minutes_before_end": 120,
+        "live_enabled": true,
+        "max_ask_size_fraction": 1.0,
+        "min_quote_age_seconds": 0.0,
+        "minimum_hold_seconds": 300.0,
+        "profit_take_price": 0.985,
+        "reentry_scale": 1.0,
+        "require_dominant_bucket": false,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 393.5,
+        "shadow_enabled": true,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "inventory_exit_and_closeout": {
+        "directional_take_profit_buffer": 0.01,
+        "enabled": true,
+        "force_flatten_minutes_before_end": 120,
+        "live_enabled": true,
+        "max_ask_size_fraction": 1.0,
+        "max_merge_delay_minutes": 240.0,
+        "partial_repair_window_seconds": 30.0,
+        "reentry_scale": 1.0,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 5.0,
+        "shadow_enabled": true,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "neg_risk_basket": {
+        "enabled": true,
+        "force_flatten_minutes_before_end": 120,
+        "live_enabled": true,
+        "max_ask_size_fraction": 1.0,
+        "max_quote_age_seconds": 120.0,
+        "max_unmatched_ratio": 0.317073,
+        "min_distinct_conditions": 3,
+        "reentry_scale": 1.0,
+        "require_sibling_coverage": true,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 107.21,
+        "shadow_enabled": true,
+        "synthetic_basket_cost_lte": 0.99,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "paired_under_par": {
+        "allow_active_market_reentry": true,
+        "allow_stale_pair_recovery": true,
+        "enabled": true,
+        "live_enabled": true,
+        "live_requires_full_quote_pair": false,
+        "max_ask_size_fraction": 1.0,
+        "max_inventory_imbalance_ratio": 0.473218,
+        "max_leg_price_lte": 1.0,
+        "max_leg_spread": 0.08,
+        "max_quote_age_seconds": 120.0,
+        "midpoint_confirmation_required": false,
+        "min_leg_price_gte": 0.0,
+        "min_mergeable_size": 0.0,
+        "reentry_scale": 1.0,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 215.08,
+        "shadow_enabled": true,
+        "shadow_requires_full_quote_pair": false,
+        "stale_pair_recovery_tolerance": 0.03,
+        "synthetic_pair_cost_lte": 1.02,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      },
+      "tail_bucket_accumulation": {
+        "directional_price_lte": 0.001,
+        "enabled": true,
+        "force_flatten_minutes_before_end": 120,
+        "live_enabled": true,
+        "max_ask_size_fraction": 1.0,
+        "min_quote_age_seconds": 0.0,
+        "minimum_hold_seconds": 300.0,
+        "profit_take_price": 0.12,
+        "reentry_scale": 1.0,
+        "rolling_window_seconds": 60.0,
+        "sequence_budget_usd": 2.0,
+        "shadow_enabled": true,
+        "target_sides": [
+          "yes",
+          "no"
+        ]
+      }
+    },
+    "size_model": {
+      "per_playbook": {
+        "asymmetric_paired_accumulation": {
+          "dominant_leg_budget_fraction": 0.96671,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 215.08
+        },
+        "cheap_bucket_accumulation": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 15.03
+        },
+        "high_prob_bucket_accumulation": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 393.5
+        },
+        "inventory_exit_and_closeout": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 5.0
+        },
+        "neg_risk_basket": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 107.21
+        },
+        "paired_under_par": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 215.08
+        },
+        "tail_bucket_accumulation": {
+          "dominant_leg_budget_fraction": null,
+          "max_ask_size_fraction": 1.0,
+          "reentry_scale": 1.0,
+          "sequence_budget_usd": 2.0
+        }
+      },
+      "repeat_entry_cooldown_seconds": 15.0
+    }
+  },
+  "training_metrics": {
+    "covered_trade_count": 659,
+    "covered_trade_match_rate_condition_side": 0.0,
+    "covered_trade_match_rate_playbook": 0.0,
+    "false_positive_notional_usd": 0,
+    "false_positive_pnl_proxy_usd": 0,
+    "false_positive_trade_count": 0,
+    "median_entry_time_delta_seconds": null,
+    "median_size_error_ratio": null,
+    "playbook_pnl_proxy": [
+      {
+        "playbook_key": "asymmetric_paired_accumulation",
+        "public_notional_usd": 3298.793161,
+        "public_pnl_proxy_usd": -3298.793161,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "cheap_bucket_accumulation",
+        "public_notional_usd": 15.35289,
+        "public_pnl_proxy_usd": -15.35289,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "neg_risk_basket",
+        "public_notional_usd": 125.1596,
+        "public_pnl_proxy_usd": -125.1596,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "paired_under_par",
+        "public_notional_usd": 450.131368,
+        "public_pnl_proxy_usd": -450.131368,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      },
+      {
+        "playbook_key": "unsupported_public_behavior",
+        "public_notional_usd": 462.140864,
+        "public_pnl_proxy_usd": -462.140864,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      }
+    ],
+    "public_notional_usd": 4351.577883,
+    "public_pnl_proxy_usd": -4351.577883,
+    "replay_notional_usd": 0,
+    "replay_pnl_proxy_ratio": null,
+    "replay_pnl_proxy_usd": 0,
+    "top_miss_reasons": [
+      {
+        "count": 659,
+        "label": "no_replay_match"
+      }
+    ]
+  },
+  "wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11"
+}

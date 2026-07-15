@@ -27,6 +27,32 @@
       "live_requires_full_quote_pair": false,
       "midpoint_confirmation_required": false
     },
+    "asymmetric_paired_accumulation": {
+      "enabled": true,
+      "shadow_enabled": true,
+      "live_enabled": false,
+      "rolling_window_seconds": 60.0,
+      "sequence_budget_usd": 8.0,
+      "max_ask_size_fraction": 1.0,
+      "reentry_scale": 1.0,
+      "target_sides": [
+        "yes",
+        "no"
+      ],
+      "synthetic_pair_cost_lte": 1.02,
+      "min_mergeable_size": 0.0,
+      "max_inventory_imbalance_ratio": 0.8,
+      "max_quote_age_seconds": 120.0,
+      "max_leg_spread": 0.08,
+      "allow_stale_pair_recovery": true,
+      "allow_active_market_reentry": true,
+      "shadow_requires_full_quote_pair": false,
+      "live_requires_full_quote_pair": false,
+      "midpoint_confirmation_required": false,
+      "dominant_leg_price_gte": 0.9,
+      "complementary_leg_price_lte": 0.1,
+      "dominant_leg_budget_fraction": 0.94
+    },
     "neg_risk_basket": {
       "enabled": true,
       "shadow_enabled": true,

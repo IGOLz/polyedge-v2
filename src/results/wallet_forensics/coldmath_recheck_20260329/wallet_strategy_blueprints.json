@@ -1,0 +1,194 @@
+[
+  {
+    "blueprint_id": "db1030565667d78bef2cf2506c2fea17f1e0e933",
+    "confidence": 0.99,
+    "distinct_conditions": 497,
+    "distinct_events": 361,
+    "entry_rule_json": {
+      "complete_set_cost_lte": 0.995,
+      "condition": "same_condition_both_sides",
+      "max_inventory_imbalance_ratio": 0.473218
+    },
+    "evidence_json": {
+      "actionable_complete_set_cost_lte": 0.995,
+      "median_complete_set_cost": 1.03391,
+      "median_inventory_imbalance_ratio": 0.473218,
+      "median_matched_size": 94.523891,
+      "median_merge_delay_minutes": 0.733333,
+      "sample_sequence_ids": [
+        "69631de6ccae2fa61380568196cc561651da8ae3",
+        "80a42ce3684801da4edc9e9600695daf3b3efd8f",
+        "e848978163bbb10a2e93a0e03634404fa86bf03d",
+        "bdc6c18eb7326de0604aff1f195037865847a4d3",
+        "31edbf84b66083bb0690018b3531e809f2076bbb",
+        "553e57e7701ee9df87876f4ffa2b6fbad0ac7c30",
+        "efee5680e90c617885a9fab909a393f23abbe003",
+        "4dae7cfcf4f11c6f9f484b58378df3f6d2c4182a",
+        "416bb21db490e2e4fb8428f62d9034626745a30e",
+        "59bd2ac0279498cf5ad921f4440cd8bef0602f64"
+      ]
+    },
+    "exit_rule_json": {
+      "action": "merge",
+      "expected_merge_delay_minutes": 0.733333,
+      "when_inventory_matched": true
+    },
+    "priority_score": 260.0802,
+    "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+    "realized_pnl_avg": 0.7876469909444996,
+    "realized_pnl_total": 853.0216911928932,
+    "risk_rule_json": {
+      "avoid_unmatched_inventory": true,
+      "force_flatten_before_resolution": true,
+      "max_complete_set_cost": 0.995
+    },
+    "sizing_rule_json": {
+      "inventory_style": "match_smaller_side_and_rebalance",
+      "matched_size_target": 94.523891
+    },
+    "status": "ready_for_backtest",
+    "strategy_key": "inventory_rebalancing_merge",
+    "summary": "Accumulate both sides in the same condition when the reconstructed complete-set cost is below par, keep inventory roughly balanced, and exit by merging back into collateral.",
+    "support_count": 1083,
+    "win_rate": 0.4801477377654663
+  },
+  {
+    "blueprint_id": "e0ca14d6e297f2aa2181049ca5862e810013f6f7",
+    "confidence": 0.937228225116279,
+    "distinct_conditions": 299,
+    "distinct_events": 169,
+    "entry_rule_json": {
+      "complete_set_cost_lte": 0.99,
+      "condition": "neg_risk_event_basket",
+      "min_distinct_conditions": 3
+    },
+    "evidence_json": {
+      "actionable_complete_set_cost_lte": 0.99,
+      "median_complete_set_cost": 4.295,
+      "median_condition_count": 3.0,
+      "median_unmatched_ratio": 0.317073,
+      "sample_sequence_ids": [
+        "b4ee6edf0941f53ce3fe48d04ed722eda7197f9f",
+        "91a4d0173f6a5c3b01235d70368b55ba24b6acda",
+        "02fdfeaa47d1a9d361611c3765472f84d1e3ac1b",
+        "3b1fd3db77236db99389d616953cde478cf07491",
+        "b51c61747175ea539a3ba220c80235a0fdd5c4f0",
+        "86f00ae8232e88d10c7e3f38069dd0f63b053eab",
+        "bf5839afb07e89ef6d099dc56c715f90bf531f50",
+        "cbc30bce21617087036dcfb9ce89b01856ea8d1c",
+        "b9ea0a9fdbdc1c4848c93461c66639ba46fa0017",
+        "4cc375fbd5dc99c129b4c961b5aa61fef66db981"
+      ]
+    },
+    "exit_rule_json": {
+      "action": "event_completion_or_conversion",
+      "notes": "Needs explicit operational exit modeling beyond naive mark-to-market replay."
+    },
+    "priority_score": 137.5861,
+    "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+    "realized_pnl_avg": 6.255795807838213,
+    "realized_pnl_total": 2689.9921973704318,
+    "risk_rule_json": {
+      "limit_unmatched_tail_inventory": true,
+      "max_basket_cost": 0.995,
+      "require_sibling_coverage": true
+    },
+    "sizing_rule_json": {
+      "inventory_style": "equal_notional_per_condition",
+      "max_unmatched_ratio": 0.317073
+    },
+    "status": "needs_exit_research",
+    "strategy_key": "neg_risk_basket",
+    "summary": "Construct a same-side basket across sibling negative-risk markets when the basket cost is below a synthetic complete set, then monetize through event completion or later operational exits.",
+    "support_count": 430,
+    "win_rate": 0.06744186046511629
+  },
+  {
+    "blueprint_id": "c10db91ec5a9bd4ee66e794bcd30620ac0a47704",
+    "confidence": 0.8920559542579112,
+    "distinct_conditions": 10,
+    "distinct_events": 10,
+    "entry_rule_json": {
+      "condition": "tail_bucket_pricing",
+      "max_entry_price": 0.001
+    },
+    "evidence_json": {
+      "median_min_entry_price": 0.001,
+      "sample_sequence_ids": [
+        "55b87b856fd92836db98c3ac75c50838db9219b9",
+        "cddf69700629e5ae77d24072caa8cc937702934c",
+        "845bdd2e06434ab9a271082cda569e704b1acaac",
+        "2924d15b7b46eadde0a98e78975bc3e5bb223977",
+        "3d8ae4d129bdd8f4a23695b4fd4c8ad45fc21895",
+        "20b9398eaa15805d9451e7c1d085b0de855132ba",
+        "aa57e88800a87627292b6f9975092c4f025054ce",
+        "f13616076011ebb25116462915906b8181f8b35c",
+        "b76b35c67e1e4de4cfa4e3967983e6b27ea83535",
+        "06049f65f35d54eaff4223ac2fd949fae309483e"
+      ]
+    },
+    "exit_rule_json": {
+      "action": "research_required",
+      "notes": "Standalone replay is weak; likely depends on basket context."
+    },
+    "priority_score": 26.5453,
+    "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+    "realized_pnl_avg": 0.8504999999999996,
+    "realized_pnl_total": 8.504999999999995,
+    "risk_rule_json": {
+      "cap_total_tail_exposure": 0.1,
+      "treat_as_add_on_only": true
+    },
+    "sizing_rule_json": {
+      "inventory_style": "small_probe_or_basket_complement",
+      "max_notional_per_bucket": 50.0
+    },
+    "status": "needs_exit_research",
+    "strategy_key": "dust_long_tail_bucket",
+    "summary": "Pick up extremely low-priced tail buckets, likely as convex payoff scraps or as complements to a larger basket.",
+    "support_count": 10,
+    "win_rate": 0.1
+  },
+  {
+    "blueprint_id": "150a4d164e116a6546b2994a05167b1ac56e93f3",
+    "confidence": 0.9142977777777777,
+    "distinct_conditions": 45,
+    "distinct_events": 38,
+    "entry_rule_json": {
+      "condition": "no_entry_signal"
+    },
+    "evidence_json": {
+      "post_resolution_redeem_sequences": 45,
+      "sample_sequence_ids": [
+        "02a744bcf6f8ac4702c6f1ce9286ce290395bc21",
+        "53532a43ea19554ea9cdd0a4d4f7b4891da1ff6f",
+        "eb1bf9be581f555d835c371128f2313f167e46fb",
+        "c879a51b6c399b0af624e18913960e453ed98dcf",
+        "7933d7eeddd67c990f0419094d89a968e0a5a799",
+        "18cedaa01675735f4cb28c38c7db0fe3e36d2626",
+        "efcdedbe31ba999d30a2b0b8a7f32fa67c9368f3",
+        "ac8f46a506acd9aee1eb8a462f589696398f8464",
+        "5131642ea9c0ca159c8ca562c98e88263890ddcb",
+        "898096c38b6b20f7a282e7657b3027aba1c3faef"
+      ]
+    },
+    "exit_rule_json": {
+      "action": "redeem_after_resolution"
+    },
+    "priority_score": 85.7395,
+    "proxy_wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11",
+    "realized_pnl_avg": 149.26232113543895,
+    "realized_pnl_total": 6716.804451094753,
+    "risk_rule_json": {
+      "require_verified_resolution": true
+    },
+    "sizing_rule_json": {
+      "inventory_style": "inherits_primary_strategy_position"
+    },
+    "status": "operational_only",
+    "strategy_key": "late_redemption_farming",
+    "summary": "Hold winning inventory through resolution and redeem directly, treating redemption as an operational exit path rather than alpha by itself.",
+    "support_count": 45,
+    "win_rate": 1.0
+  }
+]

@@ -17,6 +17,7 @@ from analysis.coldmath_quote_parity import (
     _build_context_for_event,
     _counter_rows,
     _load_historical_weather_state,
+    _nearest_quote_row,
     _normalize_weather_trades,
 )
 from analysis.coldmath_window_compare import _extract_wallet
@@ -224,6 +225,8 @@ def run_public_parity(args: argparse.Namespace | list[str] | None = None) -> dic
         covered_end=covered_window["covered_end_utc"],
         catalog_by_event=catalog_by_event,
         event_bounds=event_bounds,
+        quote_series=quote_series,
+        quote_window_seconds=int(args.quote_window_seconds),
     )
     clone_config = _prepare_parity_clone_config(clone_config, covered_rows=covered_rows)
     logger.info(
@@ -507,6 +510,8 @@ def _mark_trade_coverage(
     covered_end,
     catalog_by_event: dict[str, list[dict[str, Any]]],
     event_bounds: dict[str, dict[str, Any]],
+    quote_series: dict[tuple[str, str], dict[str, Any]],
+    quote_window_seconds: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     covered: list[dict[str, Any]] = []
     uncovered: list[dict[str, Any]] = []
@@ -522,12 +527,88 @@ def _mark_trade_coverage(
             bounds = event_bounds.get(event_slug) or {}
             if bounds.get("min_time") is None or bounds.get("max_time") is None:
                 coverage_reason = "event_has_no_quote_history"
+            else:
+                coverage_reason = _trade_quote_coverage_reason(
+                    row,
+                    quote_series=quote_series,
+                    quote_window_seconds=quote_window_seconds,
+                    event_market_rows=catalog_by_event.get(event_slug) or [],
+                )
         merged = {**row, "covered": coverage_reason is None, "coverage_reason": coverage_reason}
         if coverage_reason is None:
             covered.append(merged)
         else:
             uncovered.append(merged)
     return covered, uncovered
+
+
+def _trade_quote_coverage_reason(
+    trade_row: dict[str, Any],
+    *,
+    quote_series: dict[tuple[str, str], dict[str, Any]],
+    quote_window_seconds: int,
+    event_market_rows: list[dict[str, Any]],
+) -> str | None:
+    playbook_key = str(trade_row.get("public_playbook") or "")
+    captured_at = trade_row["timestamp_utc"]
+    market_id = str(trade_row.get("condition_id") or "")
+    outcome = str(trade_row.get("outcome") or "").lower()
+    if playbook_key in PAIR_PLAYBOOK_KEYS:
+        up = _nearest_quote_row(
+            quote_series.get((market_id, "Up")),
+            captured_at=captured_at,
+            quote_window_seconds=quote_window_seconds,
+        )
+        down = _nearest_quote_row(
+            quote_series.get((market_id, "Down")),
+            captured_at=captured_at,
+            quote_window_seconds=quote_window_seconds,
+        )
+        if up is None or down is None:
+            return "market_missing_quote_at_trade_time"
+        return None
+    if playbook_key == "neg_risk_basket":
+        available = 0
+        for row in event_market_rows:
+            event_market_id = str(row.get("market_id") or "")
+            quote = _nearest_trade_outcome_quote(
+                event_market_id,
+                outcome=outcome,
+                captured_at=captured_at,
+                quote_series=quote_series,
+                quote_window_seconds=quote_window_seconds,
+            )
+            if quote is not None:
+                available += 1
+        if available < 3:
+            return "event_missing_quote_at_trade_time"
+        return None
+    quote = _nearest_trade_outcome_quote(
+        market_id,
+        outcome=outcome,
+        captured_at=captured_at,
+        quote_series=quote_series,
+        quote_window_seconds=quote_window_seconds,
+    )
+    if quote is None:
+        return "market_missing_quote_at_trade_time"
+    return None
+
+
+def _nearest_trade_outcome_quote(
+    market_id: str,
+    *,
+    outcome: str,
+    captured_at: datetime,
+    quote_series: dict[tuple[str, str], dict[str, Any]],
+    quote_window_seconds: int,
+) -> dict[str, Any] | None:
+    outcome_key = "Up" if outcome == "yes" else "Down"
+    return _nearest_quote_row(
+        quote_series.get((market_id, outcome_key)),
+        captured_at=captured_at,
+        quote_window_seconds=quote_window_seconds,
+    )
 
 
 def _group_public_trade_sequences(
@@ -743,15 +824,17 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
     runtime["summary_interval_seconds"] = float(runtime.get("summary_interval_seconds") or 60.0)
     runtime["min_expected_edge_usd"] = 0.0
     runtime["min_target_shares"] = 1
-    runtime["max_total_exposure_usd"] = max(float(runtime.get("max_total_exposure_usd") or 0.0), 250.0)
-    runtime["max_concurrent_positions"] = max(int(runtime.get("max_concurrent_positions") or 0), 25)
-    runtime["max_entry_attempts"] = max(int(runtime.get("max_entry_attempts") or 0), 10)
+    runtime["repeat_entry_cooldown_seconds"] = 0.0
+    runtime["max_total_exposure_usd"] = max(float(runtime.get("max_total_exposure_usd") or 0.0), 5000.0)
+    runtime["max_concurrent_positions"] = 0
+    runtime["max_entry_attempts"] = 0
     runtime["total_spend_limit_usd"] = 0.0
 
     notional_by_playbook: dict[str, list[float]] = {}
     paired_sequence_notionals: dict[str, float] = {}
     asymmetric_dominant_fractions: list[float] = []
     pair_sequence_profiles: dict[str, dict[str, float]] = {}
+    entry_notional_total = 0.0
     for row in covered_rows:
         if str(row.get("public_playbook") or "") in PAIR_PLAYBOOK_KEYS:
             sequence_id = str(row.get("sequence_id") or "")
@@ -768,8 +851,11 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
         playbook = str(row.get("public_playbook") or "")
         price = safe_float(row.get("price")) or 0.0
         size = safe_float(row.get("size")) or 0.0
+        trade_type = str(row.get("trade_type") or row.get("side") or "").lower()
         if playbook and price > 0 and size > 0:
             notional_by_playbook.setdefault(playbook, []).append(price * size)
+            if trade_type == "buy":
+                entry_notional_total += price * size
             if playbook in PAIR_PLAYBOOK_KEYS:
                 sequence_id = str(row.get("sequence_id") or "")
                 if sequence_id:
@@ -777,6 +863,7 @@ def _prepare_parity_clone_config(base_config: dict[str, Any], *, covered_rows: l
                     profile = pair_sequence_profiles.get(sequence_id)
                     if playbook == "asymmetric_paired_accumulation" and profile is not None:
                         asymmetric_dominant_fractions.append(profile["dominant_notional_fraction"])
+    runtime["max_total_exposure_usd"] = max(float(runtime.get("max_total_exposure_usd") or 0.0), round(entry_notional_total, 2))
 
     for playbook_key, playbook in (config.get("playbooks") or {}).items():
         notionals = sorted(notional_by_playbook.get(playbook_key) or [])
@@ -955,6 +1042,8 @@ def _match_trade_to_candidate(market_rows: list[dict[str, Any]], trade: dict[str
             if str(row.get("side") or "") == outcome:
                 return row
         if _is_pair_playbook(playbook_key) and playbook_key == public_playbook:
+            return row
+        if playbook_key == public_playbook and str(row.get("side") or "") == outcome:
             return row
     for row in market_rows:
         if not bool(row.get("qualifies")):
@@ -1326,7 +1415,7 @@ def _run_full_replay(
     total_spend_limit = float(runtime_cfg.get("total_spend_limit_usd") or 0.0)
     max_exposure = float(runtime_cfg.get("max_total_exposure_usd") or weather_config.DEFAULT_MAX_TOTAL_EXPOSURE_USD)
     max_positions = int(runtime_cfg.get("max_concurrent_positions") or weather_config.DEFAULT_MAX_CONCURRENT_POSITIONS)
-    max_entries_per_tick = int(runtime_cfg.get("max_entry_attempts") or 1)
+    max_entries_per_tick = _max_entry_attempt_limit(runtime_cfg)
 
     for captured_at in tick_times:
         active_positions, neg_risk_exit_trades = _simulate_neg_risk_exits(
@@ -1486,6 +1575,13 @@ def _build_tick_times(start, end, loop_seconds: float) -> list[Any]:
         ticks.append(current)
         current = current + timedelta(seconds=loop_seconds)
     return ticks
+
+
+def _max_entry_attempt_limit(runtime_cfg: dict[str, Any]) -> int:
+    raw_value = runtime_cfg.get("max_entry_attempts")
+    if raw_value is None:
+        return 1
+    return int(raw_value)
 
 
 def _reentry_cooldown_blocked(*, replay_trades: list[dict[str, Any]], cooldown_key: tuple[str, str, str], captured_at, cooldown_seconds: float) -> bool:
@@ -2100,6 +2196,8 @@ def _compare_replay_to_public(
     for public in public_rows:
         matches: list[tuple[float, int, dict[str, Any]]] = []
         for idx, replay in enumerate(replay_rows):
+            if idx not in unmatched_replay:
+                continue
             if str(replay.get("condition_id") or "") != str(public.get("condition_id") or ""):
                 continue
             if str(replay.get("trade_type") or "") != str(public.get("trade_type") or ""):

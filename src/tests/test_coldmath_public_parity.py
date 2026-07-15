@@ -11,6 +11,8 @@ from analysis.coldmath_public_parity import (
     _deployment_gate_result,
     _group_public_trade_sequences,
     _infer_public_sequence_label,
+    _max_entry_attempt_limit,
+    _match_trade_to_candidate,
     _requested_window,
 )
 
@@ -112,6 +114,30 @@ class ColdMathPublicParityTests(unittest.TestCase):
         label = _infer_public_sequence_label(rows, None)
 
         self.assertEqual(label, "asymmetric_paired_accumulation")
+
+    def test_match_trade_to_candidate_prefers_exact_directional_playbook_before_pair_fallback(self):
+        trade = {
+            "trade_type": "buy",
+            "outcome": "yes",
+            "public_playbook": "high_prob_bucket_accumulation",
+        }
+        market_rows = [
+            {
+                "playbook_key": "asymmetric_paired_accumulation",
+                "qualifies": True,
+                "side": None,
+            },
+            {
+                "playbook_key": "high_prob_bucket_accumulation",
+                "qualifies": True,
+                "side": "yes",
+            },
+        ]
+
+        matched = _match_trade_to_candidate(market_rows, trade)
+
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched["playbook_key"], "high_prob_bucket_accumulation")
 
     def test_apply_size_model_caps_by_ask_fraction_and_reentry_scale(self):
         plan = {
@@ -262,6 +288,60 @@ class ColdMathPublicParityTests(unittest.TestCase):
         self.assertTrue(matched_rows[0]["matched"])
         self.assertAlmostEqual(matched_rows[0]["size_error_ratio"], 0.2)
         self.assertEqual(metrics["covered_trade_match_rate_condition_side"], 1.0)
+
+    def test_compare_replay_to_public_does_not_reuse_replay_trade(self):
+        public_rows = [
+            {
+                "timestamp_utc": datetime(2026, 3, 25, 22, 0, 0, tzinfo=UTC),
+                "condition_id": "cond-1",
+                "event_slug": "event-1",
+                "city": "Rome",
+                "bucket_label": "16C",
+                "trade_type": "buy",
+                "outcome": "yes",
+                "public_playbook": "cheap_bucket_accumulation",
+                "size": 100.0,
+            },
+            {
+                "timestamp_utc": datetime(2026, 3, 25, 22, 0, 5, tzinfo=UTC),
+                "condition_id": "cond-1",
+                "event_slug": "event-1",
+                "city": "Rome",
+                "bucket_label": "16C",
+                "trade_type": "buy",
+                "outcome": "yes",
+                "public_playbook": "cheap_bucket_accumulation",
+                "size": 100.0,
+            },
+        ]
+        replay_rows = [
+            {
+                "timestamp_utc": datetime(2026, 3, 25, 22, 0, 2, tzinfo=UTC),
+                "condition_id": "cond-1",
+                "event_slug": "event-1",
+                "city": "Rome",
+                "bucket_label": "16C",
+                "trade_type": "buy",
+                "outcome": "yes",
+                "playbook_key": "cheap_bucket_accumulation",
+                "size": 100.0,
+            }
+        ]
+
+        matched_rows, metrics = _compare_replay_to_public(
+            public_rows=public_rows,
+            replay_rows=replay_rows,
+            match_window_seconds=10.0,
+        )
+
+        self.assertEqual(len(matched_rows), 2)
+        self.assertEqual(sum(1 for row in matched_rows if row["matched"]), 1)
+        self.assertEqual(metrics["covered_trade_match_rate_condition_side"], 0.5)
+
+    def test_max_entry_attempt_limit_preserves_zero_as_unlimited(self):
+        self.assertEqual(_max_entry_attempt_limit({"max_entry_attempts": 0}), 0)
+        self.assertEqual(_max_entry_attempt_limit({"max_entry_attempts": 3}), 3)
+        self.assertEqual(_max_entry_attempt_limit({}), 1)
 
     def test_classify_miss_bucket_prefers_size_mismatch_for_near_match(self):
         bucket = _classify_miss_bucket(

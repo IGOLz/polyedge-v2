@@ -1,0 +1,147 @@
+{
+  "artifact_dir": "C:\\Users\\igol\\Documents\\GitHub\\polyedge-v2\\src\\results\\wallet_forensics\\coldmath_fast_covered_replay_20260329\\20260329T211436Z",
+  "artifact_id": "20260329T211436Z",
+  "coverage": {
+    "coverage_end_utc": "2026-03-29 21:14:44.848558+00:00",
+    "coverage_start_utc": "2026-03-22 09:41:33.218551+00:00",
+    "quote_market_count": 593,
+    "quote_row_count": 4321732
+  },
+  "covered_trade_count": 1116,
+  "covered_window": {
+    "covered_end_utc": "2026-03-27 00:00:00+00:00",
+    "covered_start_utc": "2026-03-25 00:00:00+00:00"
+  },
+  "marked_pnl_ratio": null,
+  "public_ledger_summary": {
+    "attributable_cashflow_usd": -30931.007236,
+    "entry_notional_usd": 44545.708906,
+    "exit_value_usd": 18151.47126,
+    "marked_pnl_usd": -1323.943818,
+    "mergeable_value_usd": 14701.679407,
+    "missing_mark_count": 0,
+    "open_position_count": 29,
+    "residual_value_usd": 14905.384011,
+    "terminal_inventory_value_usd": 29607.063418,
+    "unattributed_exit_value_usd": 4536.76959
+  },
+  "public_marked_pnl_usd": -1323.943818,
+  "replay_counts": {
+    "blocked_candidate_count": 932,
+    "open_position_count_end": 41,
+    "replay_trade_count": 109
+  },
+  "replay_ledger_summary": {
+    "attributable_cashflow_usd": -19889.088304,
+    "entry_notional_usd": 27438.321514,
+    "exit_value_usd": 7549.23321,
+    "marked_pnl_usd": -1674.281508,
+    "mergeable_value_usd": 5399.673416,
+    "missing_mark_count": 0,
+    "open_position_count": 28,
+    "residual_value_usd": 12815.13338,
+    "terminal_inventory_value_usd": 18214.806796,
+    "unattributed_exit_value_usd": 0.0
+  },
+  "replay_marked_pnl_usd": -1674.281508,
+  "requested_window": {
+    "requested_end_utc": "2026-03-27 00:00:00+00:00",
+    "requested_lookback_hours": 0.0,
+    "requested_start_utc": "2026-03-25 00:00:00+00:00"
+  },
+  "top_blocked_reasons": [
+    {
+      "count": 912,
+      "label": "repeat_entry_rule_mismatch"
+    },
+    {
+      "count": 11,
+      "label": "closeout_rule_mismatch"
+    },
+    {
+      "count": 3,
+      "label": "high_prob_rejected"
+    },
+    {
+      "count": 3,
+      "label": "paired_under_par_rejected"
+    },
+    {
+      "count": 3,
+      "label": "unsupported_public_behavior"
+    }
+  ],
+  "trade_match_metrics": {
+    "covered_trade_count": 1116,
+    "covered_trade_match_rate_condition_side": 0.794803,
+    "covered_trade_match_rate_playbook": 0.703405,
+    "false_positive_notional_usd": 0,
+    "false_positive_pnl_proxy_usd": 0,
+    "false_positive_trade_count": 0,
+    "median_entry_time_delta_seconds": 6.0,
+    "median_size_error_ratio": 1.0,
+    "playbook_pnl_proxy": [
+      {
+        "playbook_key": "asymmetric_paired_accumulation",
+        "public_notional_usd": 19586.862317,
+        "public_pnl_proxy_usd": -19586.862317,
+        "replay_notional_usd": 11246.523212,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": -11246.523212
+      },
+      {
+        "playbook_key": "high_prob_bucket_accumulation",
+        "public_notional_usd": 24751.232786,
+        "public_pnl_proxy_usd": -24751.232786,
+        "replay_notional_usd": 15843.5064,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": -15843.5064
+      },
+      {
+        "playbook_key": "inventory_rebalance_and_exit",
+        "public_notional_usd": 18151.47126,
+        "public_pnl_proxy_usd": 18151.47126,
+        "replay_notional_usd": 7549.23321,
+        "replay_pnl_proxy_ratio": 0.415902,
+        "replay_pnl_proxy_usd": 7549.23321
+      },
+      {
+        "playbook_key": "paired_under_par",
+        "public_notional_usd": 0.0,
+        "public_pnl_proxy_usd": 0.0,
+        "replay_notional_usd": 347.218928,
+        "replay_pnl_proxy_ratio": 0.0,
+        "replay_pnl_proxy_usd": -347.218928
+      },
+      {
+        "playbook_key": "tail_bucket_accumulation",
+        "public_notional_usd": 1.183993,
+        "public_pnl_proxy_usd": -1.183993,
+        "replay_notional_usd": 1.07192,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": -1.07192
+      },
+      {
+        "playbook_key": "unsupported_public_behavior",
+        "public_notional_usd": 206.42981,
+        "public_pnl_proxy_usd": -206.42981,
+        "replay_notional_usd": 0.0,
+        "replay_pnl_proxy_ratio": null,
+        "replay_pnl_proxy_usd": 0.0
+      }
+    ],
+    "public_notional_usd": 62697.180166,
+    "public_pnl_proxy_usd": -26394.237646,
+    "replay_notional_usd": 34987.55367,
+    "replay_pnl_proxy_ratio": null,
+    "replay_pnl_proxy_usd": -19889.08725,
+    "top_miss_reasons": [
+      {
+        "count": 229,
+        "label": "no_replay_match"
+      }
+    ]
+  },
+  "uncovered_trade_count": 2522,
+  "wallet": "0x594edb9112f526fa6a80b8f858a6379c8a2c1c11"
+}
